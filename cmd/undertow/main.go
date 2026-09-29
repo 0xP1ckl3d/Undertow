@@ -32,6 +32,7 @@ var commit = "none"
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+	writeBanner(os.Stderr)
 	if len(os.Args) < 2 {
 		_ = writeHelp(os.Stderr, "")
 		os.Exit(2)
