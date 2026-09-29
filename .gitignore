@@ -1,0 +1,16 @@
+/.cache/
+/.local/
+/bin/
+/dist/
+/Plan.md
+/undertow
+/undertow-*
+*.elf
+*.exe
+*.dll
+*.test
+*.out
+*.key
+*.log
+*.pid
+*.fingerprint

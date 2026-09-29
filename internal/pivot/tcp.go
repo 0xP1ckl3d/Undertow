@@ -1,0 +1,207 @@
+package pivot
+
+import (
+	"context"
+	"errors"
+	"io"
+	"log"
+	"net"
+	"net/netip"
+	"strings"
+
+	"undertow/internal/icmp"
+	"undertow/internal/mux"
+)
+
+// ServeAgent handles stream opens with ordinary TCP sockets. It never listens
+// on the agent or changes its host routes or adapters.
+func ServeAgent(ctx context.Context, m *mux.Mux) {
+	for {
+		s, err := m.Accept(ctx)
+		if err != nil {
+			return
+		}
+		go serveSocket(ctx, s)
+	}
+}
+
+func serveSocket(ctx context.Context, s *mux.Stream) {
+	if strings.HasPrefix(s.Destination(), "icmp://") {
+		host, _, err := net.SplitHostPort(strings.TrimPrefix(s.Destination(), "icmp://"))
+		if err != nil {
+			s.Fail(err)
+			return
+		}
+		ip, err := netip.ParseAddr(host)
+		if err != nil || !ip.Is4() {
+			s.Fail(errors.New("invalid ICMP target"))
+			return
+		}
+		if err = s.AcceptOpen(ctx); err != nil {
+			s.Close()
+			return
+		}
+		defer s.Close()
+		payload, err := io.ReadAll(io.LimitReader(s, 1401))
+		status := byte(1)
+		if err == nil && len(payload) > 0 && len(payload) <= 1400 {
+			if _, err = icmp.Echo(ctx, ip, payload); err == nil {
+				status = 0
+			}
+		}
+		if err != nil {
+			log.Printf("ICMP echo %s failed: %v", ip, err)
+		}
+		_, _ = s.Write([]byte{status})
+		_ = s.CloseWrite()
+		return
+	}
+	var dialer net.Dialer
+	network := "tcp"
+	destination := s.Destination()
+	if strings.HasPrefix(destination, "udp://") {
+		network = "udp"
+		destination = strings.TrimPrefix(destination, "udp://")
+	}
+	conn, err := dialer.DialContext(ctx, network, destination)
+	if err != nil {
+		log.Printf("socket egress %s %s failed: %v", network, destination, err)
+		s.Fail(err)
+		return
+	}
+	if err = s.AcceptOpen(ctx); err != nil {
+		conn.Close()
+		s.Close()
+		return
+	}
+	if network == "udp" {
+		BridgeUDP(ctx, conn, s)
+	} else {
+		bridge(ctx, conn, s)
+	}
+}
+
+// ServeVPN accepts outbound client flows. Explicit pivot routes may be sent
+// through an agent when the client requested internal access.
+func ServeVPN(ctx context.Context, client *mux.Mux, resolve func(netip.Addr) (*mux.Mux, bool), internal bool) {
+	for {
+		s, err := client.Accept(ctx)
+		if err != nil {
+			return
+		}
+		go func(s *mux.Stream) {
+			if s.Destination() == "health.undertow.invalid:0" {
+				_ = s.AcceptOpen(ctx)
+				_ = s.CloseWrite()
+				return
+			}
+			if !internal {
+				serveSocket(ctx, s)
+				return
+			}
+			address := strings.TrimPrefix(strings.TrimPrefix(s.Destination(), "udp://"), "icmp://")
+			host, _, err := net.SplitHostPort(address)
+			if err != nil {
+				s.Fail(err)
+				return
+			}
+			ip, err := netip.ParseAddr(host)
+			if err != nil {
+				s.Fail(err)
+				return
+			}
+			agent, configured := resolve(ip)
+			if !configured {
+				serveSocket(ctx, s)
+				return
+			}
+			if agent == nil {
+				s.Fail(errors.New("pivot agent offline"))
+				return
+			}
+			upstream, err := agent.Open(ctx, s.Destination())
+			if err != nil {
+				s.Fail(err)
+				return
+			}
+			if err := s.AcceptOpen(ctx); err != nil {
+				upstream.Close()
+				s.Close()
+				return
+			}
+			defer s.Close()
+			defer upstream.Close()
+			done := make(chan struct{}, 2)
+			go func() { _, _ = io.Copy(upstream, s); _ = upstream.CloseWrite(); done <- struct{}{} }()
+			go func() { _, _ = io.Copy(s, upstream); _ = s.CloseWrite(); done <- struct{}{} }()
+			for i := 0; i < 2; i++ {
+				select {
+				case <-done:
+				case <-ctx.Done():
+					return
+				case <-s.Done():
+					return
+				case <-upstream.Done():
+					return
+				}
+			}
+		}(s)
+	}
+}
+
+// ServeForward exposes one operator-side TCP listener mapped to an agent stream.
+// choose must select a live authenticated agent for each new flow.
+func ServeForward(ctx context.Context, listener net.Listener, destination string, choose func() *mux.Mux) {
+	go func() { <-ctx.Done(); listener.Close() }()
+	for {
+		local, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		go func() {
+			m := choose()
+			if m == nil {
+				local.Close()
+				return
+			}
+			stream, err := m.Open(ctx, destination)
+			if err != nil {
+				local.Close()
+				return
+			}
+			bridge(ctx, local, stream)
+		}()
+	}
+}
+
+func bridge(ctx context.Context, local net.Conn, stream *mux.Stream) {
+	defer local.Close()
+	defer stream.Close()
+	done := make(chan struct{}, 2)
+	go func() { _, _ = io.Copy(stream, local); _ = stream.CloseWrite(); done <- struct{}{} }()
+	go func() {
+		_, _ = io.Copy(local, stream)
+		if tcp, ok := local.(*net.TCPConn); ok {
+			_ = tcp.CloseWrite()
+		}
+		done <- struct{}{}
+	}()
+	for i := 0; i < 2; i++ {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			local.Close()
+			stream.Close()
+			return
+		case <-streamDone(stream):
+			local.Close()
+			return
+		}
+	}
+}
+
+// Bridge connects a proxy-side TCP endpoint, including a userland-stack
+// endpoint, to one authenticated agent stream.
+func Bridge(ctx context.Context, local net.Conn, stream *mux.Stream) { bridge(ctx, local, stream) }
+
+func streamDone(s *mux.Stream) <-chan struct{} { return s.Done() }

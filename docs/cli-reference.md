@@ -1,0 +1,119 @@
+# CLI reference
+
+Run `undertow help` or `undertow help COMMAND` for terminal help. Linux binary: `./bin/undertow`; Windows binary: `.\bin\undertow.exe`. This page describes the current command line. Paths are relative to the process working directory unless absolute.
+
+## Enrollment and identity shared by connection modes
+
+| Flag | Modes | Meaning |
+| --- | --- | --- |
+| `--auth token\|password\|none` | server, agent, client | Enrollment policy; default `token`. `none` lets any reachable peer enroll. |
+| `--token-file PATH` | server, agent, client | Enrollment token file for token mode; default `token.key`. |
+| `--password TEXT` | server, agent, client | Password mode only, at least 12 bytes; visible to process listings. |
+| `--password-file PATH` | server, agent, client | Password mode only; reads a password file. Do not combine with `--password`. |
+| `--domain NAME` | server, agent, client | Synthetic direct-DNS name; default `t.undertow.invalid`, must match. |
+
+Agents and VPN clients must provide `--server IP:PORT` with a numeric IP. They pin the server through `--fingerprint HEX`, a previously saved `--fingerprint-file PATH` (default `server.fingerprint`), or an explicit `--trust-on-first-use` first connection. The explicit fingerprint takes precedence. A fingerprint is saved only after a successful session. Trust on first use cannot authenticate an intercepted first contact. See [getting started](getting-started.md) for enrollment examples.
+
+## `init`
+
+`undertow init [--identity PATH] [--token-file PATH]`
+
+Creates or reuses an Ed25519 server key at `identity.key`, creates or reuses a random token at `token.key`, and prints the server fingerprint. Keep the identity key only on the server; distribute the token only for token enrollment.
+
+## `server`
+
+`undertow server [FLAGS]`
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--listen IP:PORT` | `0.0.0.0:53` | Direct DNS UDP listener. |
+| `--identity PATH` | `identity.key` | Server Ed25519 identity key. |
+| `--domain NAME` | `t.undertow.invalid` | DNS question domain. |
+| `--auth`, `--token-file`, `--password`, `--password-file` | See above | Enrollment. |
+| `--tun` | Off | Create proxy TUN/Wintun for routed internal pivots from the server host. |
+| `--tun-name NAME` | `undertow0` | Proxy adapter name. |
+| `--tunnel-address CIDR` | `172.16.254.1/24` | Proxy interface IPv4 address and network. |
+| `--forward LOCAL=REMOTE` | None | Local TCP listener to agent reachable TCP target; may repeat. |
+| `--via-agent ID` | Auto with one agent | Agent used by TCP forwards. |
+| `--control-listen IP:PORT` | `127.0.0.1:47889` | Loopback operator API. |
+| `--control-token-file PATH` | `control.key` | API credential, distinct from enrollment token. |
+| `--probe-echo` | Off | Echo diagnostic probes; normal streams are disabled. |
+
+The server may require privilege to bind UDP/53 or create a proxy interface. A second positional `server` is an error; write `undertow server --listen ...`.
+
+## `agent`
+
+`undertow agent --server IP:PORT [--fingerprint HEX | --trust-on-first-use] [FLAGS]`
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--server IP:PORT` | Required | Direct-DNS server. |
+| `--fingerprint HEX` | None | Explicit server identity pin. |
+| `--fingerprint-file PATH` | `server.fingerprint` | Read saved pin or save a trust-on-first-use pin. |
+| `--trust-on-first-use` | Off | Discover the server pin for first connection. |
+| `--agent-key PATH` | `agent.key` | Stable agent Ed25519 identity. |
+| `--domain NAME` | `t.undertow.invalid` | Must match the server. |
+| `--auth`, `--token-file`, `--password`, `--password-file` | See above | Enrollment. |
+| `--payload-profile auto\|large\|small` | `auto` | Direct-DNS payload size; auto can fall back to small. |
+| `--probe` | Off | Run encrypted echo probes against a `--probe-echo` server instead of socket operations. |
+| `--probe-count N` | `0` | Number of probes; zero runs continuously. |
+| `--probe-size BYTES` | `64` | Echo payload size, 16 through 65536 bytes. |
+| `--probe-interval DURATION` | `1s` | Time between probes; zero sends as fast as the window allows. |
+
+The agent makes no interface or host route changes. Its local key must differ for each independently managed agent.
+
+## `client`
+
+`undertow client --vpn --server IP:PORT [--fingerprint HEX | --trust-on-first-use] [FLAGS]`
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--vpn` | Required | Enable privileged IPv4 VPN mode. |
+| `--internal` | Off | Also use server configured agent routes for internal destinations. |
+| `--server IP:PORT` | Required | Numeric IPv4 direct-DNS server address. |
+| `--fingerprint HEX` | None | Explicit server identity pin. |
+| `--fingerprint-file PATH` | `server.fingerprint` | Saved pin path. |
+| `--trust-on-first-use` | Off | Discover and save a first-use pin after connection. |
+| `--client-key PATH` | `client.key` | Client Ed25519 identity. |
+| `--domain NAME` | `t.undertow.invalid` | Must match the server. |
+| `--auth`, `--token-file`, `--password`, `--password-file` | See above | Enrollment. |
+| `--tun-name NAME` | `undertow-vpn` | Client TUN/Wintun name. |
+| `--tunnel-address CIDR` | `172.16.253.1/24` | Client interface IPv4 address/network. |
+| `--payload-profile auto\|large\|small` | `auto` | Direct-DNS payload size. |
+| `--verify-url URL` | `https://api.ipify.org` | Public IPv4 check after routes are installed. Empty disables it. |
+
+The client pins a physical route to the server, installs two IPv4 `/1` routes through its adapter, and withdraws its owned routes on graceful exit or verification failure. It does not provide IPv6 VPN routing. The `.1` client adapter address is local; the public egress address is reported separately.
+
+## Foreground and background lifecycle
+
+`server`, `agent`, and `client` each accept:
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--foreground` | Active if no mode selected | Run in the terminal; Ctrl+C stops gracefully. |
+| `--background` | Off | Detach, logging to a file and creating protected PID/control state. |
+| `--stop` | Off | Ask the background process to stop gracefully. |
+| `--log-file PATH` | `undertow-MODE.log` | Background log path. |
+| `--pid-file PATH` | `undertow-MODE.pid` | Background control state path. |
+
+Choose only one of foreground, background, and stop. `--stop` needs the same `--pid-file` used on startup; the other connection flags are not needed for stop. A background process runs with the privilege of the command that launched it; a privileged server or VPN client should also be stopped at the needed privilege. Graceful stop cleans owned routes; forced termination may require manual OS route inspection.
+
+## Operator commands
+
+These commands run on the server host and use its loopback API. All accept `--control IP:PORT` (default `127.0.0.1:47889`) and `--control-token-file PATH` (default `control.key`). `--json` is available where noted.
+
+| Command | Meaning |
+| --- | --- |
+| `undertow status [--json]` | Connected agents, selected agent, route state, counters. |
+| `undertow agent list [--json]` | Same agent and route status view. |
+| `undertow agent show AGENT_ID` | Detailed JSON for one agent. |
+| `undertow agent select AGENT_ID` | Set selected agent for operations that use the selection. |
+| `undertow route add CIDR [--via AGENT_ID]` | Configure an internal prefix; explicit owner recommended. |
+| `undertow route list [--json]` | Show configured and active routes. |
+| `undertow route del CIDR` | Remove an internal route. |
+| `undertow session kill AGENT_ID` | Disconnect current agent session; agent may reconnect. |
+| `undertow version` | Print build version. |
+
+Agent IDs in the human table can be shortened for display; use `status --json` for the full ID. `--control` must be a numeric loopback address. A route belongs to one agent and becomes inactive when that agent disconnects.
+
+See [scenarios](scenarios.md) for complete commands and verification steps.
