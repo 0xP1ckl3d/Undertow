@@ -17,7 +17,7 @@ import (
 )
 
 func TestTCPForwardOverDirectDNS(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	remote, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

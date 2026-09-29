@@ -71,6 +71,7 @@ type Session struct {
 	rxPrefix     [4]byte
 	nonceSeq     uint64
 	dataSeq      uint64
+	peerAckBase  uint64
 	msgSeq       uint64
 	ackBase      uint64
 	received     map[uint64]bool
@@ -230,13 +231,19 @@ func (s *Session) Stats() Stats {
 	return v
 }
 
+// A selective ACK releases a packet buffer, but a gap still occupies the
+// receiver's sequence window. Keep new data within that fixed window.
+func (s *Session) canSendData() bool {
+	return len(s.queue)+len(s.priority) > 0 && len(s.pending) < s.cwnd && s.dataSeq-s.peerAckBase < 64
+}
+
 func (s *Session) HasWork(now time.Time) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.ackDirty {
 		return true
 	}
-	if len(s.queue)+len(s.priority) > 0 && len(s.pending) < s.cwnd {
+	if s.canSendData() {
 		return true
 	}
 	for _, p := range s.pending {
@@ -275,7 +282,7 @@ func (s *Session) NextPacket(now time.Time) ([]byte, error) {
 	}
 	var data []byte
 	var dataSeq uint64
-	if len(s.queue)+len(s.priority) > 0 && len(s.pending) < s.cwnd {
+	if s.canSendData() {
 		var f fragment
 		if len(s.priority) > 0 {
 			f = s.priority[0]
@@ -326,7 +333,7 @@ func (s *Session) NextPacket(now time.Time) ([]byte, error) {
 	}
 	// A single wake token only releases one pending DNS poll. Hand another
 	// token to the next poll while sendable fragments remain.
-	if len(s.queue)+len(s.priority) > 0 && len(s.pending) < s.cwnd {
+	if s.canSendData() {
 		s.signal()
 	}
 	s.stats.TXPackets++
@@ -384,6 +391,10 @@ func (s *Session) Process(wire []byte, now time.Time) error {
 	if ack > s.dataSeq {
 		return errors.New("ACK beyond sent data")
 	}
+	ackAdvanced := ack > s.peerAckBase
+	if ackAdvanced {
+		s.peerAckBase = ack
+	}
 	newAcks := 0
 	for seq, p := range s.pending {
 		acknowledged := seq <= ack
@@ -426,7 +437,7 @@ func (s *Session) Process(wire []byte, now time.Time) error {
 			}
 		}
 	}
-	if newAcks > 0 && len(s.queue)+len(s.priority) > 0 && len(s.pending) < s.cwnd {
+	if (newAcks > 0 || ackAdvanced) && s.canSendData() {
 		s.signal()
 	}
 	s.stats.RXPackets++

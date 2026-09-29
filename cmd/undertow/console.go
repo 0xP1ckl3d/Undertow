@@ -54,10 +54,24 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 	vpnClient := clientID != nil
 	selectedID, selectedLabel := "", ""
 	known := make(map[string]control.AgentInfo)
-	if agents, err := consoleAgents(ctx, call); err == nil {
-		for _, agent := range agents {
-			known[agent.ID] = agent
+	type agentRefresh struct {
+		agents []control.AgentInfo
+		err    error
+	}
+	refreshes := make(chan agentRefresh, 1)
+	refreshPending := false
+	startRefresh := func() {
+		if refreshPending {
+			return
 		}
+		refreshPending = true
+		go func() {
+			agents, err := consoleAgents(ctx, call)
+			select {
+			case refreshes <- agentRefresh{agents: agents, err: err}:
+			case <-ctx.Done():
+			}
+		}()
 	}
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
@@ -85,6 +99,9 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 			}
 			scanDone <- scanner.Err()
 		}()
+	}
+	if editor != nil {
+		startRefresh()
 	}
 	promptShown := false
 	for {
@@ -126,13 +143,18 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 			}
 			continue
 		case <-ticker.C:
-			agents, err := consoleAgents(ctx, call)
-			if err != nil {
+			if editor != nil {
+				startRefresh()
+			}
+			continue
+		case refresh := <-refreshes:
+			refreshPending = false
+			if refresh.err != nil {
 				continue
 			}
-			next := make(map[string]control.AgentInfo, len(agents))
+			next := make(map[string]control.AgentInfo, len(refresh.agents))
 			emitted := false
-			for _, agent := range agents {
+			for _, agent := range refresh.agents {
 				next[agent.ID] = agent
 				if _, ok := known[agent.ID]; !ok {
 					if editor != nil {

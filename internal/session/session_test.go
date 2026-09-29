@@ -139,6 +139,71 @@ func TestRepeatedSACKDoesNotRetransmitSameGapRepeatedly(t *testing.T) {
 	}
 }
 
+func TestSelectiveACKDoesNotSendPastReceiveWindow(t *testing.T) {
+	sender, receiver := pair(t)
+	defer sender.Close()
+	defer receiver.Close()
+	sender.cwnd = maxPending
+	for i := 0; i < maxPending+1; i++ {
+		if err := sender.Send(context.Background(), []byte{byte(i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Now()
+	var missing []byte
+	for i := 1; i <= maxPending; i++ {
+		wire, err := sender.NextPacket(now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if i == 1 {
+			missing = wire
+			continue
+		}
+		if err := receiver.Process(wire, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ack, err := receiver.NextPacket(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sender.Process(ack, now.Add(time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	retry, err := sender.NextPacket(now.Add(2 * time.Millisecond))
+	if err != nil || !bytes.Equal(retry, missing) {
+		t.Fatalf("missing packet was not retransmitted: %v", err)
+	}
+	if sender.HasWork(now.Add(3 * time.Millisecond)) {
+		t.Fatal("sender treated a SACK hole as free receive-window space")
+	}
+	blocked, err := sender.NextPacket(now.Add(3 * time.Millisecond))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seq := binary.BigEndian.Uint64(blocked[20:28]); seq != 0 {
+		t.Fatalf("sent sequence %d beyond receiver window", seq)
+	}
+	if err := receiver.Process(retry, now.Add(4*time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	ack, err = receiver.NextPacket(now.Add(5 * time.Millisecond))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sender.Process(ack, now.Add(6*time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	next, err := sender.NextPacket(now.Add(7 * time.Millisecond))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seq := binary.BigEndian.Uint64(next[20:28]); seq != maxPending+1 {
+		t.Fatalf("next sequence after gap closed = %d", seq)
+	}
+}
+
 func TestLossReorderFragmentAndDuplicate(t *testing.T) {
 	a, b := pair(t)
 	defer a.Close()

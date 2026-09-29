@@ -33,11 +33,14 @@ type FileMessage struct {
 func ReadFileMessage(reader *bufio.Reader) (FileMessage, error) {
 	var message FileMessage
 	line, err := reader.ReadSlice('\n')
-	if err != nil || len(line) > 4096 {
+	if err != nil {
+		return message, fmt.Errorf("invalid file transfer header: %w", err)
+	}
+	if len(line) > 4096 {
 		return message, errors.New("invalid file transfer header")
 	}
 	if err := json.Unmarshal(line, &message); err != nil {
-		return message, errors.New("invalid file transfer header")
+		return message, fmt.Errorf("invalid file transfer header: %w", err)
 	}
 	return message, nil
 }

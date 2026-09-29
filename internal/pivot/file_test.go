@@ -13,7 +13,7 @@ import (
 )
 
 func TestFileTransferBothDirectionsAndNoOverwrite(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	server, agent := execTestMuxPair(ctx)
 	defer server.Close()

@@ -98,6 +98,8 @@ func callClientConsole(path string, request consoleRPCRequest) (consoleRPCRespon
 	deadline := 30 * time.Second
 	if request.Action == "transfer" {
 		deadline = 30 * time.Minute
+	} else if request.Action == "call" && request.Method == "GET" {
+		deadline = 5 * time.Second
 	}
 	_ = conn.SetDeadline(time.Now().Add(deadline))
 	if _, err := fmt.Fprintf(conn, "%s %s\n", state.Token, encoded); err != nil {
