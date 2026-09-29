@@ -79,7 +79,7 @@ Agent:
 ./bin/undertow agent --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
 ```
 
-Back on the server, `./bin/undertow status` shows the connected agent. Run `./bin/undertow help`, `./bin/undertow help server`, `./bin/undertow help agent`, or `./bin/undertow help client` for built-in guidance.
+Back on the server, `sudo ./bin/undertow status` shows the connected agent when the elevated server created `control.key`. Run `./bin/undertow help`, `./bin/undertow help server`, `./bin/undertow help agent`, or `./bin/undertow help client` for built-in guidance.
 
 ## Guides
 

@@ -100,7 +100,7 @@ Choose only one of foreground, background, and stop. `--stop` needs the same `--
 
 ## Operator commands
 
-These commands run on the server host and use its loopback API. All accept `--control IP:PORT` (default `127.0.0.1:47889`) and `--control-token-file PATH` (default `control.key`). `--json` is available where noted.
+These commands run on the server host and use its loopback API. All accept `--control IP:PORT` (default `127.0.0.1:47889`) and `--control-token-file PATH` (default `control.key`). `--json` is available where noted. Use an account able to read `control.key`; an elevated server may create it with root only access, requiring `sudo` for operator commands.
 
 | Command | Meaning |
 | --- | --- |

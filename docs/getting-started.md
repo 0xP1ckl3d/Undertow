@@ -33,7 +33,7 @@ The server prints a fingerprint. Copy `token.key` securely to the agent host, th
 undertow agent --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
 ```
 
-On the server, `undertow status` should show the agent. Stop either foreground process with Ctrl+C. The server identity stays on the server. Each agent and VPN client creates its **own** Ed25519 key file (`agent.key` or `client.key`) on first run. Never copy `identity.key` to a client.
+On the server, `sudo undertow status` should show the agent when the elevated server created `control.key`. Stop either foreground process with Ctrl+C. The server identity stays on the server. Each agent and VPN client creates its **own** Ed25519 key file (`agent.key` or `client.key`) on first run. Never copy `identity.key` to a client.
 
 ## Enrollment choices
 
@@ -68,5 +68,7 @@ The fingerprint is discovered from the server, then saved to `server.fingerprint
 ## Local operator API
 
 The server listens on `127.0.0.1:47889` for operator commands. It creates `control.key` for that API, separate from `token.key`. Keep it private. Override the listener with `--control-listen` and use matching `--control` plus `--control-token-file` on commands. The control address must be numeric loopback.
+
+Run operator commands as an account allowed to read `control.key`. When the server first creates it under `sudo`, use `sudo` for `status`, `agent list/show/select`, `route`, and `session` commands too, or arrange restricted file access for your operator account.
 
 See [scenarios](scenarios.md) for working topologies and [CLI reference](cli-reference.md) for every flag.
