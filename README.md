@@ -45,7 +45,7 @@ flowchart LR
 | `client --internal` | Route configured/accepted internal prefixes through agents; keep the Internet route | Root/Administrator |
 | `client --vpn --internal` | VPN egress plus server configured agent routes | Root/Administrator |
 
-**Agent and client are different jobs.** Put an `agent` on a host that can reach an internal network; it lets the server open sockets from that host, but changes none of that host's routes. Put a `client` on a host whose *own* applications should use the tunnel. `--vpn` installs two IPv4 `/1` Internet routes and verifies public egress. `--internal` alone installs only configured or accepted internal routes, leaving the client's Internet route unchanged. Combine the flags for both behaviours. An agent and a route to its subnet are needed for internal access. `status` lists agents and clients separately.
+**Agent and client are different jobs.** Put an `agent` on a host that can reach an internal network; it lets the server open sockets from that host, but changes none of that host's routes. Put a `client` on a host whose *own* applications should use the tunnel. `--vpn` installs two IPv4 `/1` Internet routes and verifies public egress. `--internal` alone installs only internal routes, leaving the client's Internet route unchanged. Combine the flags for both behaviours. After connecting, select an agent in the client console and use `route accept CIDR` for an advertised network or `route add CIDR` for a manual route. No server route command is required for those client routes. `status` lists agents and clients separately.
 
 On the **VPN client host**, choose one mode:
 
@@ -54,6 +54,8 @@ sudo undertow client --vpn --server SERVER_IP:53 --fingerprint FINGERPRINT --tok
 sudo undertow client --internal --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
 sudo undertow client --vpn --internal --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
 ```
+
+For internal-only setup, use the client console after the second command: `agents`, `use 1`, `routes`, then `route accept 10.20.0.0/16` (or `route add 10.20.0.0/16` for a reachable network the agent has not advertised).
 
 For interactive operation, run `undertow console` on the server or start a VPN client in a terminal; the client console opens by default. Type `agents`, then `use 1` to enter an agent and run `exec`, `upload`, `download`, or route commands without copying its ID. `help` changes with the menu; `back` returns to the main menu. The server console manages global routes. The VPN client console manages its own accepted and manual routes, which persist across reconnects. Current agent capabilities are enabled by default; use `agent --deny=exec,upload` or other listed names to restrict them independently. `status` shows supported and allowed operations. See [interactive scenarios](docs/scenarios.md#8-interactive-consoles-and-agent-commands).
 

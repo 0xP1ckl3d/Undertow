@@ -50,10 +50,10 @@ The server console uses the server's loopback API. If its address or token file 
 
 ## VPN client console
 
-A terminal launch of `client --vpn` opens the console by default. For example:
+A terminal launch of `client --internal` or `client --vpn` opens the console by default. Internal-only access can be configured entirely here after the agent connects; no server `route add` is required. For example:
 
 ```text
-sudo undertow client --vpn --server SERVER_IP:53 --token-file token.key
+sudo undertow client --internal --server SERVER_IP:53 --token-file token.key
 agents
 use 1
 routes
@@ -62,7 +62,6 @@ route add 10.30.0.0/16
 upload ./notes.txt /tmp/notes.txt
 download /tmp/result.txt ./result.txt
 back
-internal on
 background
 ```
 

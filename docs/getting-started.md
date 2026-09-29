@@ -19,7 +19,7 @@ sudo undertow client --internal --server SERVER_IP:53 --fingerprint FINGERPRINT 
 sudo undertow client --vpn --internal --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
 ```
 
-`--vpn` installs two IPv4 `/1` routes and verifies public egress. `--internal` alone pins the direct-DNS server route, creates the TUN, and uses configured server routes and routes accepted in the client console; it does not change the Internet/default route or require a public egress check. Both flags provide VPN Internet egress and agent routes. At least one flag is required. See [deployment scenarios](scenarios.md) for route setup and tests.
+`--vpn` installs two IPv4 `/1` routes and verifies public egress. `--internal` alone pins the direct-DNS server route and creates the TUN without changing the Internet/default route or requiring a public egress check. Once connected, type `agents`, `use 1`, and `routes` in the client console; use `route accept CIDR` for an advertised subnet or `route add CIDR` for another network reachable from that agent. This setup needs no server route command. Server configured routes are also supported when an operator wants global route management. Both flags provide VPN Internet egress and agent routes. At least one flag is required. See [deployment scenarios](scenarios.md) for tests.
 
 Undertow uses **direct UDP DNS**, addressed to a numeric server IP and port. The default synthetic domain is `t.undertow.invalid`; it must match on both ends. Public DNS delegation is not required. Allow the chosen UDP port through the server firewall. UDP/53 and virtual interfaces commonly need elevated privileges.
 

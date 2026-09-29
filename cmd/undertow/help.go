@@ -32,8 +32,8 @@ An agent exposes destinations reachable from its host, without changing that
 host's routes. A client routes selected prefixes on its own host; --internal
 alone leaves its Internet/default route unchanged. A client does not expose
 its local network; an agent does not provide VPN Internet egress to its own
-host. For access to agent networks, configure a route to the agent and run
-the client with --internal.
+host. For access to agent networks, connect with --internal, then accept an
+advertised route or add a manual route in the client console.
 
 Setup:
   1. On the server: undertow init
@@ -164,8 +164,9 @@ Operator subcommands: 'undertow agent list|show ID|select ID'.
 Usage: undertow client (--vpn | --internal | --vpn --internal) --server IP:PORT [FLAGS]
 
   --vpn                    Install two IPv4 /1 routes for Internet egress.
-  --internal               Use server configured agent routes. Alone, this
-                           leaves Internet/default routes unchanged.
+  --internal               Use agent routes accepted or added in the client
+                           console; server global routes are optional. Alone,
+                           this leaves Internet/default routes unchanged.
   --server IP:PORT         Direct-DNS server IPv4 and UDP port (required).
   --fingerprint HEX        Pinned server public-key fingerprint.
   --fingerprint-file PATH  Saved pin (default server.fingerprint).
@@ -198,8 +199,10 @@ Examples (on the client host):
   sudo undertow client --internal --server 203.0.113.10:53 --fingerprint HEX --token-file token.key
   sudo undertow client --vpn --internal --server 203.0.113.10:53 --fingerprint HEX --token-file token.key
 
---internal alone pins the DNS server route and installs active server and accepted
-routes without changing Internet/default routes or checking public egress.
+--internal alone pins the DNS server route without changing Internet/default
+routes or checking public egress. After connecting, type 'agents', 'use 1',
+'routes', then 'route accept CIDR' or 'route add CIDR'. No server route command
+is needed for per-client routes; active global server routes also work.
 --vpn adds two /1 routes and checks public egress by default. The local .1
 address belongs to the client adapter; it is not the public egress address.
 In a terminal, client opens the interactive console by default. The
