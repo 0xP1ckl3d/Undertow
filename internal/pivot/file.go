@@ -171,6 +171,9 @@ func TransferFile(parent context.Context, session *mux.Mux, agentID, operation, 
 	if err := temp.Close(); err != nil {
 		return result, err
 	}
+	if err := setDownloadOwner(temp.Name()); err != nil {
+		return result, err
+	}
 	if err := os.Link(temp.Name(), localPath); err != nil {
 		return result, err
 	}
