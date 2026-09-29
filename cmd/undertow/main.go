@@ -474,7 +474,8 @@ func agent(args []string) error {
 			err = io.EOF
 		}
 		stats, q, r := c.Stats()
-		log.Printf("session finished: queries=%d responses=%d tx=%d rx=%d retransmits=%d rtt=%s", q, r, stats.TXBytes, stats.RXBytes, stats.Retransmits, stats.RTT)
+		adaptive := c.AdaptiveStats()
+		log.Printf("session finished: queries=%d responses=%d tx=%d rx=%d retransmits=%d rtt=%s queued=%d in_flight=%d cwnd=%d peer_window=%d dns_outstanding=%d dns_target=%d dns_health_window=%d", q, r, stats.TXBytes, stats.RXBytes, stats.Retransmits, stats.RTT, stats.Queued, stats.InFlight, stats.CongestionWindow, stats.PeerReceiveWindow, adaptive.Outstanding, adaptive.Target, adaptive.HealthWindow)
 		c.Close()
 		if *profileFlag == "auto" && profile == 0 && err != nil {
 			profile = 1

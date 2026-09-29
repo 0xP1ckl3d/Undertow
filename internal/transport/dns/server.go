@@ -268,7 +268,7 @@ func (s *Server) handle(ctx context.Context, addr *net.UDPAddr, b []byte) {
 			return
 		}
 		if !p.Session.HasWork(time.Now()) {
-			t := time.NewTimer(200 * time.Millisecond)
+			t := time.NewTimer(time.Second)
 			select {
 			case <-p.Session.Wake():
 			case <-t.C:

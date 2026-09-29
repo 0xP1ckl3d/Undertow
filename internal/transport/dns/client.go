@@ -19,14 +19,29 @@ import (
 )
 
 type Client struct {
-	Session   *session.Session
-	server    *net.UDPAddr
-	domain    string
-	lastSeen  atomic.Int64
-	queries   atomic.Uint64
-	responses atomic.Uint64
-	cancel    context.CancelFunc
-	workers   sync.WaitGroup
+	Session      *session.Session
+	server       *net.UDPAddr
+	domain       string
+	lastSeen     atomic.Int64
+	queries      atomic.Uint64
+	responses    atomic.Uint64
+	cancel       context.CancelFunc
+	workers      sync.WaitGroup
+	sockets      chan *pollSocket
+	outstanding  atomic.Int64
+	target       atomic.Int64
+	healthWindow atomic.Int64
+}
+
+type pollSocket struct {
+	conn *net.UDPConn
+	buf  [maxDNS]byte
+}
+
+type AdaptiveStats struct {
+	Outstanding  int64
+	Target       int64
+	HealthWindow int64
 }
 
 func Dial(ctx context.Context, serverAddr, domain, fingerprint string, token []byte, agentKey ed25519.PrivateKey) (*Client, error) {
@@ -177,10 +192,10 @@ func DialProfile(ctx context.Context, serverAddr, domain, fingerprint string, to
 	runCtx, cancel := context.WithCancel(ctx)
 	c := &Client{Session: sess, server: server, domain: domain, cancel: cancel}
 	c.lastSeen.Store(time.Now().UnixNano())
-	for i := 0; i < 16; i++ {
-		c.workers.Add(1)
-		go c.poll(runCtx)
-	}
+	c.sockets = make(chan *pollSocket, 64)
+	c.healthWindow.Store(16)
+	c.workers.Add(1)
+	go c.run(runCtx)
 	go func() { <-runCtx.Done(); sess.Close() }()
 	return c, nil
 }
@@ -193,52 +208,118 @@ func (c *Client) Recv(ctx context.Context) ([]byte, error) { return c.Session.Re
 func (c *Client) Stats() (session.Stats, uint64, uint64) {
 	return c.Session.Stats(), c.queries.Load(), c.responses.Load()
 }
-func (c *Client) Close() error { c.cancel(); c.Session.Close(); c.workers.Wait(); return nil }
-
-func (c *Client) poll(ctx context.Context) {
-	defer c.workers.Done()
-	conn, err := net.DialUDP("udp", nil, c.server)
-	if err != nil {
-		c.Session.Close()
-		return
+func (c *Client) AdaptiveStats() AdaptiveStats {
+	return AdaptiveStats{Outstanding: c.outstanding.Load(), Target: c.target.Load(), HealthWindow: c.healthWindow.Load()}
+}
+func (c *Client) Close() error {
+	c.cancel()
+	c.Session.Close()
+	c.workers.Wait()
+	for len(c.sockets) > 0 {
+		(<-c.sockets).conn.Close()
 	}
-	defer conn.Close()
+	return nil
+}
+
+func pollTarget(stats session.Stats, health int) int {
+	if stats.Queued+stats.InFlight == 0 {
+		return 1
+	}
+	limit := min(64, stats.CongestionWindow, health, stats.PeerReceiveWindow+stats.InFlight)
+	if stats.RTT > 0 && stats.RTT < 20*time.Millisecond {
+		limit = min(limit, 16)
+	}
+	return max(1, min(limit, stats.Queued+stats.InFlight))
+}
+
+func (c *Client) run(ctx context.Context) {
+	defer c.workers.Done()
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	results := make(chan error, 64)
+	active := 0
+	health := 16
+	lastRetries := uint64(0)
 	for {
+		stats := c.Session.Stats()
+		if stats.Retransmits > lastRetries {
+			health = max(2, health/2)
+			lastRetries = stats.Retransmits
+		}
+		c.healthWindow.Store(int64(health))
+		target := pollTarget(stats, health)
+		c.target.Store(int64(target))
+		for active < target {
+			wire, err := c.Session.NextPacket(time.Now())
+			if err != nil {
+				return
+			}
+			active++
+			c.outstanding.Store(int64(active))
+			c.workers.Add(1)
+			go c.query(ctx, wire, results)
+		}
 		select {
 		case <-ctx.Done():
 			return
 		case <-c.Session.Done():
 			return
-		default:
-		}
-		wire, err := c.Session.NextPacket(time.Now())
-		if err != nil {
-			return
-		}
-		c.queries.Add(1)
-		resp, err := exchange(ctx, conn, c.domain, wire)
-		if err != nil {
-			if time.Since(time.Unix(0, c.lastSeen.Load())) > 15*time.Second {
-				c.Session.Close()
-				return
+		case <-c.Session.Wake():
+		case <-ticker.C:
+		case err := <-results:
+			active--
+			c.outstanding.Store(int64(active))
+			if err == nil && stats.Queued+stats.InFlight > 0 && health < 64 {
+				health++
 			}
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(50 * time.Millisecond):
+			if err != nil {
+				health = max(2, health/2)
+				if time.Since(time.Unix(0, c.lastSeen.Load())) > 15*time.Second {
+					c.Session.Close()
+					return
+				}
 			}
-			continue
 		}
-		c.responses.Add(1)
-		if err = c.Session.Process(resp, time.Now()); err != nil {
-			c.Session.Close()
-			return
-		}
-		c.lastSeen.Store(time.Now().UnixNano())
 	}
 }
 
+func (c *Client) query(ctx context.Context, wire []byte, results chan<- error) {
+	defer c.workers.Done()
+	var socket *pollSocket
+	select {
+	case socket = <-c.sockets:
+	default:
+		conn, err := net.DialUDP("udp", nil, c.server)
+		if err != nil {
+			results <- err
+			return
+		}
+		socket = &pollSocket{conn: conn}
+	}
+	c.queries.Add(1)
+	resp, err := exchangeBuffer(ctx, socket.conn, c.domain, wire, socket.buf[:])
+	if err == nil {
+		c.responses.Add(1)
+		err = c.Session.Process(resp, time.Now())
+		if err == nil {
+			c.lastSeen.Store(time.Now().UnixNano())
+		} else {
+			c.Session.Close()
+		}
+	}
+	select {
+	case c.sockets <- socket:
+	default:
+		socket.conn.Close()
+	}
+	results <- err
+}
+
 func exchange(ctx context.Context, conn *net.UDPConn, domain string, payload []byte) ([]byte, error) {
+	return exchangeBuffer(ctx, conn, domain, payload, make([]byte, maxDNS))
+}
+
+func exchangeBuffer(ctx context.Context, conn *net.UDPConn, domain string, payload, buf []byte) ([]byte, error) {
 	name, err := RandomName(domain)
 	if err != nil {
 		return nil, err
@@ -262,7 +343,6 @@ func exchange(ctx context.Context, conn *net.UDPConn, domain string, payload []b
 	if _, err = conn.Write(b); err != nil {
 		return nil, err
 	}
-	buf := make([]byte, maxDNS)
 	n, err := conn.Read(buf)
 	if err != nil {
 		return nil, err

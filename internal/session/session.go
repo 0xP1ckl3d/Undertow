@@ -50,16 +50,18 @@ type assembly struct {
 }
 
 type Stats struct {
-	TXBytes          uint64
-	RXBytes          uint64
-	TXPackets        uint64
-	RXPackets        uint64
-	Retransmits      uint64
-	Duplicates       uint64
-	RTT              time.Duration
-	InFlight         int
-	Queued           int
-	CongestionWindow int
+	TXBytes           uint64
+	RXBytes           uint64
+	TXPackets         uint64
+	RXPackets         uint64
+	Retransmits       uint64
+	Duplicates        uint64
+	RTT               time.Duration
+	InFlight          int
+	Queued            int
+	CongestionWindow  int
+	PeerReceiveWindow int
+	ReceiveWindow     int
 }
 
 type Session struct {
@@ -90,6 +92,7 @@ type Session struct {
 	cwnd         int
 	ackCount     int
 	fragmentSize int
+	peerWindow   int
 }
 
 func New(id uint64, keys security.Keys, client bool) (*Session, error) {
@@ -132,7 +135,7 @@ func NewWithFragment(id uint64, keys security.Keys, client bool, size int) (*Ses
 	if err != nil {
 		return nil, err
 	}
-	return &Session{id: id, tx: tx, rx: rx, txPrefix: txPrefix, rxPrefix: rxPrefix, received: make(map[uint64]bool), seen: make(map[uint64]bool), pending: make(map[uint64]*pending), reassembly: make(map[uint64]*assembly), deliver: make(chan []byte, 64), wake: make(chan struct{}, 1), done: make(chan struct{}), cwnd: 16, fragmentSize: size}, nil
+	return &Session{id: id, tx: tx, rx: rx, txPrefix: txPrefix, rxPrefix: rxPrefix, received: make(map[uint64]bool), seen: make(map[uint64]bool), pending: make(map[uint64]*pending), reassembly: make(map[uint64]*assembly), deliver: make(chan []byte, 64), wake: make(chan struct{}, 1), done: make(chan struct{}), cwnd: 16, fragmentSize: size, peerWindow: maxPending}, nil
 }
 
 func (s *Session) ID() uint64            { return s.id }
@@ -228,6 +231,8 @@ func (s *Session) Stats() Stats {
 	v.InFlight = len(s.pending)
 	v.Queued = len(s.queue) + len(s.priority)
 	v.CongestionWindow = s.cwnd
+	v.PeerReceiveWindow = s.peerWindow
+	v.ReceiveWindow = maxPending - len(s.received)
 	return v
 }
 
@@ -388,6 +393,10 @@ func (s *Session) Process(wire []byte, now time.Time) error {
 	}
 	ack := binary.BigEndian.Uint64(h[28:36])
 	bits := binary.BigEndian.Uint64(h[36:44])
+	window := binary.BigEndian.Uint32(h[44:48])
+	if window > maxPending {
+		return errors.New("invalid advertised receive window")
+	}
 	if ack > s.dataSeq {
 		return errors.New("ACK beyond sent data")
 	}
@@ -395,6 +404,7 @@ func (s *Session) Process(wire []byte, now time.Time) error {
 	if ackAdvanced {
 		s.peerAckBase = ack
 	}
+	s.peerWindow = int(window)
 	newAcks := 0
 	for seq, p := range s.pending {
 		acknowledged := seq <= ack
