@@ -31,7 +31,7 @@ func TestConsoleHistoryAndTabCompletion(t *testing.T) {
 	editor := newConsoleEditor(&output, true)
 	editor.showPrompt("undertow> ", false)
 	lines := make(chan string, 2)
-	err := editor.read(context.Background(), strings.NewReader("sta\t\n\x1b[A\n"), lines)
+	err := editor.read(context.Background(), strings.NewReader("statu\t\n\x1b[A\n"), lines)
 	if err != io.EOF {
 		t.Fatalf("read = %v", err)
 	}
@@ -153,6 +153,30 @@ func TestConsoleExecSendsArgvWithoutShell(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(request.Argv, []string{"/usr/bin/id", "-u"}) || output.String() != "done\n[exit 0]\n" {
+		t.Fatalf("request=%+v output=%q", request, output.String())
+	}
+}
+
+func TestConsoleSelectedAgentBuiltin(t *testing.T) {
+	var request pivot.ExecRequest
+	caller := func(_ context.Context, _, path string, body any) ([]byte, error) {
+		if path == "/v1/status" {
+			return json.Marshal(map[string]any{"agents": []control.AgentInfo{{ID: "agent-long-id", Hostname: "pivot-host"}}})
+		}
+		if path != "/v1/agents/agent-long-id/exec" {
+			t.Fatalf("unexpected path %q", path)
+		}
+		encoded, _ := json.Marshal(body)
+		if err := json.Unmarshal(encoded, &request); err != nil {
+			t.Fatal(err)
+		}
+		return json.Marshal(pivot.ExecResult{Stdout: "file.txt\n"})
+	}
+	var output bytes.Buffer
+	if err := runConsole(context.Background(), strings.NewReader("use 1\nls /tmp\nquit\n"), &output, caller, nil, nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if request.Builtin != "ls" || !reflect.DeepEqual(request.Args, []string{"/tmp"}) || !strings.Contains(output.String(), "file.txt") {
 		t.Fatalf("request=%+v output=%q", request, output.String())
 	}
 }

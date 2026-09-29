@@ -8,6 +8,7 @@ Run `undertow help` or `undertow help COMMAND` for terminal help. Linux binary: 
 | --- | --- | --- |
 | `--auth token\|password\|none` | server, agent, client | Enrollment policy; default `token`. `none` lets any reachable peer enroll. |
 | `--token-file PATH` | server, agent, client | Enrollment token file for token mode; default `token.key`. |
+| `--token HEX` | server, agent, client | Pass the token value directly instead of a file. Cannot combine with `--token-file`; visible in process listings and shell history. |
 | `--password TEXT` | server, agent, client | Password mode only, at least 12 bytes; visible to process listings. |
 | `--password-file PATH` | server, agent, client | Password mode only; reads a password file. Do not combine with `--password`. |
 | `--domain NAME` | server, agent, client | Synthetic direct-DNS name; default `t.undertow.invalid`, must match. |
@@ -29,7 +30,7 @@ Creates or reuses an Ed25519 server key at `identity.key`, creates or reuses a r
 | `--listen IP:PORT` | `0.0.0.0:53` | Direct DNS UDP listener. |
 | `--identity PATH` | `identity.key` | Server Ed25519 identity key. |
 | `--domain NAME` | `t.undertow.invalid` | DNS question domain. |
-| `--auth`, `--token-file`, `--password`, `--password-file` | See above | Enrollment. |
+| `--auth`, `--token`, `--token-file`, `--password`, `--password-file` | See above | Enrollment. |
 | `--tun` | Off | Create proxy TUN/Wintun for routed internal pivots from the server host. |
 | `--tun-name NAME` | `undertow0` | Proxy adapter name. |
 | `--tunnel-address CIDR` | `172.16.254.1/24` | Proxy interface IPv4 address and network. |
@@ -55,7 +56,7 @@ The server may require privilege to bind UDP/53 or create a proxy interface. A s
 | `--deny LIST` | None | Disable any current agent capability independently: `pivot`, `exec`, `upload`, `download`. For example, `--deny=exec,upload`. All are allowed by default. |
 | `--advertise-route CIDR` | None | Offer an additional IPv4 subnet to VPN clients; repeatable. Up IPv4 interface subnets are offered automatically. |
 | `--domain NAME` | `t.undertow.invalid` | Must match the server. |
-| `--auth`, `--token-file`, `--password`, `--password-file` | See above | Enrollment. |
+| `--auth`, `--token`, `--token-file`, `--password`, `--password-file` | See above | Enrollment. |
 | `--payload-profile auto\|large\|small` | `auto` | Direct-DNS payload size; auto can fall back to small. |
 | `--probe` | Off | Run encrypted echo probes against a `--probe-echo` server instead of socket operations. |
 | `--probe-count N` | `0` | Number of probes; zero runs continuously. |
@@ -78,7 +79,7 @@ The agent makes no interface or host route changes. Its local key must differ fo
 | `--trust-on-first-use` | Off | Discover and save a first-use pin after connection. |
 | `--client-key PATH` | `client.key` | Client Ed25519 identity. |
 | `--domain NAME` | `t.undertow.invalid` | Must match the server. |
-| `--auth`, `--token-file`, `--password`, `--password-file` | See above | Enrollment. |
+| `--auth`, `--token`, `--token-file`, `--password`, `--password-file` | See above | Enrollment. |
 | `--tun-name NAME` | `undertow-vpn` | Client TUN/Wintun name. |
 | `--tunnel-address CIDR` | `172.16.253.1/24` | Client interface IPv4 address/network. |
 | `--payload-profile auto\|large\|small` | `auto` | Direct-DNS payload size. |
@@ -125,11 +126,7 @@ Agent IDs in the human table can be shortened for display; use `status --json` f
 
 In `status`, **Agents** are hosts exposing reachable networks; **VPN clients** are hosts sending their own traffic through the server. A VPN client appears after its session is ready. Because UDP has no disconnect signal, the server removes an idle client after roughly 60–75 seconds. `last_seen` in JSON shows the last received packet. Each new agent reports `capabilities.supported` and `capabilities.allowed`; older agents show unknown. `Internal` shows whether the client requested configured agent routes. `RX` and `TX` are encrypted session bytes at the server. `Streams` counts open tunneled flows. `Queued`, `Flight`, and `CWND` show waiting fragments, unacknowledged packets, and the current congestion window. Rising `Retrans` indicates packet loss or delayed acknowledgement; compare repeated status snapshots to see whether traffic is still making progress.
 
-Both consoles start at a main menu. `agents` lists connected agents by number; `use NUMBER` enters one. An ID prefix or hostname can also be used when unambiguous. In an agent menu, `exec PROGRAM [ARGS]` and `route add CIDR` use that agent automatically. `help` shows commands for the current menu, and `back` returns to the main menu. `status [--json]`, `routes`, and `quit` work in both menus. `select NUMBER` is an alias of `use NUMBER` inside the interactive console; the separate `undertow agent select AGENT_ID` command retains its server-wide selection behavior.
-
-In the server console, `route add CIDR` in an agent menu creates a global route. In the VPN client console, `route accept CIDR` accepts that agent's advertisement locally, `route add CIDR` adds a manual local route even when it was not advertised, and `route del CIDR` removes a locally accepted route. The VPN main menu also has `internal on|off`. Client route commands install or remove a route on the client TUN and configure forwarding for that client session; they do not change server global routes. `route add` is useful when an agent can reach a subnet through a router on one of its interfaces, but that subnet is not directly attached and thus not auto advertised. Quote arguments containing spaces. `exec` starts the named program directly on the agent, with no implicit shell or visible console window on Windows. Commands have a 30 second execution limit and capture up to 32 KiB each of stdout and stderr. Numbered agent selection avoids typing the full ID.
-
-In the VPN client's selected agent menu, `upload LOCAL REMOTE` copies a file from the client host to the agent, and `download REMOTE LOCAL` copies one back. At the main menu, use `upload AGENT_ID LOCAL REMOTE` or `download AGENT_ID REMOTE LOCAL`. The client streams file contents through the server to the agent, verifies SHA-256, and reports the byte count and digest. Paths containing spaces must be quoted. Relative local paths resolve from the console's current directory; relative remote paths resolve from the agent process's current directory. The destination's parent directory must exist. Existing destination files are refused, and incomplete transfers are removed. On Linux, a VPN client started with `sudo` gives downloads to the invoking user. Transfers have a 30 minute limit. `agent --deny=upload` and `agent --deny=download` restrict those operations separately; `--deny=exec` restricts one-shot command execution. `--deny=pivot` rejects agent socket traffic and stops advertising its routes. `shell` and `listeners` are not current capabilities and are rejected if named in `--deny`.
+For command tables, menu examples, key bindings, agent selection, route acceptance, built-in host operations, execution, file transfers, and detach/reattach, see the [interactive console guide](console.md). The built-in host operations use the `exec` capability; `agent --deny=exec` blocks them. `agent --deny=pivot` rejects agent socket traffic and stops advertising its routes. `shell` and `listeners` are not current capabilities and are rejected if named in `--deny`.
 
 If the agent and VPN client share a host, accepting a route used by the agent's own outbound connections can create a routing loop. Keep that outbound path outside the client's accepted routes or use an agent on a separate host.
 

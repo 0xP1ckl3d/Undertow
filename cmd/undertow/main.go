@@ -159,7 +159,8 @@ func serve(args []string) error {
 	listen := f.String("listen", "0.0.0.0:53", "direct DNS UDP listen address")
 	domain := f.String("domain", "t.undertow.invalid", "synthetic DNS domain")
 	identityPath := f.String("identity", "identity.key", "server identity key file")
-	tokenPath := f.String("token-file", "token.key", "enrolment token file")
+	tokenPath := f.String("token-file", "", "enrolment token file (default token.key)")
+	tokenValue := f.String("token", "", "enrolment token hex; visible in process listings")
 	authMode := f.String("auth", "token", "client enrollment: token, password, none")
 	password := f.String("password", "", "shared enrollment password; visible in process listings")
 	passwordFile := f.String("password-file", "", "read shared enrollment password from a file")
@@ -189,7 +190,7 @@ func serve(args []string) error {
 	if err != nil {
 		return err
 	}
-	token, err := security.EnrollmentSecret(*authMode, *tokenPath, *password, *passwordFile, security.Fingerprint(identity))
+	token, err := security.EnrollmentSecret(*authMode, *tokenPath, *tokenValue, *password, *passwordFile, security.Fingerprint(identity))
 	if err != nil {
 		return err
 	}
@@ -369,7 +370,8 @@ func agent(args []string) error {
 	fingerprint := f.String("fingerprint", "", "pinned SHA-256 server public-key fingerprint")
 	fingerprintFile := f.String("fingerprint-file", "server.fingerprint", "saved server fingerprint")
 	trustFirstUse := f.Bool("trust-on-first-use", false, "save server fingerprint after first authenticated connection")
-	tokenPath := f.String("token-file", "token.key", "enrolment token file")
+	tokenPath := f.String("token-file", "", "enrolment token file (default token.key)")
+	tokenValue := f.String("token", "", "enrolment token hex; visible in process listings")
 	authMode := f.String("auth", "token", "client enrollment: token, password, none")
 	password := f.String("password", "", "shared enrollment password; visible in process listings")
 	passwordFile := f.String("password-file", "", "read shared enrollment password from a file")
@@ -414,7 +416,7 @@ func agent(args []string) error {
 	if err != nil {
 		return err
 	}
-	token, err := security.EnrollmentSecret(*authMode, *tokenPath, *password, *passwordFile, pinnedFingerprint)
+	token, err := security.EnrollmentSecret(*authMode, *tokenPath, *tokenValue, *password, *passwordFile, pinnedFingerprint)
 	if err != nil {
 		return err
 	}

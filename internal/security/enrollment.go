@@ -13,7 +13,7 @@ import (
 // EnrollmentSecret returns the key used to prove that a client is allowed to
 // open a session. Open enrollment still uses the authenticated, encrypted
 // transport and requires clients to pin the server identity fingerprint.
-func EnrollmentSecret(mode, tokenFile, password, passwordFile, fingerprint string) ([]byte, error) {
+func EnrollmentSecret(mode, tokenFile, tokenValue, password, passwordFile, fingerprint string) ([]byte, error) {
 	if password != "" && passwordFile != "" {
 		return nil, errors.New("choose either --password or --password-file")
 	}
@@ -22,8 +22,20 @@ func EnrollmentSecret(mode, tokenFile, password, passwordFile, fingerprint strin
 		if password != "" || passwordFile != "" {
 			return nil, errors.New("password options require --auth password")
 		}
+		if tokenFile != "" && tokenValue != "" {
+			return nil, errors.New("choose either --token or --token-file")
+		}
+		if tokenValue != "" {
+			return ParseToken(tokenValue)
+		}
+		if tokenFile == "" {
+			tokenFile = "token.key"
+		}
 		return ReadToken(tokenFile)
 	case "password":
+		if tokenValue != "" {
+			return nil, errors.New("--token requires --auth token")
+		}
 		if passwordFile != "" {
 			b, err := os.ReadFile(passwordFile)
 			if err != nil {
@@ -41,6 +53,9 @@ func EnrollmentSecret(mode, tokenFile, password, passwordFile, fingerprint strin
 		salt := append([]byte("undertow-password-enrollment-v1"), fingerprintBytes...)
 		return pbkdf2.Key(sha256.New, password, salt, 600_000, 32)
 	case "none":
+		if tokenValue != "" {
+			return nil, errors.New("--token requires --auth token")
+		}
 		if password != "" || passwordFile != "" {
 			return nil, errors.New("password options require --auth password")
 		}

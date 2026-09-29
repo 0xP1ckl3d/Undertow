@@ -654,7 +654,7 @@ func (m *Manager) handler(token string) http.Handler {
 			http.Error(w, "invalid command request", http.StatusBadRequest)
 			return
 		}
-		result, err := pivot.Execute(r.Context(), agent, request.Argv)
+		result, err := pivot.ExecuteRequest(r.Context(), agent, request)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return

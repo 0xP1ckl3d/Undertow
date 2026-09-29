@@ -126,7 +126,7 @@ func TestPasswordAndOpenEnrollmentOverDNS(t *testing.T) {
 			if mode == "password" {
 				password = "a memorable passphrase"
 			}
-			secret, err := security.EnrollmentSecret(mode, "", password, "", fingerprint)
+			secret, err := security.EnrollmentSecret(mode, "", "", password, "", fingerprint)
 			if err != nil {
 				t.Fatal(err)
 			}

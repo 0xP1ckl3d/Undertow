@@ -17,7 +17,9 @@ import (
 const ExecDestination = "exec.undertow.invalid:0"
 
 type ExecRequest struct {
-	Argv []string `json:"argv"`
+	Argv    []string `json:"argv,omitempty"`
+	Builtin string   `json:"builtin,omitempty"`
+	Args    []string `json:"args,omitempty"`
 }
 
 type ExecResult struct {
@@ -62,7 +64,12 @@ func validateArgv(argv []string) error {
 
 // Execute runs one agent command over its authenticated mux session.
 func Execute(ctx context.Context, agent *mux.Mux, argv []string) (ExecResult, error) {
-	if err := validateArgv(argv); err != nil {
+	return ExecuteRequest(ctx, agent, ExecRequest{Argv: argv})
+}
+
+// ExecuteRequest runs a direct executable or a built-in host operation.
+func ExecuteRequest(ctx context.Context, agent *mux.Mux, request ExecRequest) (ExecResult, error) {
+	if err := validateExecRequest(request); err != nil {
 		return ExecResult{}, err
 	}
 	if agent == nil {
@@ -84,7 +91,7 @@ func Execute(ctx context.Context, agent *mux.Mux, argv []string) (ExecResult, er
 		case <-done:
 		}
 	}()
-	if err := json.NewEncoder(stream).Encode(ExecRequest{Argv: argv}); err != nil {
+	if err := json.NewEncoder(stream).Encode(request); err != nil {
 		return ExecResult{}, err
 	}
 	if err := stream.CloseWrite(); err != nil {
@@ -102,6 +109,27 @@ func Execute(ctx context.Context, agent *mux.Mux, argv []string) (ExecResult, er
 		return ExecResult{}, fmt.Errorf("agent command response: %w", err)
 	}
 	return result, nil
+}
+
+func validateExecRequest(request ExecRequest) error {
+	if request.Builtin == "" {
+		if len(request.Args) != 0 {
+			return errors.New("built-in arguments require a built-in command")
+		}
+		return validateArgv(request.Argv)
+	}
+	if len(request.Argv) != 0 {
+		return errors.New("choose a built-in command or executable")
+	}
+	if len(request.Args) > 2 {
+		return errors.New("too many built-in arguments")
+	}
+	for _, arg := range request.Args {
+		if strings.ContainsRune(arg, 0) || len(arg) > 4096 {
+			return errors.New("invalid built-in argument")
+		}
+	}
+	return validateBuiltin(request.Builtin, request.Args)
 }
 
 func serveExec(ctx context.Context, stream *mux.Stream) {
@@ -129,8 +157,13 @@ func serveExec(ctx context.Context, stream *mux.Stream) {
 		writeExecResult(stream, ExecResult{Error: "invalid command request"})
 		return
 	}
-	if err := validateArgv(request.Argv); err != nil {
+	if err := validateExecRequest(request); err != nil {
 		writeExecResult(stream, ExecResult{Error: err.Error()})
+		return
+	}
+	if request.Builtin != "" {
+		result := runBuiltin(ctx, request.Builtin, request.Args)
+		writeExecResult(stream, result)
 		return
 	}
 	commandCtx, cancel := context.WithTimeout(ctx, 30*time.Second)

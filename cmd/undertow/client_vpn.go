@@ -43,7 +43,8 @@ func clientCommand(args []string) error {
 	fingerprint := f.String("fingerprint", "", "pinned server identity fingerprint")
 	fingerprintFile := f.String("fingerprint-file", "server.fingerprint", "saved server fingerprint")
 	trustFirstUse := f.Bool("trust-on-first-use", false, "save server fingerprint after first authenticated connection")
-	tokenPath := f.String("token-file", "token.key", "enrolment token file")
+	tokenPath := f.String("token-file", "", "enrolment token file (default token.key)")
+	tokenValue := f.String("token", "", "enrolment token hex; visible in process listings")
 	authMode := f.String("auth", "token", "client enrollment: token, password, none")
 	password := f.String("password", "", "shared enrollment password; visible in process listings")
 	passwordFile := f.String("password-file", "", "read shared enrollment password from a file")
@@ -190,7 +191,7 @@ func clientCommand(args []string) error {
 	if err != nil {
 		return err
 	}
-	token, err := security.EnrollmentSecret(*authMode, *tokenPath, *password, *passwordFile, pinnedFingerprint)
+	token, err := security.EnrollmentSecret(*authMode, *tokenPath, *tokenValue, *password, *passwordFile, pinnedFingerprint)
 	if err != nil {
 		return err
 	}

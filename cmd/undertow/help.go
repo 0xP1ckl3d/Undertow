@@ -79,6 +79,7 @@ Connection and identity:
   --identity PATH           Server Ed25519 key (default identity.key).
   --auth MODE               token (default), password, or none/open enrollment.
   --token-file PATH         Enrollment token for token mode (default token.key).
+  --token HEX               Token value instead of a file; visible in process list.
   --password TEXT           Password mode credential; visible in process list.
   --password-file PATH      Read password from file instead.
 
@@ -125,6 +126,7 @@ Usage: undertow agent --server IP:PORT [--fingerprint HEX | --trust-on-first-use
                            connection; opt in only if first contact is trusted.
   --auth MODE             token (default), password, or none/open enrollment.
   --token-file PATH        Enrollment token for token mode (default token.key).
+  --token HEX              Token value instead of a file; visible in process list.
   --password TEXT         Password mode credential; visible in process list.
   --password-file PATH    Read password from file instead.
   --agent-key PATH         Agent Ed25519 identity (default agent.key).
@@ -170,6 +172,7 @@ Usage: undertow client --vpn --server IP:PORT [--fingerprint HEX | --trust-on-fi
                            connection; opt in only if first contact is trusted.
   --auth MODE             token (default), password, or none/open enrollment.
   --token-file PATH        Enrollment token for token mode (default token.key).
+  --token HEX              Token value instead of a file; visible in process list.
   --password TEXT         Password mode credential; visible in process list.
   --password-file PATH    Read password from file instead.
   --client-key PATH        Client Ed25519 identity (default client.key).
@@ -222,6 +225,9 @@ without an implicit shell. Use 'undertow console' on the server host;
 'undertow client --vpn --interactive ...' opens a VPN client console.
 In either console, type 'agents' to list numbered agents, 'use 1' to enter
 one, 'help' for the current menu, and 'back' to return to the main menu.
+Inside an agent, use built-in pwd, ls, stat, mkdir, rm, whoami, ps,
+privileges, env, interfaces, dns, and route-table commands. --deny=exec
+on the agent disables both direct exec and these built-in operations.
 `
 	case "status":
 		body = `undertow status — inspect agents, VPN clients, and routes

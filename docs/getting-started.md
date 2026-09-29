@@ -45,11 +45,13 @@ All modes use an encrypted session and a server identity fingerprint. `--auth` c
 
 | Mode | Server | Agent or VPN client | What to share |
 | --- | --- | --- | --- |
-| Token (default) | `--auth token --token-file token.key` | same flags | Copy `token.key` securely |
+| Token (default) | `--auth token --token-file token.key` or `--auth token --token TOKEN_HEX` | same token through either flag | Copy the file securely or share its hex value securely |
 | Password | `--auth password --password-file password.key` | same flags | Share the password securely; each host writes its own restricted file |
 | Open | `--auth none` | `--auth none` | No enrollment secret; anyone who reaches UDP listener may enroll |
 
 You can copy `token.key` as a file, or paste the server's hex token into a PowerShell file with `echo "TOKEN_HEX" > token.key`. Undertow accepts PowerShell's UTF-16LE text as well as UTF-8. Use the exact token generated on the server; a different token will fail enrollment. Treat the token as a secret.
+
+To avoid creating a token file on a host, pass its hex value with `--token TOKEN_HEX` on that host. Both server and connecting hosts accept this flag; each must use the same value. Do not combine `--token` with `--token-file`. A literal `--token` value is visible in process listings and may remain in shell history, so a restricted token file is safer on shared hosts.
 
 Password mode requires at least 12 bytes. Use `--password-file` to avoid showing the password in a process command line; `--password TEXT` is available for temporary use. The password file's trailing newline is ignored. Token mode remains the default, and a `--token-file` is irrelevant to password or open mode. Open enrollment still encrypts transport and authenticates the server **when its fingerprint is pinned**; it provides no admission control. **For real deployments, use token or password enrollment.** With `--auth none`, anyone who can reach the listener can enroll, access network paths, and use operations that agents have not restricted with `--deny`.
 

@@ -278,9 +278,19 @@ func ReadToken(path string) ([]byte, error) {
 	} else {
 		b = []byte(strings.TrimPrefix(string(b), "\ufeff"))
 	}
-	t, err := hex.DecodeString(strings.TrimSpace(string(b)))
-	if err != nil || len(t) < 32 {
+	t, err := ParseToken(string(b))
+	if err != nil {
 		return nil, fmt.Errorf("invalid token file %s: expected at least 64 hexadecimal characters from the server's token.key", path)
 	}
 	return t, nil
+}
+
+// ParseToken accepts the same hexadecimal value used by token.key without
+// including the secret in validation errors.
+func ParseToken(value string) ([]byte, error) {
+	token, err := hex.DecodeString(strings.TrimSpace(value))
+	if err != nil || len(token) < 32 {
+		return nil, errors.New("token must contain at least 64 hexadecimal characters")
+	}
+	return token, nil
 }

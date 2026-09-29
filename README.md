@@ -93,6 +93,7 @@ Back on the server, `sudo ./bin/undertow status` shows the connected agent when 
 
 - [Setup, roles, enrollment and fingerprints](docs/getting-started.md)
 - [Scenario commands: pivot, VPN, forwarding and lifecycle](docs/scenarios.md)
+- [Interactive console commands and examples](docs/console.md)
 - [All commands and flags](docs/cli-reference.md)
 - [Protocol version 1](docs/protocol.md)
 - [Performance tests and comparison method](docs/benchmarks.md)

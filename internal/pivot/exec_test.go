@@ -89,3 +89,16 @@ func TestAgentExecutesArgvWithoutShell(t *testing.T) {
 		t.Fatalf("unexpected command result: %+v", result)
 	}
 }
+
+func TestAgentBuiltinsUseExecCapability(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	server, agent := execTestMuxPair(ctx)
+	defer server.Close()
+	defer agent.Close()
+	go ServeAgentWithExec(ctx, agent, true)
+	result, err := ExecuteRequest(ctx, server, ExecRequest{Builtin: "pwd"})
+	if err != nil || result.Error != "" || strings.TrimSpace(result.Stdout) == "" {
+		t.Fatalf("remote pwd: %+v, %v", result, err)
+	}
+}

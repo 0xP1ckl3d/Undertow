@@ -241,6 +241,8 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 			switch args[0] {
 			case "exec":
 				args = append([]string{"exec", selectedID}, args[1:]...)
+			case "pwd", "ls", "stat", "mkdir", "rm", "whoami", "ps", "privileges", "env", "interfaces", "dns", "route-table":
+				args = append([]string{args[0], selectedID}, args[1:]...)
 			case "upload", "download":
 				args = append([]string{args[0], selectedID}, args[1:]...)
 			case "route":
@@ -333,6 +335,18 @@ func printConsoleHelp(output io.Writer, vpnClient, selected bool) {
 	if selected {
 		fmt.Fprint(output, `Agent commands:
   exec PROGRAM [ARGS]    Run a program on the selected agent
+  pwd                    Agent working directory
+  ls [PATH]              List a directory
+  stat PATH              Show file metadata
+  mkdir PATH             Create one directory
+  rm PATH                Remove one file or empty directory
+  whoami                 Agent process user
+  ps                     Process list
+  privileges             Current user and privileges
+  env [NAME]             Environment or one variable
+  interfaces             Network interfaces and addresses
+  dns                    DNS configuration
+  route-table            Full host route table
   routes                 Show routes and advertisements
   route add CIDR         Add a route through this agent
   route del CIDR         Remove a route
@@ -361,6 +375,7 @@ Quote paths or arguments containing spaces. Programs run without a shell.
   background             Detach console; keep VPN running
   quit                   Stop the VPN and exit
 Inside an agent, use exec PROGRAM, upload LOCAL REMOTE, download REMOTE LOCAL, or route accept CIDR.
+Host commands: pwd, ls, stat, mkdir, rm, whoami, ps, privileges, env, interfaces, dns, route-table.
 `)
 		return
 	}
@@ -373,6 +388,7 @@ Inside an agent, use exec PROGRAM, upload LOCAL REMOTE, download REMOTE LOCAL, o
   help                   Show this menu
   quit                   Exit the console
 Inside an agent, use exec PROGRAM or route add CIDR.
+Host commands: pwd, ls, stat, mkdir, rm, whoami, ps, privileges, env, interfaces, dns, route-table.
 `)
 }
 
@@ -421,6 +437,7 @@ func runConsoleCommand(ctx context.Context, output io.Writer, call consoleCaller
   route add CIDR AGENT_ID        Add a manual local route via an agent
   route del CIDR                 Remove a locally accepted route
   exec AGENT_ID PROGRAM [ARGS]   Run one program on an agent
+  HOST_OP AGENT_ID [ARGS]        Host operations; type use NUMBER then help
   upload AGENT_ID LOCAL REMOTE   Copy a file to an agent
   download AGENT_ID REMOTE LOCAL Copy a file from an agent
   internal on|off                Change this VPN client's pivot mode
@@ -436,6 +453,7 @@ Quote arguments containing spaces.
   route del CIDR                 Remove an internal route
   select AGENT_ID                Select the default agent
   exec AGENT_ID PROGRAM [ARGS]   Run one program on an agent
+  HOST_OP AGENT_ID [ARGS]        Host operations; type use NUMBER then help
   quit                           Leave the console
 Quote arguments containing spaces. Commands run only when submitted.
 `)
@@ -534,6 +552,24 @@ Quote arguments containing spaces. Commands run only when submitted.
 			return errors.New(result.Error)
 		}
 		fmt.Fprintf(output, "[exit %d]\n", result.ExitCode)
+		return nil
+	case "pwd", "ls", "stat", "mkdir", "rm", "whoami", "ps", "privileges", "env", "interfaces", "dns", "route-table":
+		if len(args) < 2 {
+			return errors.New("select an agent with use NUMBER, or provide AGENT_ID")
+		}
+		data, err := call(ctx, http.MethodPost, "/v1/agents/"+url.PathEscape(args[1])+"/exec", pivot.ExecRequest{Builtin: args[0], Args: args[2:]})
+		if err != nil {
+			return err
+		}
+		var result pivot.ExecResult
+		if err := json.Unmarshal(data, &result); err != nil {
+			return err
+		}
+		fmt.Fprint(output, result.Stdout)
+		fmt.Fprint(output, result.Stderr)
+		if result.Error != "" {
+			return errors.New(result.Error)
+		}
 		return nil
 	case "upload", "download":
 		if !vpnClient {
