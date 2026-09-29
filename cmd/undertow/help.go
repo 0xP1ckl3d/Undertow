@@ -132,7 +132,7 @@ Usage: undertow agent --server IP:PORT [--fingerprint HEX | --trust-on-first-use
   --password-file PATH    Read password from file instead.
   --agent-key PATH         Agent Ed25519 identity (default agent.key).
   --deny LIST              Disable agent capabilities independently. Names:
-                           pivot,exec,upload,download,listeners (comma-separated).
+                           pivot,exec,hostops,upload,download,listeners.
   --advertise-route CIDR    Offer an additional IPv4 route to VPN clients;
                            repeatable. Up IPv4 interfaces are also offered.
   --domain NAME            Match server --domain (default t.undertow.invalid).
@@ -153,7 +153,8 @@ Example: undertow agent --server 203.0.113.10:53 --fingerprint HEX --token-file 
 The agent changes no interface or host route. After it connects, run
 'undertow status' on the server and add an internal route through its ID.
 All implemented capabilities are enabled by default. For example, use
---deny=exec,upload to reject those operations while allowing downloads.
+--deny=exec,upload to reject those operations while allowing built-in host
+operations and downloads. Add hostops to deny the built-in commands.
 Connected VPN clients can request allowed operations. 'status' shows the
 agent's supported and allowed capabilities.
 Operator subcommands: 'undertow agent list|show ID|select ID'.
@@ -235,7 +236,8 @@ In either console, type 'agents' to list numbered agents, 'use 1' to enter
 one, 'help' for the current menu, and 'back' to return to the main menu.
 Inside an agent, use built-in pwd, ls, stat, mkdir, rm, whoami, ps,
 privileges, env, interfaces, dns, and route-table commands. --deny=exec
-on the agent disables both direct exec and these built-in operations.
+blocks arbitrary programs while leaving these built-ins available;
+--deny=hostops blocks the built-ins separately.
 The VPN client console also supports per-agent TCP 'forward add/list/del'.
 For example, after 'use 1': forward add 0.0.0.0:8080 127.0.0.1:8080.
 `

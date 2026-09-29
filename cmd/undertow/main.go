@@ -381,7 +381,7 @@ func agent(args []string) error {
 	interval := f.Duration("probe-interval", time.Second, "time between probes; 0 sends as fast as the window allows")
 	profileFlag := f.String("payload-profile", "auto", "DNS payload profile: auto, large, or small")
 	probe := f.Bool("probe", false, "run Phase 1 echo probes instead of TCP socket handling")
-	deny := f.String("deny", "", "comma-separated agent capabilities to disable: pivot,exec,upload,download,listeners")
+	deny := f.String("deny", "", "comma-separated agent capabilities to disable: pivot,exec,hostops,upload,download,listeners")
 	var advertise advertisedRoutes
 	f.Var(&advertise, "advertise-route", "IPv4 CIDR offered for client acceptance; repeatable")
 	if err := f.Parse(args); err != nil {

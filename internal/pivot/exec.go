@@ -15,6 +15,7 @@ import (
 )
 
 const ExecDestination = "exec.undertow.invalid:0"
+const HostOpsDestination = "hostops.undertow.invalid:0"
 
 type ExecRequest struct {
 	Argv    []string `json:"argv,omitempty"`
@@ -77,7 +78,11 @@ func ExecuteRequest(ctx context.Context, agent *mux.Mux, request ExecRequest) (E
 	}
 	ctx, cancel := context.WithTimeout(ctx, 40*time.Second)
 	defer cancel()
-	stream, err := agent.Open(ctx, ExecDestination)
+	destination := ExecDestination
+	if request.Builtin != "" {
+		destination = HostOpsDestination
+	}
+	stream, err := agent.Open(ctx, destination)
 	if err != nil {
 		return ExecResult{}, err
 	}
@@ -132,7 +137,7 @@ func validateExecRequest(request ExecRequest) error {
 	return validateBuiltin(request.Builtin, request.Args)
 }
 
-func serveExec(ctx context.Context, stream *mux.Stream) {
+func serveExec(ctx context.Context, stream *mux.Stream, hostOps bool) {
 	defer stream.Close()
 	if err := stream.AcceptOpen(ctx); err != nil {
 		return
@@ -159,6 +164,10 @@ func serveExec(ctx context.Context, stream *mux.Stream) {
 	}
 	if err := validateExecRequest(request); err != nil {
 		writeExecResult(stream, ExecResult{Error: err.Error()})
+		return
+	}
+	if hostOps != (request.Builtin != "") {
+		writeExecResult(stream, ExecResult{Error: "command type does not match stream capability"})
 		return
 	}
 	if request.Builtin != "" {

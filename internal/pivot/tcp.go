@@ -23,7 +23,7 @@ func ServeAgent(ctx context.Context, m *mux.Mux) {
 // combined execution/file-transfer switch.
 func ServeAgentWithExec(ctx context.Context, m *mux.Mux, allowExec bool) {
 	caps := DefaultCapabilities()
-	caps.Exec, caps.Upload, caps.Download = allowExec, allowExec, allowExec
+	caps.Exec, caps.HostOps, caps.Upload, caps.Download = allowExec, allowExec, allowExec, allowExec
 	ServeAgentWithCapabilities(ctx, m, caps)
 }
 
@@ -38,7 +38,15 @@ func ServeAgentWithCapabilities(ctx context.Context, m *mux.Mux, caps Capabiliti
 				s.Fail(errors.New("agent command execution is disabled"))
 				continue
 			}
-			go serveExec(ctx, s)
+			go serveExec(ctx, s, false)
+			continue
+		}
+		if s.Destination() == HostOpsDestination {
+			if !caps.HostOps {
+				s.Fail(errors.New("agent host operations are disabled"))
+				continue
+			}
+			go serveExec(ctx, s, true)
 			continue
 		}
 		if s.Destination() == FileDestination {

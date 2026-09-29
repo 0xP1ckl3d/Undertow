@@ -53,7 +53,7 @@ The server may require privilege to bind UDP/53 or create a proxy interface. A s
 | `--fingerprint-file PATH` | `server.fingerprint` | Read saved pin or save a trust-on-first-use pin. |
 | `--trust-on-first-use` | Off | Discover the server pin for first connection. |
 | `--agent-key PATH` | `agent.key` | Stable agent Ed25519 identity. |
-| `--deny LIST` | None | Disable agent capabilities independently: `pivot`, `exec`, `upload`, `download`, `listeners`. For example, `--deny=exec,upload`. All are allowed by default. `listeners` controls agent-side TCP forwards. |
+| `--deny LIST` | None | Disable agent capabilities independently: `pivot`, `exec`, `hostops`, `upload`, `download`, `listeners`. For example, `--deny=exec,upload` still allows built-in host operations. All are allowed by default. `listeners` controls agent-side TCP forwards. |
 | `--advertise-route CIDR` | None | Offer an additional IPv4 subnet to VPN clients; repeatable. Up IPv4 interface subnets are offered automatically. |
 | `--domain NAME` | `t.undertow.invalid` | Must match the server. |
 | `--auth`, `--token`, `--token-file`, `--password`, `--password-file` | See above | Enrollment. |
@@ -134,7 +134,7 @@ Agent IDs in the human table can be shortened for display; use `status --json` f
 
 In `status`, **Agents** are hosts exposing reachable networks; **VPN clients** are hosts sending their own traffic through the server. A VPN client appears after its session is ready. Because UDP has no disconnect signal, the server removes an idle client after roughly 60–75 seconds. `last_seen` in JSON shows the last received packet. Each new agent reports `capabilities.supported` and `capabilities.allowed`; older agents show unknown. `Internal` shows whether the client requested configured agent routes. `RX` and `TX` are encrypted session bytes at the server. `Streams` counts open tunneled flows. `Queued`, `Flight`, and `CWND` show waiting fragments, unacknowledged packets, and the current congestion window. Rising `Retrans` indicates packet loss or delayed acknowledgement; compare repeated status snapshots to see whether traffic is still making progress.
 
-For command tables, menu examples, key bindings, agent selection, route acceptance, client-to-agent TCP forwards, built-in host operations, execution, file transfers, and detach/reattach, see the [interactive console guide](console.md). The built-in host operations use the `exec` capability; `agent --deny=exec` blocks them. `agent --deny=pivot` rejects agent socket traffic and stops advertising its routes. `agent --deny=listeners` blocks agent-side TCP forward listeners. `shell` is not a current capability.
+For command tables, menu examples, key bindings, agent selection, route acceptance, client-to-agent TCP forwards, built-in host operations, execution, file transfers, and detach/reattach, see the [interactive console guide](console.md). Built-in host operations use `hostops`; `agent --deny=exec` still allows them, while `agent --deny=hostops` blocks them. `agent --deny=pivot` rejects agent socket traffic and stops advertising its routes. `agent --deny=listeners` blocks agent-side TCP forward listeners.
 
 If the agent and VPN client share a host, accepting a route used by the agent's own outbound connections can create a routing loop. Keep that outbound path outside the client's accepted routes or use an agent on a separate host.
 
