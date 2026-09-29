@@ -163,13 +163,13 @@ func renderStatus(w io.Writer, data []byte) error {
 		return err
 	}
 	fmt.Fprintf(w, "Agents (%d)\n", len(status.Agents))
-	fmt.Fprintf(w, "%-18s %-16s %-24s %-18s %8s %8s %7s\n", "ID", "Virtual IP", "Host", "Remote", "RX", "TX", "Streams")
+	fmt.Fprintf(w, "%-18s %-16s %-24s %-18s %8s %8s %7s %4s\n", "ID", "Virtual IP", "Host", "Remote", "RX", "TX", "Streams", "Jobs")
 	for _, a := range status.Agents {
 		id := a.ID
 		if len(id) > 18 {
 			id = id[:18]
 		}
-		fmt.Fprintf(w, "%-18s %-16s %-24s %-18s %8d %8d %7d\n", id, a.VirtualIP, a.Hostname, a.Remote, a.RXBytes, a.TXBytes, a.Streams)
+		fmt.Fprintf(w, "%-18s %-16s %-24s %-18s %8d %8d %7d %4d\n", id, a.VirtualIP, a.Hostname, a.Remote, a.RXBytes, a.TXBytes, a.Streams, a.ActiveJobs)
 		for _, prefix := range a.AdvertisedRoutes {
 			fmt.Fprintf(w, "  advertised %s via %s\n", prefix, a.ID)
 		}

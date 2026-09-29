@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -124,6 +126,33 @@ func TestInteractiveClientAgentContext(t *testing.T) {
 	}
 	if !reflect.DeepEqual(routeArgs, []string{"route", "add", "10.10.0.0/16", "agent-long-id"}) {
 		t.Fatalf("route args=%q", routeArgs)
+	}
+}
+
+func TestSelectedAgentStartsBackgroundJob(t *testing.T) {
+	var requests []string
+	caller := func(_ context.Context, method, path string, body any) ([]byte, error) {
+		requests = append(requests, method+" "+path)
+		if path == "/v1/status" {
+			return json.Marshal(map[string]any{"agents": []control.AgentInfo{{ID: "agent-a", Hostname: "agent-host"}}})
+		}
+		if path == "/v1/agents/agent-a/jobs" {
+			return json.Marshal(control.JobInfo{ID: "job-1", AgentID: "agent-a", State: "running"})
+		}
+		if path == "/v1/jobs?agent_id=agent-a" {
+			return json.Marshal([]control.JobInfo{{ID: "job-1", AgentID: "agent-a", State: "running"}})
+		}
+		return nil, fmt.Errorf("unexpected request %s", path)
+	}
+	var output bytes.Buffer
+	if err := runConsole(context.Background(), strings.NewReader("use 1\njob start powershell.exe -NoProfile\njobs\nquit\n"), &output, caller, nil, nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "Job job-1 started") || !strings.Contains(output.String(), "Jobs (1)") {
+		t.Fatalf("output=%s", output.String())
+	}
+	if !slices.Contains(requests, "POST /v1/agents/agent-a/jobs") || !slices.Contains(requests, "GET /v1/jobs?agent_id=agent-a") {
+		t.Fatalf("requests=%v", requests)
 	}
 }
 

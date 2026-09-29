@@ -56,7 +56,7 @@ func (m *Manager) ServeRemote(ctx context.Context, token string, clientID uint64
 		writeRemoteResponse(stream, remoteResponse{Status: http.StatusBadRequest, Body: []byte("invalid API request")})
 		return
 	}
-	httpRequest, err := http.NewRequestWithContext(ctx, request.Method, "http://localhost"+request.Path, bytes.NewReader(request.Body))
+	httpRequest, err := http.NewRequestWithContext(context.WithValue(ctx, jobOwnerKey{}, clientID), request.Method, "http://localhost"+request.Path, bytes.NewReader(request.Body))
 	if err != nil {
 		writeRemoteResponse(stream, remoteResponse{Status: http.StatusBadRequest, Body: []byte("invalid API request")})
 		return
@@ -81,6 +81,12 @@ func clientRequestAllowed(request *http.Request, clientID uint64) bool {
 	if request.Method == http.MethodGet && path == "/v1/status" && request.URL.RawQuery == "" {
 		return true
 	}
+	if request.Method == http.MethodGet && (path == "/v1/jobs" || strings.HasPrefix(path, "/v1/jobs/")) {
+		return true
+	}
+	if request.Method == http.MethodPost && strings.HasPrefix(path, "/v1/jobs/") && strings.HasSuffix(path, "/cancel") && request.URL.RawQuery == "" {
+		return true
+	}
 	clientPrefix := "/v1/clients/" + strconv.FormatUint(clientID, 10)
 	if request.Method == http.MethodGet && path == clientPrefix+"/forwards" && request.URL.RawQuery == "" {
 		return true
@@ -99,7 +105,7 @@ func clientRequestAllowed(request *http.Request, clientID uint64) bool {
 		return true
 	}
 	parts := strings.Split(path, "/")
-	return len(parts) == 5 && parts[1] == "v1" && parts[2] == "agents" && parts[3] != "" && parts[4] == "exec" && !strings.ContainsAny(parts[3], "%\\")
+	return len(parts) == 5 && parts[1] == "v1" && parts[2] == "agents" && parts[3] != "" && (parts[4] == "exec" || parts[4] == "jobs") && !strings.ContainsAny(parts[3], "%\\")
 }
 
 func writeRemoteResponse(stream *mux.Stream, response remoteResponse) {

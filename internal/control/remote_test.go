@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net/http"
 	"net/netip"
 	"os"
 	"strings"
@@ -87,6 +88,29 @@ func TestConnectedVPNClientHasLimitedAPI(t *testing.T) {
 	}
 	if len(manager.routes.List()) != 0 {
 		t.Fatal("VPN client changed server routes")
+	}
+}
+
+func TestVPNClientJobPathsAreScopedToJobAPI(t *testing.T) {
+	for _, tc := range []struct {
+		method, path string
+		allowed      bool
+	}{
+		{"POST", "/v1/agents/agent-a/jobs", true},
+		{"GET", "/v1/jobs", true},
+		{"GET", "/v1/jobs/abc/output", true},
+		{"POST", "/v1/jobs/abc/cancel", true},
+		{"POST", "/v1/jobs/abc", false},
+		{"DELETE", "/v1/jobs/abc", false},
+		{"GET", "/v1/routes", false},
+	} {
+		request, err := http.NewRequest(tc.method, "http://localhost"+tc.path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := clientRequestAllowed(request, 705); got != tc.allowed {
+			t.Fatalf("%s %s: allowed=%t", tc.method, tc.path, got)
+		}
 	}
 }
 

@@ -236,6 +236,9 @@ In either console, type 'agents' to list numbered agents, 'use 1' to enter
 one, 'help' for the current menu, and 'back' to return to the main menu.
 Inside the selected agent, 'shell' opens a live session; Ctrl-] returns to
 Undertow without stopping the VPN. --deny=interactive blocks these sessions.
+Use 'job start PROGRAM [ARGS]' inside the agent menu for a task that should
+continue while the console is detached. 'jobs', 'job show ID', 'job output ID',
+and 'job cancel ID' manage it.
 Inside an agent, use built-in pwd, ls, stat, mkdir, rm, whoami, ps,
 privileges, env, interfaces, dns, and route-table commands. --deny=exec
 blocks arbitrary programs while leaving these built-ins available;

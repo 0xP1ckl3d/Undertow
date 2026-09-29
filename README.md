@@ -59,6 +59,8 @@ For internal-only setup, use the client console after the second command: `agent
 
 For interactive operation, run `undertow console` on the server or start a client in a terminal; the client console opens by default. Type `agents`, then `use 1` to enter an agent and run `shell` for a live terminal, `exec` for one-shot execution, built-in host operations, `upload`, `download`, or route commands without copying its ID. Ctrl-] exits a live shell and returns to the Undertow menu. `help` changes with the menu; `back` returns to the main menu. The server console manages global routes. The client console manages its own accepted and manual routes, which persist across reconnects. Current agent capabilities are enabled by default; `agent --deny=exec,upload` still allows built-in host operations and live shells, while `--deny=hostops` and `--deny=interactive` block those separately. `status` shows supported and allowed operations. See [interactive scenarios](docs/scenarios.md#8-interactive-consoles-and-agent-commands).
 
+For a task that should run while you use the console, select an agent and enter `job start PROGRAM [ARGS]`. Use `jobs`, `job show ID`, `job output ID`, and `job cancel ID` to manage it. Tasks remain visible after client console detach/reattach while the agent stays connected; output is retained up to 256 KiB per job.
+
 For real deployments, use token or password enrollment. With `server --auth none`, anyone who can reach the listener can join, access network paths, and run commands on agents that allow execution.
 
 ## Build

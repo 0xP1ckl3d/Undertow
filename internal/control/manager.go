@@ -52,6 +52,7 @@ type AgentInfo struct {
 	InFlight         int                     `json:"in_flight"`
 	Queued           int                     `json:"queued"`
 	Window           int                     `json:"congestion_window"`
+	ActiveJobs       int                     `json:"active_jobs"`
 }
 
 type ClientInfo struct {
@@ -98,6 +99,7 @@ type Manager struct {
 	agents         map[string]*agentState
 	clients        map[uint64]*clientState
 	forwards       map[string]*forwardState
+	jobs           map[string]*jobState
 	routes         *routing.Table
 	device         RouteDevice
 	selected       string
@@ -108,7 +110,7 @@ type Manager struct {
 }
 
 func NewManager(routes *routing.Table, device RouteDevice, virtualNetwork netip.Prefix, proxyIP netip.Addr) *Manager {
-	return &Manager{agents: make(map[string]*agentState), clients: make(map[uint64]*clientState), forwards: make(map[string]*forwardState), routes: routes, device: device, virtualNetwork: virtualNetwork.Masked(), proxyIP: proxyIP, virtualByAgent: make(map[string]netip.Addr), virtualUsed: make(map[netip.Addr]bool)}
+	return &Manager{agents: make(map[string]*agentState), clients: make(map[uint64]*clientState), forwards: make(map[string]*forwardState), jobs: make(map[string]*jobState), routes: routes, device: device, virtualNetwork: virtualNetwork.Masked(), proxyIP: proxyIP, virtualByAgent: make(map[string]netip.Addr), virtualUsed: make(map[netip.Addr]bool)}
 }
 
 func (m *Manager) RegisterClient(peer *dns.Peer, streamMux *mux.Mux, internal bool, hostname string) {
@@ -516,6 +518,11 @@ func (m *Manager) AgentList() []AgentInfo {
 		info.InFlight = p.Transport.InFlight
 		info.Queued = p.Transport.Queued
 		info.Window = p.Transport.CongestionWindow
+		for _, job := range m.jobs {
+			if job.info.AgentID == info.ID && job.info.State == "running" {
+				info.ActiveJobs++
+			}
+		}
 		out = append(out, info)
 	}
 	return out
@@ -650,6 +657,7 @@ func (m *Manager) ServeHTTP(ctx context.Context, address, token string) error {
 
 func (m *Manager) handler(token string) http.Handler {
 	muxer := http.NewServeMux()
+	m.jobHTTPHandlers(muxer)
 	muxer.HandleFunc("GET /v1/status", func(w http.ResponseWriter, r *http.Request) {
 		m.mu.RLock()
 		selected := m.selected

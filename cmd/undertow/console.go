@@ -256,6 +256,12 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 		}
 		if selectedID != "" {
 			switch args[0] {
+			case "jobs":
+				args = append(args, selectedID)
+			case "job":
+				if len(args) >= 2 && args[1] == "start" {
+					args = append([]string{"job", "start", selectedID}, args[2:]...)
+				}
 			case "exec":
 				args = append([]string{"exec", selectedID}, args[1:]...)
 			case "pwd", "ls", "stat", "mkdir", "rm", "whoami", "ps", "privileges", "env", "interfaces", "dns", "route-table":
@@ -323,7 +329,7 @@ func consoleAgentName(agent control.AgentInfo) string {
 func printConsoleAgents(output io.Writer, agents []control.AgentInfo) {
 	fmt.Fprintf(output, "Agents (%d):\n", len(agents))
 	for i, agent := range agents {
-		fmt.Fprintf(output, "  %d  %-20s  %s  %s  routes=%d\n", i+1, consoleAgentName(agent), shortAgentID(agent.ID), agent.VirtualIP, len(agent.AdvertisedRoutes))
+		fmt.Fprintf(output, "  %d  %-20s  %s  %s  routes=%d jobs=%d\n", i+1, consoleAgentName(agent), shortAgentID(agent.ID), agent.VirtualIP, len(agent.AdvertisedRoutes), agent.ActiveJobs)
 	}
 	if len(agents) > 0 {
 		fmt.Fprintln(output, "Use an agent with: use NUMBER")
@@ -357,6 +363,9 @@ func printConsoleHelp(output io.Writer, vpnClient, selected bool) {
 		fmt.Fprint(output, `Agent commands:
   exec PROGRAM [ARGS]    Run a program on the selected agent
   shell [PROGRAM ARGS]   Open a live shell; Ctrl-] closes only this shell
+  job start PROGRAM [ARGS] Start a background task
+  jobs                   List this agent's tasks
+  job show|output|cancel ID Inspect or stop a task
   pwd                    Agent working directory
   ls [PATH]              List a directory
   stat PATH              Show file metadata
@@ -397,6 +406,7 @@ Quote paths or arguments containing spaces. Programs run without a shell.
   routes                 Show advertised and locally accepted routes
   internal on|off        Change this client's global pivot mode
   forward list           List this client's agent TCP forwards
+  jobs                   List background tasks
   help                   Show this menu
   background             Detach console; keep VPN running
   quit                   Stop the VPN and exit
@@ -410,6 +420,7 @@ Host commands: pwd, ls, stat, mkdir, rm, whoami, ps, privileges, env, interfaces
   use NUMBER             Enter an agent (ID prefix or hostname also works)
   status                 Show agents, VPN clients, and routes
   routes                 Show global routes
+  jobs                   List background tasks
   route del CIDR         Remove a global route
   help                   Show this menu
   quit                   Exit the console
@@ -453,6 +464,9 @@ func splitConsoleCommand(line string) ([]string, error) {
 }
 
 func runConsoleCommand(ctx context.Context, output io.Writer, call consoleCaller, vpnClient bool, ownClientID uint64, clientRoutes clientRouteAction, args []string) error {
+	if args[0] == "jobs" || args[0] == "job" {
+		return runConsoleJobCommand(ctx, output, call, args)
+	}
 	switch args[0] {
 	case "help":
 		if vpnClient {
@@ -466,6 +480,8 @@ func runConsoleCommand(ctx context.Context, output io.Writer, call consoleCaller
   forward list [AGENT_ID]        List TCP forwards
   forward del AGENT_ID BIND      Stop one TCP forward
   exec AGENT_ID PROGRAM [ARGS]   Run one program on an agent
+  job start AGENT_ID PROGRAM ... Start a background task
+  jobs; job show|output|cancel ID Inspect or stop tasks
   HOST_OP AGENT_ID [ARGS]        Host operations; type use NUMBER then help
   upload AGENT_ID LOCAL REMOTE   Copy a file to an agent
   download AGENT_ID REMOTE LOCAL Copy a file from an agent
@@ -482,6 +498,8 @@ Quote arguments containing spaces.
   route del CIDR                 Remove an internal route
   select AGENT_ID                Select the default agent
   exec AGENT_ID PROGRAM [ARGS]   Run one program on an agent
+  job start AGENT_ID PROGRAM ... Start a background task
+  jobs; job show|output|cancel ID Inspect or stop tasks
   HOST_OP AGENT_ID [ARGS]        Host operations; type use NUMBER then help
   quit                           Leave the console
 Quote arguments containing spaces. Commands run only when submitted.
