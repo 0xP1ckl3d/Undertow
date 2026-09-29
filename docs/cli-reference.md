@@ -83,12 +83,12 @@ The agent makes no interface or host route changes. Its local key must differ fo
 | `--tunnel-address CIDR` | `172.16.253.1/24` | Client interface IPv4 address/network. |
 | `--payload-profile auto\|large\|small` | `auto` | Direct-DNS payload size. |
 | `--verify-url URL` | `https://api.ipify.org` | Public IPv4 check after routes are installed. Empty disables it. |
-| `--interactive` | Off | Open the console inside the foreground VPN client. |
+| `--interactive` | Automatic in a terminal | Force an attached console when input is redirected. |
 | `--routes-file PATH` | `client-routes.json` | Persist this client's accepted and manual agent routes. The file is created locally, not copied from the server. |
 
 The client pins a physical route to the server, installs two IPv4 `/1` routes through its adapter, and withdraws its owned routes on graceful exit or verification failure. It does not provide IPv6 VPN routing. The `.1` client adapter address is local; the public egress address is reported separately.
 
-Interactive mode cannot run in the background. A connected VPN client can view status, accept agent advertised routes, add its own manual route through an agent, change its own internal mode, and execute programs on agents that allow it. Client accepted routes affect only that client and persist across reconnects, including when it later runs in the background. Global server route management and agent selection remain on the server host. No extra credential or server setting is needed for client commands. The server's `control.key` is only for its loopback API and local operator commands; do not copy it to VPN clients. `internal on` and `internal off` change how **new** flows use global server routes; the client's explicitly accepted routes remain active in either setting. Existing connections keep their current path. In interactive mode, routine VPN logs are written to `--log-file` (default `undertow-client.log`); the console shows connection and agent changes.
+In a terminal, `client --vpn` opens the interactive console by default. The VPN runs in a separate local worker so `background` detaches the console without dropping its routes or session. Run `undertow client attach` to return; use `--pid-file PATH` if the worker uses a custom state file. `quit` stops the VPN and removes its routes. Ctrl+C asks before stopping. Up/Down recall commands and Tab completes the first command word. `client --background` starts without the console. A nonterminal foreground client can also be attached from another terminal. A connected VPN client can view status, accept agent advertised routes, add its own manual route through an agent, change its own internal mode, and execute programs on agents that allow it. Client accepted routes affect only that client and persist across reconnects. Global server route management and agent selection remain on the server host. No extra credential or server setting is needed for client commands. The server's `control.key` is only for its loopback API and local operator commands; do not copy it to VPN clients. `internal on` and `internal off` change how **new** flows use global server routes; the client's explicitly accepted routes remain active in either setting. Existing connections keep their current path. Routine VPN logs are written to `--log-file` (default `undertow-client.log`); the console shows connection and agent changes.
 
 ## Foreground and background lifecycle
 
@@ -96,13 +96,13 @@ Interactive mode cannot run in the background. A connected VPN client can view s
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `--foreground` | Active if no mode selected | Run in the terminal; Ctrl+C stops gracefully. |
+| `--foreground` | Active if no mode selected | Server/agent run in the terminal. VPN client opens its console when terminal input is present. |
 | `--background` | Off | Detach, logging to a file and creating protected PID/control state. |
 | `--stop` | Off | Ask the background process to stop gracefully. |
 | `--log-file PATH` | `undertow-MODE.log` | Background log path. |
 | `--pid-file PATH` | `undertow-MODE.pid` | Background control state path. |
 
-Choose only one of foreground, background, and stop. `--stop` needs the same `--pid-file` used on startup; the other connection flags are not needed for stop. A background process runs with the privilege of the command that launched it; a privileged server or VPN client should also be stopped at the needed privilege. Graceful stop cleans owned routes; forced termination may require manual OS route inspection.
+Choose only one of foreground, background, and stop. `--stop` needs the same `--pid-file` used on startup; the other connection flags are not needed for stop. A background process runs with the privilege of the command that launched it; a privileged server or VPN client should also be stopped at the needed privilege. The interactive VPN's worker retains the launch privilege when its console detaches. Graceful stop cleans owned routes; forced termination may require manual OS route inspection.
 
 ## Operator commands
 
@@ -110,7 +110,7 @@ These commands run on the server host and use its loopback API. All accept `--co
 
 | Command | Meaning |
 | --- | --- |
-| `undertow status [--json]` | Connected agents and VPN clients separately, selected agent, route state, counters. |
+| `undertow status [--json]` | Connected agents and VPN clients separately, their hostnames, selected agent, route state, counters. |
 | `undertow console` | Interactive console attached to the running server's loopback API. |
 | `undertow agent list [--json]` | Alias of `status`; also shows VPN clients. |
 | `undertow agent show AGENT_ID` | Detailed JSON for one agent. |

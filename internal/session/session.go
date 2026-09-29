@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	mathbits "math/bits"
 	"sync"
 	"time"
 
@@ -35,10 +36,11 @@ type fragment struct {
 	data   []byte
 }
 type pending struct {
-	wire    []byte
-	sent    time.Time
-	retries uint32
-	fast    bool
+	wire         []byte
+	sent         time.Time
+	retries      uint32
+	fast         bool
+	fastEvidence uint64
 }
 type assembly struct {
 	total   uint32
@@ -407,6 +409,7 @@ func (s *Session) Process(wire []byte, now time.Time) error {
 		s.ackCount = 0
 	}
 	if bits != 0 {
+		highest := ack + uint64(64-mathbits.LeadingZeros64(bits))
 		for seq, p := range s.pending {
 			if seq <= ack || seq > ack+64 {
 				continue
@@ -417,8 +420,9 @@ func (s *Session) Process(wire []byte, now time.Time) error {
 					higher++
 				}
 			}
-			if higher >= 3 {
+			if higher >= 3 && highest > p.fastEvidence {
 				p.fast = true
+				p.fastEvidence = highest
 			}
 		}
 	}

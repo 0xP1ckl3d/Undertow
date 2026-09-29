@@ -262,9 +262,25 @@ func ReadToken(path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Windows PowerShell commonly writes redirected text as UTF-16LE.
+	if len(b) >= 2 && b[0] == 0xff && b[1] == 0xfe {
+		if (len(b)-2)%2 != 0 {
+			return nil, errors.New("token file contains incomplete UTF-16LE text")
+		}
+		text := make([]byte, 0, (len(b)-2)/2)
+		for i := 2; i < len(b); i += 2 {
+			if b[i+1] != 0 {
+				return nil, errors.New("token file must contain hexadecimal text")
+			}
+			text = append(text, b[i])
+		}
+		b = text
+	} else {
+		b = []byte(strings.TrimPrefix(string(b), "\ufeff"))
+	}
 	t, err := hex.DecodeString(strings.TrimSpace(string(b)))
 	if err != nil || len(t) < 32 {
-		return nil, errors.New("token file must contain at least 32 random bytes as hex")
+		return nil, fmt.Errorf("invalid token file %s: expected at least 64 hexadecimal characters from the server's token.key", path)
 	}
 	return t, nil
 }

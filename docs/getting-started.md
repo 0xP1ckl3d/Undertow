@@ -49,6 +49,8 @@ All modes use an encrypted session and a server identity fingerprint. `--auth` c
 | Password | `--auth password --password-file password.key` | same flags | Share the password securely; each host writes its own restricted file |
 | Open | `--auth none` | `--auth none` | No enrollment secret; anyone who reaches UDP listener may enroll |
 
+You can copy `token.key` as a file, or paste the server's hex token into a PowerShell file with `echo "TOKEN_HEX" > token.key`. Undertow accepts PowerShell's UTF-16LE text as well as UTF-8. Use the exact token generated on the server; a different token will fail enrollment. Treat the token as a secret.
+
 Password mode requires at least 12 bytes. Use `--password-file` to avoid showing the password in a process command line; `--password TEXT` is available for temporary use. The password file's trailing newline is ignored. Token mode remains the default, and a `--token-file` is irrelevant to password or open mode. Open enrollment still encrypts transport and authenticates the server **when its fingerprint is pinned**; it provides no admission control. **For real deployments, use token or password enrollment.** With `--auth none`, anyone who can reach the listener can enroll, access network paths, and execute programs on agents that have not set `--deny-exec`.
 
 The server can be initialized once with `undertow init` even when you choose password or open mode. `init` also creates an unused token file; the server identity and fingerprint are what those modes need.

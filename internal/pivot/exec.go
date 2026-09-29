@@ -143,6 +143,7 @@ func serveExec(ctx context.Context, stream *mux.Stream) {
 		}
 	}()
 	command := exec.CommandContext(commandCtx, request.Argv[0], request.Argv[1:]...)
+	configureExecProcess(command)
 	stdout := &cappedWriter{limit: 32 << 10}
 	stderr := &cappedWriter{limit: 32 << 10}
 	command.Stdout, command.Stderr = stdout, stderr

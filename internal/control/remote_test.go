@@ -123,7 +123,7 @@ func TestVPNClientExecutesOnDefaultAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager.RegisterClient(&dns.Peer{Session: clientSession, AgentID: "client-a", Connected: time.Now()}, serverVPN, false)
+	manager.RegisterClient(&dns.Peer{Session: clientSession, AgentID: "client-a", Connected: time.Now()}, serverVPN, false, "")
 	go pivot.ServeVPNInteractive(ctx, serverVPN, manager.ResolveEgress, func() bool { return false }, func(ctx context.Context, stream *mux.Stream) {
 		manager.ServeRemote(ctx, "operator-secret", 705, stream)
 	})

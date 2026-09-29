@@ -53,27 +53,42 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 	}
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
-	scanner := bufio.NewScanner(input)
-	scanner.Buffer(make([]byte, 4096), 8192)
 	lines := make(chan string)
 	scanDone := make(chan error, 1)
-	go func() {
-		for scanner.Scan() {
-			select {
-			case lines <- scanner.Text():
-			case <-ctx.Done():
-				return
-			}
+	var editor *consoleEditor
+	if file, ok := input.(*os.File); ok && file == os.Stdin && isConsoleTerminal(file) {
+		restore, err := setConsoleRaw(file)
+		if err != nil {
+			return err
 		}
-		scanDone <- scanner.Err()
-	}()
+		defer restore()
+		editor = newConsoleEditor(output, vpnClient)
+		go func() { scanDone <- editor.read(ctx, input, lines) }()
+	} else {
+		scanner := bufio.NewScanner(input)
+		scanner.Buffer(make([]byte, 4096), 8192)
+		go func() {
+			for scanner.Scan() {
+				select {
+				case lines <- scanner.Text():
+				case <-ctx.Done():
+					return
+				}
+			}
+			scanDone <- scanner.Err()
+		}()
+	}
 	promptShown := false
 	for {
 		if !promptShown {
-			if selectedID == "" {
-				fmt.Fprint(output, "undertow> ")
+			prompt := "undertow> "
+			if selectedID != "" {
+				prompt = fmt.Sprintf("undertow[%s]> ", selectedLabel)
+			}
+			if editor != nil {
+				editor.showPrompt(prompt, selectedID != "")
 			} else {
-				fmt.Fprintf(output, "undertow[%s]> ", selectedLabel)
+				fmt.Fprint(output, prompt)
 			}
 			promptShown = true
 		}
@@ -82,6 +97,12 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 		case <-ctx.Done():
 			return nil
 		case err := <-scanDone:
+			if editor != nil && errors.Is(err, io.EOF) {
+				if vpnClient {
+					fmt.Fprintln(output, "\nConsole detached. VPN continues; reconnect with 'undertow client attach'.")
+				}
+				return nil
+			}
 			if quit != nil {
 				quit()
 			}
@@ -89,8 +110,12 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 		case line = <-lines:
 			promptShown = false
 		case event := <-events:
-			fmt.Fprintf(output, "\n[%s]\n", event)
-			promptShown = false
+			if editor != nil {
+				editor.notice(event)
+			} else {
+				fmt.Fprintf(output, "\n[%s]\n", event)
+				promptShown = false
+			}
 			continue
 		case <-ticker.C:
 			agents, err := consoleAgents(ctx, call)
@@ -102,13 +127,21 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 			for _, agent := range agents {
 				next[agent.ID] = agent
 				if _, ok := known[agent.ID]; !ok {
-					fmt.Fprintf(output, "\n[Agent connected: %s (%s)]\n", consoleAgentName(agent), shortAgentID(agent.ID))
+					if editor != nil {
+						editor.notice(fmt.Sprintf("Agent connected: %s (%s)", consoleAgentName(agent), shortAgentID(agent.ID)))
+					} else {
+						fmt.Fprintf(output, "\n[Agent connected: %s (%s)]\n", consoleAgentName(agent), shortAgentID(agent.ID))
+					}
 					emitted = true
 				}
 			}
 			for id, agent := range known {
 				if _, ok := next[id]; !ok {
-					fmt.Fprintf(output, "\n[Agent lost: %s (%s)]\n", consoleAgentName(agent), shortAgentID(id))
+					if editor != nil {
+						editor.notice(fmt.Sprintf("Agent lost: %s (%s)", consoleAgentName(agent), shortAgentID(id)))
+					} else {
+						fmt.Fprintf(output, "\n[Agent lost: %s (%s)]\n", consoleAgentName(agent), shortAgentID(id))
+					}
 					emitted = true
 					if selectedID == id {
 						selectedID, selectedLabel = "", ""
@@ -133,6 +166,10 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 			if quit != nil {
 				quit()
 			}
+			return nil
+		}
+		if args[0] == "background" && vpnClient {
+			fmt.Fprintln(output, "Console detached. VPN continues in the background; reconnect with 'undertow client attach'.")
 			return nil
 		}
 		if args[0] == "help" {
@@ -275,6 +312,7 @@ Quote paths or arguments containing spaces. Programs run without a shell.
 `)
 		if vpnClient {
 			fmt.Fprintln(output, "  route accept CIDR      Accept an advertised route from this agent")
+			fmt.Fprintln(output, "  background             Detach console; keep VPN running")
 		}
 		return
 	}
@@ -286,6 +324,7 @@ Quote paths or arguments containing spaces. Programs run without a shell.
   routes                 Show advertised and locally accepted routes
   internal on|off        Change this client's global pivot mode
   help                   Show this menu
+  background             Detach console; keep VPN running
   quit                   Stop the VPN and exit
 Inside an agent, use exec PROGRAM, route accept CIDR, or route add CIDR.
 `)

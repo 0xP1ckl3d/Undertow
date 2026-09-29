@@ -45,7 +45,7 @@ Commands:
   init       Create server identity and enrollment token.
   server     Run the DNS listener and operator control API.
   agent      Connect an internal host without changing its routes.
-  client     Run the privileged IPv4 VPN on a client host.
+  client     Run the privileged IPv4 VPN; 'client attach' opens its console.
   console    Open an interactive server operator console.
   status     Show connected agents, VPN clients, and routes.
   route      Add, remove, or list agent pivot routes.
@@ -176,10 +176,11 @@ Usage: undertow client --vpn --server IP:PORT [--fingerprint HEX | --trust-on-fi
   --payload-profile MODE   auto, large, or small (default auto).
   --verify-url URL         Public IPv4 check (default https://api.ipify.org);
                            empty value skips verification.
-  --interactive            Open a console while the VPN is running.
+  --interactive            Open a console even when input is redirected;
+                           terminal starts open it by default.
   --routes-file PATH       Persist accepted client routes (default client-routes.json).
 
-  --foreground             Run attached to the terminal (default).
+  --foreground             Open an attached console when in a terminal.
   --background             Run detached with a log and PID file.
   --stop                   Gracefully stop and remove owned VPN routes.
   --log-file PATH          Default undertow-client.log.
@@ -190,7 +191,14 @@ Example: sudo undertow client --vpn --server 203.0.113.10:53 --fingerprint HEX -
 Without --internal, Internet traffic exits through server sockets. With
 --internal, only server configured pivot subnets use agents. The local .1
 address belongs to the client adapter; it is not the public egress address.
-Interactive mode is foreground only. VPN clients can view status, accept
+In a terminal, client --vpn opens the interactive console by default. The
+VPN worker stays running when you type 'background'; use 'undertow client
+attach' to return. 'quit' stops the worker and removes its routes. Ctrl+C
+asks for confirmation before stopping. Up/Down recall commands; Tab
+completes top-level commands. A scripted client without a terminal runs in
+the foreground and accepts a later 'client attach' from another terminal.
+Use 'client attach --pid-file PATH' for a custom state file.
+VPN clients can view status, accept
 advertised routes or add manual local routes through agents, change their
 own internal mode, and execute on agents that allow it. Accepted routes
 are restored on reconnect. Server global route and selection controls

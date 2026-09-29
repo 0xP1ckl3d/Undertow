@@ -94,6 +94,51 @@ func TestDeterministicLossyCarrier(t *testing.T) {
 	t.Fatal("message did not converge under simulated loss")
 }
 
+func TestRepeatedSACKDoesNotRetransmitSameGapRepeatedly(t *testing.T) {
+	sender, receiver := pair(t)
+	defer sender.Close()
+	defer receiver.Close()
+	now := time.Now()
+	var packets [][]byte
+	for i := 0; i < 5; i++ {
+		if err := sender.Send(context.Background(), []byte{byte(i)}); err != nil {
+			t.Fatal(err)
+		}
+		wire, err := sender.NextPacket(now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		packets = append(packets, wire)
+	}
+	for _, wire := range packets[1:] {
+		if err := receiver.Process(wire, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < 2; i++ {
+		ack, err := receiver.NextPacket(now.Add(time.Duration(i) * time.Millisecond))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := sender.Process(ack, now.Add(time.Duration(i+1)*time.Millisecond)); err != nil {
+			t.Fatal(err)
+		}
+		out, err := sender.NextPacket(now.Add(time.Duration(i+2) * time.Millisecond))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if i == 0 && !bytes.Equal(out, packets[0]) {
+			t.Fatal("missing fast retransmission")
+		}
+		if i == 1 && binary.BigEndian.Uint64(out[20:28]) != 0 {
+			t.Fatal("unchanged selective ACK caused a second fast retransmission")
+		}
+	}
+	if sender.Stats().Retransmits != 1 {
+		t.Fatalf("retransmits=%d", sender.Stats().Retransmits)
+	}
+}
+
 func TestLossReorderFragmentAndDuplicate(t *testing.T) {
 	a, b := pair(t)
 	defer a.Close()

@@ -32,7 +32,9 @@ var commit = "none"
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
-	writeBanner(os.Stderr)
+	if len(os.Args) < 2 || os.Getenv(backgroundModeEnv) != os.Args[1] {
+		writeBanner(os.Stderr)
+	}
 	if len(os.Args) < 2 {
 		_ = writeHelp(os.Stderr, "")
 		os.Exit(2)
@@ -275,6 +277,9 @@ func serve(args []string) error {
 		go pivot.ServeForward(ctx, l, parts[1], choose)
 	}
 	log.Printf("direct DNS listening on %s; fingerprint %s", srv.Addr(), security.Fingerprint(identity))
+	if err := markBackgroundReady(); err != nil {
+		return err
+	}
 	go func() {
 		for {
 			select {
@@ -304,7 +309,7 @@ func serve(args []string) error {
 							streamMux.Close()
 							return
 						}
-						manager.RegisterClient(p, streamMux, internal)
+						manager.RegisterClient(p, streamMux, internal, control.VPNHostname(hello))
 						pivot.ServeVPNInteractive(ctx, streamMux, func(destination netip.Addr) (*mux.Mux, bool) {
 							return manager.ResolveClientEgress(p.Session.ID(), destination)
 						}, func() bool { return true }, func(ctx context.Context, stream *mux.Stream) {
@@ -441,6 +446,10 @@ func agent(args []string) error {
 			}
 			log.Printf("trusted server fingerprint saved to %s: %s", *fingerprintFile, pinnedFingerprint)
 			savePin = false
+		}
+		if err := markBackgroundReady(); err != nil {
+			c.Close()
+			return err
 		}
 		log.Printf("connected: session=%d agent=%s", c.Session.ID(), security.Fingerprint(key))
 		if *probe || *probeCount > 0 {

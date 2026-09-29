@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,6 +16,7 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -28,6 +30,9 @@ import (
 )
 
 func clientCommand(args []string) error {
+	if len(args) > 0 && (args[0] == "attach" || args[0] == "console") {
+		return attachClient(args[1:])
+	}
 	f := flag.NewFlagSet("client", flag.ContinueOnError)
 	lifecycle := addLifecycleFlags(f, "client")
 	vpn := f.Bool("vpn", false, "route IPv4 traffic through the privileged VPN client")
@@ -57,11 +62,41 @@ func clientCommand(args []string) error {
 	if *interactive && (*lifecycle.background || *lifecycle.stop) {
 		return errors.New("--interactive requires a foreground VPN client")
 	}
+	if !*lifecycle.background && !*lifecycle.stop && os.Getenv(backgroundModeEnv) != "client" && (*interactive || isConsoleTerminal(os.Stdin)) {
+		logPath, err := filepath.Abs(*lifecycle.logFile)
+		if err != nil {
+			return err
+		}
+		pidPath, err := filepath.Abs(*lifecycle.pidFile)
+		if err != nil {
+			return err
+		}
+		childArgs := make([]string, 0, len(args))
+		for _, arg := range args {
+			if arg != "--interactive" && arg != "-interactive" {
+				childArgs = append(childArgs, arg)
+			}
+		}
+		if err := launchBackground("client", childArgs, logPath, pidPath); err != nil {
+			return err
+		}
+		return attachClientAt(pidPath)
+	}
 	handled, cleanup, err := lifecycle.handle(args)
 	if err != nil || handled {
 		return err
 	}
 	if cleanup != nil {
+		defer cleanup()
+	} else {
+		pidPath, err := filepath.Abs(*lifecycle.pidFile)
+		if err != nil {
+			return err
+		}
+		cleanup, err = startBackgroundControl(pidPath)
+		if err != nil {
+			return err
+		}
 		defer cleanup()
 	}
 	if !*vpn {
@@ -112,6 +147,28 @@ func clientCommand(args []string) error {
 		return err
 	}
 	live := &liveClientConsole{routeFile: *routesFile, routes: savedRoutes, serverIP: serverIP, tunnelPrefix: prefix.Masked(), events: make(chan string, 16)}
+	setBackgroundConsoleHandler(func(ctx context.Context, request consoleRPCRequest) consoleRPCResponse {
+		var response consoleRPCResponse
+		switch request.Action {
+		case "session":
+			response.SessionID = live.id()
+		case "call":
+			data, err := live.call(ctx, request.Method, request.Path, request.Body)
+			response.Data = data
+			if err != nil {
+				response.Error = err.Error()
+			}
+		case "routes":
+			var output bytes.Buffer
+			if err := live.routeCommand(ctx, request.Args, &output); err != nil {
+				response.Error = err.Error()
+			}
+			response.Output = output.String()
+		default:
+			response.Error = "unknown client console command"
+		}
+		return response
+	})
 	if *interactive {
 		go func() {
 			if err := runConsole(ctx, os.Stdin, os.Stdout, live.call, live.id, stop, live.routeCommand, live.events); err != nil && ctx.Err() == nil {
@@ -211,10 +268,12 @@ func runVPN(parent context.Context, c *dns.Client, serverIP netip.Addr, internal
 	defer cancel()
 	m := mux.New(ctx, c, false)
 	defer m.Close()
+	hostname, _ := os.Hostname()
 	hello, _ := json.Marshal(struct {
 		Mode     string `json:"mode"`
 		Internal bool   `json:"internal"`
-	}{"vpn", internal})
+		Hostname string `json:"hostname"`
+	}{"vpn", internal, hostname})
 	if err := m.SendControl(ctx, hello); err != nil {
 		return err
 	}
@@ -323,6 +382,9 @@ func runVPN(parent context.Context, c *dns.Client, serverIP netip.Addr, internal
 		log.Printf("public egress IP: %s", publicIP)
 	}
 	log.Printf("VPN active through %s; internal pivots=%t", serverIP, internal)
+	if err := markBackgroundReady(); err != nil {
+		return err
+	}
 	if onActive != nil {
 		onActive(m, c.Session.ID(), device)
 		defer onActive(nil, 0, nil)

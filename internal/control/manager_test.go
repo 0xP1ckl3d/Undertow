@@ -34,7 +34,7 @@ func TestVPNClientAppearsInStatusAndIsRemoved(t *testing.T) {
 	defer cancel()
 	streamMux := mux.New(ctx, &idleTransport{done: make(chan struct{})}, true)
 	peer := &dns.Peer{Session: s, AgentID: "client-id", Remote: "203.0.113.7:50000", Connected: time.Now(), LastSeen: time.Now()}
-	manager.RegisterClient(peer, streamMux, true)
+	manager.RegisterClient(peer, streamMux, true, "vpn-host")
 	request := httptest.NewRequest(http.MethodGet, "/v1/status", nil)
 	request.Header.Set("Authorization", "Bearer test-token")
 	response := httptest.NewRecorder()
@@ -46,7 +46,7 @@ func TestVPNClientAppearsInStatusAndIsRemoved(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &status); err != nil {
 		t.Fatal(err)
 	}
-	if len(status.Agents) != 0 || len(status.Clients) != 1 || status.Clients[0].SessionID != 702 || !status.Clients[0].Internal {
+	if len(status.Agents) != 0 || len(status.Clients) != 1 || status.Clients[0].SessionID != 702 || !status.Clients[0].Internal || status.Clients[0].Hostname != "vpn-host" {
 		t.Fatalf("unexpected status: %+v", status)
 	}
 	if err := manager.SetClientInternal(702, false); err != nil || manager.ClientInternal(702) {
@@ -72,11 +72,11 @@ func TestAcceptedRoutesStayLocalToVPNClient(t *testing.T) {
 	clientMux := mux.New(ctx, &idleTransport{done: make(chan struct{})}, true)
 	defer clientMux.Close()
 	clientSession, _ := session.New(802, keys, false)
-	manager.RegisterClient(&dns.Peer{Session: clientSession, AgentID: "client-a", Connected: time.Now()}, clientMux, false)
+	manager.RegisterClient(&dns.Peer{Session: clientSession, AgentID: "client-a", Connected: time.Now()}, clientMux, false, "")
 	otherMux := mux.New(ctx, &idleTransport{done: make(chan struct{})}, true)
 	defer otherMux.Close()
 	otherSession, _ := session.New(803, keys, false)
-	manager.RegisterClient(&dns.Peer{Session: otherSession, AgentID: "client-b", Connected: time.Now()}, otherMux, false)
+	manager.RegisterClient(&dns.Peer{Session: otherSession, AgentID: "client-b", Connected: time.Now()}, otherMux, false, "")
 	advertised := netip.MustParsePrefix("192.168.0.0/22")
 	manual := netip.MustParsePrefix("10.10.0.0/16")
 	if err := manager.SetClientRoute(802, manual, "agent-a", false); err == nil {

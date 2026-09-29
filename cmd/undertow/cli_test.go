@@ -3,10 +3,52 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"undertow/internal/control"
 )
+
+func TestLocalClientConsoleRPC(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "client.pid")
+	cleanup, err := startBackgroundControl(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	setBackgroundConsoleHandler(func(_ context.Context, request consoleRPCRequest) consoleRPCResponse {
+		if request.Action == "session" {
+			return consoleRPCResponse{SessionID: 42}
+		}
+		return consoleRPCResponse{Error: "unexpected action"}
+	})
+	defer setBackgroundConsoleHandler(nil)
+	response, err := callClientConsole(path, consoleRPCRequest{Action: "session"})
+	if err != nil || response.SessionID != 42 {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestStatusShowsAgentAndVPNHostnames(t *testing.T) {
+	data, err := json.Marshal(map[string]any{
+		"agents":  []control.AgentInfo{{ID: "agent-one", Hostname: "agent-host"}},
+		"clients": []control.ClientInfo{{SessionID: 7, Hostname: "vpn-host"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	if err := renderStatus(&output, data); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "agent-host") || !strings.Contains(output.String(), "vpn-host") {
+		t.Fatalf("hostnames missing from status: %s", output.String())
+	}
+}
 
 func TestDuplicateModeArgumentIsRejected(t *testing.T) {
 	for _, tc := range []struct {

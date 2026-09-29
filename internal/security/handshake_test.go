@@ -4,9 +4,43 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/hex"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestReadTokenPowerShellEncoding(t *testing.T) {
+	want := bytes.Repeat([]byte{0x3b}, 32)
+	value := hex.EncodeToString(want) + "\r\n"
+	utf16 := []byte{0xff, 0xfe}
+	for _, char := range []byte(value) {
+		utf16 = append(utf16, char, 0)
+	}
+	path := filepath.Join(t.TempDir(), "token.key")
+	if err := os.WriteFile(path, utf16, 0600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadToken(path)
+	if err != nil || !bytes.Equal(got, want) {
+		t.Fatalf("UTF-16LE token rejected: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("\xef\xbb\xbf"+value), 0600); err != nil {
+		t.Fatal(err)
+	}
+	got, err = ReadToken(path)
+	if err != nil || !bytes.Equal(got, want) {
+		t.Fatalf("UTF-8 BOM token rejected: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("short"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadToken(path); err == nil || !strings.Contains(err.Error(), "64 hexadecimal characters") {
+		t.Fatalf("invalid token error = %v", err)
+	}
+}
 
 func TestHandshakePinAuthAndCookie(t *testing.T) {
 	_, serverKey, err := ed25519.GenerateKey(rand.Reader)

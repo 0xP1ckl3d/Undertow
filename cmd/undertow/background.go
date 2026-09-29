@@ -26,6 +26,29 @@ const backgroundModeEnv = "UNDERTOW_BACKGROUND_CHILD"
 const backgroundPIDEnv = "UNDERTOW_BACKGROUND_PID_FILE"
 
 var backgroundStop <-chan struct{}
+var backgroundConsoleHandler func(context.Context, consoleRPCRequest) consoleRPCResponse
+var backgroundConsoleMu sync.RWMutex
+
+func setBackgroundConsoleHandler(handler func(context.Context, consoleRPCRequest) consoleRPCResponse) {
+	backgroundConsoleMu.Lock()
+	backgroundConsoleHandler = handler
+	backgroundConsoleMu.Unlock()
+}
+
+type consoleRPCRequest struct {
+	Action string          `json:"action"`
+	Method string          `json:"method,omitempty"`
+	Path   string          `json:"path,omitempty"`
+	Body   json.RawMessage `json:"body,omitempty"`
+	Args   []string        `json:"args,omitempty"`
+}
+
+type consoleRPCResponse struct {
+	Data      json.RawMessage `json:"data,omitempty"`
+	Output    string          `json:"output,omitempty"`
+	SessionID uint64          `json:"session_id,omitempty"`
+	Error     string          `json:"error,omitempty"`
+}
 
 type lifecycleFlags struct {
 	mode       string
@@ -82,6 +105,7 @@ type backgroundState struct {
 	PID     int    `json:"pid"`
 	Address string `json:"address"`
 	Token   string `json:"token"`
+	Ready   bool   `json:"ready"`
 }
 
 func launchBackground(mode string, args []string, logPath, pidPath string) error {
@@ -99,6 +123,10 @@ func launchBackground(mode string, args []string, logPath, pidPath string) error
 		return err
 	}
 	defer logFile.Close()
+	logOffset, err := logFile.Seek(0, io.SeekEnd)
+	if err != nil {
+		return err
+	}
 	childArgs := []string{mode}
 	for _, arg := range args {
 		if arg == "--background" || arg == "-background" || arg == "--background=true" || arg == "-background=true" {
@@ -115,29 +143,92 @@ func launchBackground(mode string, args []string, logPath, pidPath string) error
 	}
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
-	deadline := time.NewTimer(5 * time.Second)
+	startupTimeout := 15 * time.Second
+	if mode == "agent" {
+		startupTimeout = 30 * time.Second
+	} else if mode == "client" {
+		startupTimeout = 60 * time.Second
+	}
+	deadline := time.NewTimer(startupTimeout)
 	defer deadline.Stop()
 	tick := time.NewTicker(50 * time.Millisecond)
 	defer tick.Stop()
 	for {
 		select {
 		case err := <-done:
-			return fmt.Errorf("background %s exited during startup: %v (see %s)", mode, err, logPath)
+			return backgroundStartupError(mode, err, logPath, logOffset)
 		case <-tick.C:
 			raw, err := os.ReadFile(pidPath)
 			if err != nil {
 				continue
 			}
 			var state backgroundState
-			if json.Unmarshal(raw, &state) == nil && state.PID == cmd.Process.Pid {
-				fmt.Printf("%s process started: PID %d; log %s; stop with 'undertow %s --stop'\n", mode, state.PID, logPath, mode)
+			if json.Unmarshal(raw, &state) == nil && state.PID == cmd.Process.Pid && state.Ready {
+				select {
+				case err := <-done:
+					return backgroundStartupError(mode, err, logPath, logOffset)
+				default:
+				}
+				status := map[string]string{"server": "listening", "agent": "connected", "client": "VPN active"}[mode]
+				fmt.Printf("%s %s in background: PID %d; log %s; stop with 'undertow %s --stop'\n", mode, status, state.PID, logPath, mode)
 				return nil
 			}
 		case <-deadline.C:
-			_ = cmd.Process.Kill()
-			return fmt.Errorf("background %s did not register within five seconds (see %s)", mode, logPath)
+			_ = stopBackground(pidPath)
+			select {
+			case err := <-done:
+				if err != nil {
+					return backgroundStartupError(mode, err, logPath, logOffset)
+				}
+				return fmt.Errorf("background %s did not become ready within %s (log %s)", mode, startupTimeout, logPath)
+			case <-time.After(15 * time.Second):
+				return fmt.Errorf("background %s did not become ready within %s; stop was requested but PID %d is still running (log %s)", mode, startupTimeout, cmd.Process.Pid, logPath)
+			}
 		}
 	}
+}
+
+func backgroundStartupError(mode string, childErr error, logPath string, offset int64) error {
+	file, err := os.Open(logPath)
+	if err == nil {
+		defer file.Close()
+		if _, err = file.Seek(offset, io.SeekStart); err == nil {
+			data, _ := io.ReadAll(io.LimitReader(file, 16<<10))
+			for _, line := range strings.Split(string(data), "\n") {
+				if _, detail, found := strings.Cut(strings.TrimSpace(line), "error: "); found {
+					return fmt.Errorf("background %s failed: %s (log %s)", mode, detail, logPath)
+				}
+			}
+		}
+	}
+	return fmt.Errorf("background %s exited during startup: %v (log %s)", mode, childErr, logPath)
+}
+
+func markBackgroundReady() error {
+	path := os.Getenv(backgroundPIDEnv)
+	if path == "" || os.Getenv(backgroundModeEnv) == "" {
+		return nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read background state: %w", err)
+	}
+	var state backgroundState
+	if err := json.Unmarshal(raw, &state); err != nil || state.PID != os.Getpid() {
+		return errors.New("background state does not match this process")
+	}
+	if state.Ready {
+		return nil
+	}
+	state.Ready = true
+	raw, err = json.Marshal(state)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, raw, 0600); err != nil {
+		return fmt.Errorf("mark background ready: %w", err)
+	}
+	return nil
 }
 
 func startBackgroundControl(pidPath string) (func(), error) {
@@ -183,10 +274,34 @@ func startBackgroundControl(pidPath string) (func(), error) {
 			}
 			go func(conn net.Conn) {
 				defer conn.Close()
-				_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
-				line, err := bufio.NewReader(io.LimitReader(conn, 129)).ReadString('\n')
-				if err != nil || subtle.ConstantTimeCompare([]byte(strings.TrimSpace(line)), []byte(state.Token)) != 1 {
+				_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
+				line, err := bufio.NewReader(io.LimitReader(conn, 1<<20)).ReadString('\n')
+				if err != nil {
 					_, _ = io.WriteString(conn, "DENIED\n")
+					return
+				}
+				line = strings.TrimSuffix(line, "\n")
+				token, request, hasRequest := strings.Cut(line, " ")
+				if subtle.ConstantTimeCompare([]byte(token), []byte(state.Token)) != 1 {
+					_, _ = io.WriteString(conn, "DENIED\n")
+					return
+				}
+				if hasRequest {
+					var input consoleRPCRequest
+					response := consoleRPCResponse{}
+					if err := json.Unmarshal([]byte(request), &input); err != nil {
+						response.Error = "invalid console request"
+					} else {
+						backgroundConsoleMu.RLock()
+						handler := backgroundConsoleHandler
+						backgroundConsoleMu.RUnlock()
+						if handler == nil {
+							response.Error = "client console is unavailable"
+						} else {
+							response = handler(context.Background(), input)
+						}
+					}
+					_ = json.NewEncoder(conn).Encode(response)
 					return
 				}
 				_, _ = io.WriteString(conn, "OK\n")

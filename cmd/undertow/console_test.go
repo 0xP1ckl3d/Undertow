@@ -25,6 +25,57 @@ func TestConsoleSplitsQuotedExecutableArguments(t *testing.T) {
 	}
 }
 
+func TestConsoleHistoryAndTabCompletion(t *testing.T) {
+	var output bytes.Buffer
+	editor := newConsoleEditor(&output, true)
+	editor.showPrompt("undertow> ", false)
+	lines := make(chan string, 2)
+	err := editor.read(context.Background(), strings.NewReader("sta\t\n\x1b[A\n"), lines)
+	if err != io.EOF {
+		t.Fatalf("read = %v", err)
+	}
+	if first, second := <-lines, <-lines; first != "status" || second != "status" {
+		t.Fatalf("history/completion: %q, %q", first, second)
+	}
+}
+
+func TestInteractiveCtrlCNeedsConfirmation(t *testing.T) {
+	var output bytes.Buffer
+	editor := newConsoleEditor(&output, true)
+	editor.showPrompt("undertow> ", false)
+	lines := make(chan string, 1)
+	if err := editor.read(context.Background(), strings.NewReader("stat\x03nus\n"), lines); err != io.EOF {
+		t.Fatalf("declined Ctrl+C = %v", err)
+	}
+	if line := <-lines; line != "status" {
+		t.Fatalf("declined Ctrl+C lost command: %q", line)
+	}
+	if !strings.Contains(output.String(), "Stop VPN and remove its routes? [y/N]") {
+		t.Fatal("confirmation prompt missing")
+	}
+	lines = make(chan string, 1)
+	if err := editor.read(context.Background(), strings.NewReader("\x03y"), lines); err != nil {
+		t.Fatalf("confirmed Ctrl+C = %v", err)
+	}
+	if line := <-lines; line != "quit" {
+		t.Fatalf("confirmed Ctrl+C = %q", line)
+	}
+}
+
+func TestBackgroundCommandDetachesWithoutStoppingVPN(t *testing.T) {
+	stopped := false
+	caller := func(context.Context, string, string, any) ([]byte, error) {
+		return []byte(`{"agents":[]}`), nil
+	}
+	var output bytes.Buffer
+	if err := runConsole(context.Background(), strings.NewReader("background\n"), &output, caller, func() uint64 { return 9 }, func() { stopped = true }, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if stopped || !strings.Contains(output.String(), "VPN continues") {
+		t.Fatalf("background stopped VPN or failed to report detach: %q", output.String())
+	}
+}
+
 func TestInteractiveServerAgentContext(t *testing.T) {
 	var calls []string
 	caller := func(_ context.Context, method, path string, body any) ([]byte, error) {

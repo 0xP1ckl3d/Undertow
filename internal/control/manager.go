@@ -56,6 +56,7 @@ type AgentInfo struct {
 type ClientInfo struct {
 	ID             string          `json:"id"`
 	SessionID      uint64          `json:"session_id"`
+	Hostname       string          `json:"hostname,omitempty"`
 	Remote         string          `json:"remote"`
 	Internal       bool            `json:"internal"`
 	AcceptedRoutes []AcceptedRoute `json:"accepted_routes,omitempty"`
@@ -81,6 +82,7 @@ type clientState struct {
 	peer     *dns.Peer
 	mux      *mux.Mux
 	internal bool
+	hostname string
 	accepted map[netip.Prefix]AcceptedRoute
 }
 
@@ -106,9 +108,9 @@ func NewManager(routes *routing.Table, device RouteDevice, virtualNetwork netip.
 	return &Manager{agents: make(map[string]*agentState), clients: make(map[uint64]*clientState), routes: routes, device: device, virtualNetwork: virtualNetwork.Masked(), proxyIP: proxyIP, virtualByAgent: make(map[string]netip.Addr), virtualUsed: make(map[netip.Addr]bool)}
 }
 
-func (m *Manager) RegisterClient(peer *dns.Peer, streamMux *mux.Mux, internal bool) {
+func (m *Manager) RegisterClient(peer *dns.Peer, streamMux *mux.Mux, internal bool, hostname string) {
 	m.mu.Lock()
-	m.clients[peer.Session.ID()] = &clientState{peer: peer, mux: streamMux, internal: internal, accepted: make(map[netip.Prefix]AcceptedRoute)}
+	m.clients[peer.Session.ID()] = &clientState{peer: peer, mux: streamMux, internal: internal, hostname: safeHostname(hostname), accepted: make(map[netip.Prefix]AcceptedRoute)}
 	m.mu.Unlock()
 }
 
@@ -223,7 +225,7 @@ func (m *Manager) ClientList() []ClientInfo {
 		}
 		sort.Slice(accepted, func(i, j int) bool { return accepted[i].Prefix < accepted[j].Prefix })
 		out = append(out, ClientInfo{
-			ID: p.AgentID, SessionID: p.ID, Remote: p.Remote, Internal: state.internal,
+			ID: p.AgentID, SessionID: p.ID, Hostname: state.hostname, Remote: p.Remote, Internal: state.internal,
 			AcceptedRoutes: accepted,
 			Connected:      p.Connected, LastSeen: p.LastSeen, RTT: p.Transport.RTT,
 			RXBytes: p.Transport.RXBytes, TXBytes: p.Transport.TXBytes,
@@ -324,7 +326,7 @@ func (m *Manager) UpdateInventory(id string, streamMux *mux.Mux, b []byte) {
 	}
 	m.mu.Lock()
 	if state := m.agents[id]; state != nil && state.mux == streamMux {
-		state.inventory.Hostname = info.Hostname
+		state.inventory.Hostname = safeHostname(info.Hostname)
 		state.inventory.OS = info.OS
 		state.inventory.Arch = info.Arch
 		state.inventory.Interfaces = append([]string(nil), info.Interfaces...)
@@ -346,6 +348,28 @@ func VPNInternal(b []byte) bool {
 	}
 	_ = json.Unmarshal(b, &hello)
 	return hello.Internal
+}
+
+func VPNHostname(b []byte) string {
+	var hello struct {
+		Hostname string `json:"hostname"`
+	}
+	if json.Unmarshal(b, &hello) != nil {
+		return ""
+	}
+	return safeHostname(hello.Hostname)
+}
+
+func safeHostname(value string) string {
+	if len(value) > 253 {
+		return ""
+	}
+	for _, char := range value {
+		if char <= ' ' || char == 0x7f {
+			return ""
+		}
+	}
+	return value
 }
 
 func (m *Manager) Unregister(id string, streamMux *mux.Mux) {

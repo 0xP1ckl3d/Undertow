@@ -144,9 +144,9 @@ func renderStatus(w io.Writer, data []byte) error {
 		}
 	}
 	fmt.Fprintf(w, "\nVPN clients (%d)\n", len(status.Clients))
-	fmt.Fprintf(w, "%-20s %-18s %-8s %8s %8s %7s %6s %6s %6s %8s\n", "Session", "Remote", "Internal", "RX", "TX", "Streams", "Queued", "Flight", "CWND", "Retrans")
+	fmt.Fprintf(w, "%-20s %-24s %-18s %-8s %8s %8s %7s %6s %6s %6s %8s\n", "Session", "Host", "Remote", "Internal", "RX", "TX", "Streams", "Queued", "Flight", "CWND", "Retrans")
 	for _, c := range status.Clients {
-		fmt.Fprintf(w, "%-20d %-18s %-8t %8d %8d %7d %6d %6d %6d %8d\n", c.SessionID, c.Remote, c.Internal, c.RXBytes, c.TXBytes, c.Streams, c.Queued, c.InFlight, c.Window, c.Retransmits)
+		fmt.Fprintf(w, "%-20d %-24s %-18s %-8t %8d %8d %7d %6d %6d %6d %8d\n", c.SessionID, c.Hostname, c.Remote, c.Internal, c.RXBytes, c.TXBytes, c.Streams, c.Queued, c.InFlight, c.Window, c.Retransmits)
 		for _, route := range c.AcceptedRoutes {
 			fmt.Fprintf(w, "  accepted %s via %s\n", route.Prefix, route.AgentID)
 		}
