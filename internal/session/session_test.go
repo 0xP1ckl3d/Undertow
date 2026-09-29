@@ -51,6 +51,50 @@ func TestAdaptiveFragmentBackoff(t *testing.T) {
 	}
 }
 
+func TestRetransmittedPacketRestoresLostACK(t *testing.T) {
+	sender, receiver := pair(t)
+	defer sender.Close()
+	defer receiver.Close()
+	if err := sender.Send(context.Background(), []byte("lost acknowledgement")); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	wire, err := sender.NextPacket(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := receiver.Process(wire, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := receiver.NextPacket(now); err != nil { // ACK lost on the path
+		t.Fatal(err)
+	}
+	retryTime := now.Add(time.Second)
+	retransmit, err := sender.NextPacket(retryTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(retransmit, wire) {
+		t.Fatal("expected identical encrypted retransmission")
+	}
+	if err := receiver.Process(retransmit, retryTime); err != nil {
+		t.Fatal(err)
+	}
+	if !receiver.HasWork(retryTime) {
+		t.Fatal("duplicate packet did not trigger a fresh ACK")
+	}
+	ack, err := receiver.NextPacket(retryTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sender.Process(ack, retryTime); err != nil {
+		t.Fatal(err)
+	}
+	if sender.Stats().InFlight != 0 {
+		t.Fatal("fresh ACK did not release retransmitted packet")
+	}
+}
+
 // This deterministic carrier drops and reorders encrypted packets without waiting
 // for wall-clock timers, so retransmission behavior is repeatable in CI.
 func TestDeterministicLossyCarrier(t *testing.T) {

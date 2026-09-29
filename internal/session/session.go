@@ -397,6 +397,10 @@ func (s *Session) Process(wire []byte, now time.Time) error {
 	}
 	if s.seen[nonceSeq] {
 		s.stats.Duplicates++
+		// The earlier ACK may have been lost. A retransmission must elicit a
+		// fresh packet carrying the current cumulative/selective ACK state.
+		s.ackDirty = true
+		s.signal()
 		return nil
 	}
 	if s.maxSeen > 4096 && nonceSeq+4096 < s.maxSeen {
