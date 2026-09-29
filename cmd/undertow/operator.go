@@ -142,6 +142,11 @@ func renderStatus(w io.Writer, data []byte) error {
 		for _, prefix := range a.AdvertisedRoutes {
 			fmt.Fprintf(w, "  advertised %s via %s\n", prefix, a.ID)
 		}
+		if a.Capabilities != nil {
+			fmt.Fprintf(w, "  capabilities supported=%s allowed=%s\n", strings.Join(a.Capabilities.Supported, ","), strings.Join(a.Capabilities.Allowed, ","))
+		} else {
+			fmt.Fprintln(w, "  capabilities unknown (older agent)")
+		}
 	}
 	fmt.Fprintf(w, "\nVPN clients (%d)\n", len(status.Clients))
 	fmt.Fprintf(w, "%-20s %-24s %-18s %-8s %8s %8s %7s %6s %6s %6s %8s\n", "Session", "Host", "Remote", "Internal", "RX", "TX", "Streams", "Queued", "Flight", "CWND", "Retrans")

@@ -32,25 +32,26 @@ type RouteDevice interface {
 }
 
 type AgentInfo struct {
-	ID               string        `json:"id"`
-	SessionID        uint64        `json:"session_id"`
-	VirtualIP        string        `json:"virtual_ip"`
-	Remote           string        `json:"remote"`
-	Hostname         string        `json:"hostname,omitempty"`
-	OS               string        `json:"os,omitempty"`
-	Arch             string        `json:"arch,omitempty"`
-	Interfaces       []string      `json:"interfaces,omitempty"`
-	AdvertisedRoutes []string      `json:"advertised_routes,omitempty"`
-	Connected        time.Time     `json:"connected"`
-	LastSeen         time.Time     `json:"last_seen"`
-	RTT              time.Duration `json:"rtt_ns"`
-	RXBytes          uint64        `json:"rx_bytes"`
-	TXBytes          uint64        `json:"tx_bytes"`
-	Retransmits      uint64        `json:"retransmits"`
-	Streams          int           `json:"streams"`
-	InFlight         int           `json:"in_flight"`
-	Queued           int           `json:"queued"`
-	Window           int           `json:"congestion_window"`
+	ID               string                  `json:"id"`
+	SessionID        uint64                  `json:"session_id"`
+	VirtualIP        string                  `json:"virtual_ip"`
+	Remote           string                  `json:"remote"`
+	Hostname         string                  `json:"hostname,omitempty"`
+	OS               string                  `json:"os,omitempty"`
+	Arch             string                  `json:"arch,omitempty"`
+	Interfaces       []string                `json:"interfaces,omitempty"`
+	AdvertisedRoutes []string                `json:"advertised_routes,omitempty"`
+	Capabilities     *pivot.CapabilityReport `json:"capabilities,omitempty"`
+	Connected        time.Time               `json:"connected"`
+	LastSeen         time.Time               `json:"last_seen"`
+	RTT              time.Duration           `json:"rtt_ns"`
+	RXBytes          uint64                  `json:"rx_bytes"`
+	TXBytes          uint64                  `json:"tx_bytes"`
+	Retransmits      uint64                  `json:"retransmits"`
+	Streams          int                     `json:"streams"`
+	InFlight         int                     `json:"in_flight"`
+	Queued           int                     `json:"queued"`
+	Window           int                     `json:"congestion_window"`
 }
 
 type ClientInfo struct {
@@ -87,9 +88,10 @@ type clientState struct {
 }
 
 type agentState struct {
-	peer      *dns.Peer
-	mux       *mux.Mux
-	inventory AgentInfo
+	peer           *dns.Peer
+	mux            *mux.Mux
+	inventory      AgentInfo
+	inventoryReady bool
 }
 type Manager struct {
 	mu             sync.RWMutex
@@ -155,6 +157,9 @@ func (m *Manager) SetClientRoute(sessionID uint64, prefix netip.Prefix, agentID 
 	if agent == nil {
 		return errors.New("agent is not connected")
 	}
+	if !agentPivotAllowed(agent) {
+		return errors.New("agent pivot capability is disabled")
+	}
 	advertised := false
 	for _, route := range agent.inventory.AdvertisedRoutes {
 		if route == prefix.String() {
@@ -199,11 +204,13 @@ func (m *Manager) ResolveClientEgress(sessionID uint64, destination netip.Addr) 
 	}
 	if agentID != "" {
 		agent := m.agents[agentID]
-		m.mu.RUnlock()
-		if agent == nil {
-			return nil, true
+		allowed := agentPivotAllowed(agent)
+		var upstream *mux.Mux
+		if allowed {
+			upstream = agent.mux
 		}
-		return agent.mux, true
+		m.mu.RUnlock()
+		return upstream, true
 	}
 	internal := client.internal
 	m.mu.RUnlock()
@@ -262,25 +269,21 @@ func (m *Manager) Register(peer *dns.Peer, streamMux *mux.Mux) {
 	}
 	peer.SetVirtualIP(virtual.String())
 	old := m.agents[id]
+	for _, route := range m.routes.List() {
+		if route.AgentID != id || !route.Active {
+			continue
+		}
+		if m.device != nil {
+			if err := m.device.DelRoute(route.Prefix.String()); err != nil {
+				log.Printf("route cleanup %s: %v", route.Prefix, err)
+			}
+		}
+		m.routes.SetRouteActive(route.Prefix, false)
+	}
 	m.agents[id] = &agentState{peer: peer, mux: streamMux}
 	m.mu.Unlock()
 	if old != nil {
 		old.mux.Close()
-	}
-	for _, r := range m.routes.List() {
-		if r.AgentID != id {
-			continue
-		}
-		if r.Active {
-			continue
-		}
-		if m.device != nil {
-			if err := m.device.AddRoute(r.Prefix.String()); err != nil {
-				log.Printf("route %s remains inactive: %v", r.Prefix, err)
-				continue
-			}
-		}
-		m.routes.SetRouteActive(r.Prefix, true)
 	}
 	go m.receiveInventory(id, streamMux)
 	go func() { <-streamMux.Done(); m.Unregister(id, streamMux) }()
@@ -331,8 +334,46 @@ func (m *Manager) UpdateInventory(id string, streamMux *mux.Mux, b []byte) {
 		state.inventory.Arch = info.Arch
 		state.inventory.Interfaces = append([]string(nil), info.Interfaces...)
 		state.inventory.AdvertisedRoutes = validRoutes
+		state.inventory.Capabilities = info.Capabilities
+		state.inventoryReady = true
+		for _, route := range m.routes.List() {
+			if route.AgentID != id || route.Active == agentPivotAllowed(state) {
+				continue
+			}
+			if agentPivotAllowed(state) {
+				if m.device != nil {
+					if err := m.device.AddRoute(route.Prefix.String()); err != nil {
+						log.Printf("route %s remains inactive: %v", route.Prefix, err)
+						continue
+					}
+				}
+				m.routes.SetRouteActive(route.Prefix, true)
+			} else {
+				if m.device != nil {
+					if err := m.device.DelRoute(route.Prefix.String()); err != nil {
+						log.Printf("route cleanup %s: %v", route.Prefix, err)
+					}
+				}
+				m.routes.SetRouteActive(route.Prefix, false)
+			}
+		}
 	}
 	m.mu.Unlock()
+}
+
+func agentPivotAllowed(state *agentState) bool {
+	if state == nil || !state.inventoryReady {
+		return false
+	}
+	if state.inventory.Capabilities == nil {
+		return true // Older agents did not report capability state.
+	}
+	for _, name := range state.inventory.Capabilities.Allowed {
+		if name == "pivot" {
+			return true
+		}
+	}
+	return false
 }
 
 func IsVPNHello(b []byte) bool {
@@ -467,10 +508,14 @@ func (m *Manager) AddRoute(prefix netip.Prefix, agentID string) error {
 	if agentID == "" {
 		return errors.New("agent ID required; use --via or agent select")
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if err := m.routes.Add(prefix, agentID); err != nil {
 		return err
 	}
-	if m.Get(agentID) != nil {
+	state := m.agents[agentID]
+	active := agentPivotAllowed(state)
+	if active {
 		if m.device != nil {
 			if err := m.device.AddRoute(prefix.Masked().String()); err != nil {
 				m.routes.Delete(prefix)

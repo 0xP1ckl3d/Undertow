@@ -84,7 +84,7 @@ Connection and identity:
 
 Use token or password enrollment for real deployments. With --auth none,
 anyone who reaches the listener can join, access network paths, and run
-commands on agents unless those agents use --deny-exec.
+commands on agents unless those agents restrict capabilities with --deny.
 
 Internal pivot:
   --tun                     Create server proxy TUN/Wintun for routed pivots.
@@ -128,7 +128,8 @@ Usage: undertow agent --server IP:PORT [--fingerprint HEX | --trust-on-first-use
   --password TEXT         Password mode credential; visible in process list.
   --password-file PATH    Read password from file instead.
   --agent-key PATH         Agent Ed25519 identity (default agent.key).
-  --deny-exec              Disable operator executable commands.
+  --deny LIST              Disable agent capabilities independently. Names:
+                           pivot,exec,upload,download (comma-separated).
   --advertise-route CIDR    Offer an additional IPv4 route to VPN clients;
                            repeatable. Up IPv4 interfaces are also offered.
   --domain NAME            Match server --domain (default t.undertow.invalid).
@@ -148,8 +149,10 @@ Example: undertow agent --server 203.0.113.10:53 --fingerprint HEX --token-file 
 
 The agent changes no interface or host route. After it connects, run
 'undertow status' on the server and add an internal route through its ID.
-Operator command execution is enabled by default; use --deny-exec to turn
-it off on this agent. Connected VPN clients can request commands.
+All implemented capabilities are enabled by default. For example, use
+--deny=exec,upload to reject those operations while allowing downloads.
+Connected VPN clients can request allowed operations. 'status' shows the
+agent's supported and allowed capabilities.
 Operator subcommands: 'undertow agent list|show ID|select ID'.
 `
 	case "client":

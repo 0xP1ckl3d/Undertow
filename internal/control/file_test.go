@@ -25,7 +25,7 @@ func fileTestMuxPair(ctx context.Context) (*mux.Mux, *mux.Mux) {
 }
 
 func TestVPNClientRelaysFileToAgent(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	manager := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
 	serverAgent, agent := fileTestMuxPair(ctx)
@@ -48,7 +48,8 @@ func TestVPNClientRelaysFileToAgent(t *testing.T) {
 	source := filepath.Join(dir, "source")
 	remote := filepath.Join(dir, "remote")
 	download := filepath.Join(dir, "download")
-	content := bytes.Repeat([]byte("transfer-through-server\x00"), 8192)
+	// This crosses thousands of stream frames and exercises relay flow control.
+	content := bytes.Repeat([]byte("transfer-through-server\x00"), 1<<18)
 	if err := os.WriteFile(source, content, 0600); err != nil {
 		t.Fatal(err)
 	}

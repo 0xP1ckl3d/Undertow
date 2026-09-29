@@ -11,18 +11,20 @@ import (
 	"runtime"
 
 	"undertow/internal/mux"
+	"undertow/internal/pivot"
 )
 
 // SendInventory reports candidate routes; clients must accept them locally.
-func SendInventory(ctx context.Context, streamMux *mux.Mux, explicit []string) error {
+func SendInventory(ctx context.Context, streamMux *mux.Mux, explicit []string, caps pivot.Capabilities) error {
 	hostname, _ := os.Hostname()
 	info := struct {
-		Hostname         string   `json:"hostname"`
-		OS               string   `json:"os"`
-		Arch             string   `json:"arch"`
-		Interfaces       []string `json:"interfaces,omitempty"`
-		AdvertisedRoutes []string `json:"advertised_routes,omitempty"`
-	}{Hostname: hostname, OS: runtime.GOOS, Arch: runtime.GOARCH}
+		Hostname         string                 `json:"hostname"`
+		OS               string                 `json:"os"`
+		Arch             string                 `json:"arch"`
+		Interfaces       []string               `json:"interfaces,omitempty"`
+		AdvertisedRoutes []string               `json:"advertised_routes,omitempty"`
+		Capabilities     pivot.CapabilityReport `json:"capabilities"`
+	}{Hostname: hostname, OS: runtime.GOOS, Arch: runtime.GOARCH, Capabilities: caps.Report()}
 	seen := make(map[string]bool)
 	for _, raw := range explicit {
 		prefix, err := netip.ParsePrefix(raw)
@@ -58,6 +60,10 @@ func SendInventory(ctx context.Context, streamMux *mux.Mux, explicit []string) e
 		if len(info.Interfaces) >= 16 {
 			break
 		}
+	}
+	if !caps.Pivot {
+		info.AdvertisedRoutes = nil
+		explicitCount = 0
 	}
 	for {
 		data, err := json.Marshal(info)

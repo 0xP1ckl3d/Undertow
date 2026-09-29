@@ -68,7 +68,10 @@ func TestAcceptedRoutesStayLocalToVPNClient(t *testing.T) {
 	var keys security.Keys
 	agentSession, _ := session.New(801, keys, false)
 	manager.Register(&dns.Peer{Session: agentSession, AgentID: "agent-a", Connected: time.Now()}, agentMux)
-	manager.UpdateInventory("agent-a", agentMux, []byte(`{"advertised_routes":["192.168.0.0/22"]}`))
+	manager.UpdateInventory("agent-a", agentMux, []byte(`{"advertised_routes":["192.168.0.0/22"],"capabilities":{"supported":["pivot","exec","upload","download"],"allowed":["pivot","download"]}}`))
+	if agents := manager.AgentList(); len(agents) != 1 || agents[0].Capabilities == nil || len(agents[0].Capabilities.Allowed) != 2 {
+		t.Fatalf("agent capabilities were not reflected in status: %+v", agents)
+	}
 	clientMux := mux.New(ctx, &idleTransport{done: make(chan struct{})}, true)
 	defer clientMux.Close()
 	clientSession, _ := session.New(802, keys, false)
@@ -104,6 +107,42 @@ func TestAcceptedRoutesStayLocalToVPNClient(t *testing.T) {
 	}
 	if got, ok := manager.ResolveClientEgress(802, netip.MustParseAddr("10.10.4.9")); ok || got != nil {
 		t.Fatal("removed client route still resolves")
+	}
+}
+
+func TestDeniedPivotDeactivatesConfiguredRoute(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	device := &routeDevice{routes: make(map[string]bool)}
+	manager := NewManager(routing.New(nil), device, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	prefix := netip.MustParsePrefix("10.10.0.0/16")
+	if err := manager.AddRoute(prefix, "agent-a"); err != nil {
+		t.Fatal(err)
+	}
+	streamMux := mux.New(ctx, &idleTransport{done: make(chan struct{})}, true)
+	defer streamMux.Close()
+	var keys security.Keys
+	s, err := session.New(811, keys, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.Register(&dns.Peer{Session: s, AgentID: "agent-a", Connected: time.Now()}, streamMux)
+	if device.Has(prefix.String()) || manager.routes.List()[0].Active {
+		t.Fatal("configured route activated before agent inventory arrived")
+	}
+	manager.UpdateInventory("agent-a", streamMux, []byte(`{"capabilities":{"supported":["pivot","exec","upload","download"],"allowed":["pivot","exec","upload","download"]}}`))
+	if !device.Has(prefix.String()) || !manager.routes.List()[0].Active {
+		t.Fatal("configured route did not activate after pivot was allowed")
+	}
+	manager.UpdateInventory("agent-a", streamMux, []byte(`{"capabilities":{"supported":["pivot","exec","upload","download"],"allowed":["exec","upload","download"]}}`))
+	if device.Has(prefix.String()) || manager.routes.List()[0].Active {
+		t.Fatal("route remained active after agent denied pivot")
+	}
+	if err := manager.AddRoute(netip.MustParsePrefix("10.20.0.0/16"), "agent-a"); err != nil {
+		t.Fatal(err)
+	}
+	if manager.routes.List()[1].Active {
+		t.Fatal("new route activated through agent with pivot disabled")
 	}
 }
 
@@ -164,6 +203,10 @@ func TestRouteActivationAndControlAuthentication(t *testing.T) {
 	if peer.Snapshot().VirtualIP != "172.16.254.2" {
 		t.Fatalf("virtual IP: %s", peer.Snapshot().VirtualIP)
 	}
+	if table.List()[0].Active || device.Has(prefix.String()) {
+		t.Fatal("route activated before agent inventory arrived")
+	}
+	manager.UpdateInventory("agent-a", streamMux, []byte(`{"hostname":"test-agent"}`))
 	if !table.List()[0].Active || !device.Has(prefix.String()) {
 		t.Fatal("route did not activate")
 	}

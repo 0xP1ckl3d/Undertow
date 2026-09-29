@@ -180,7 +180,7 @@ func TransferFile(parent context.Context, session *mux.Mux, agentID, operation, 
 	return FileMessage{OK: true, Size: ready.Size, SHA256: hex.EncodeToString(expected)}, nil
 }
 
-func serveFile(ctx context.Context, stream *mux.Stream) {
+func serveFile(ctx context.Context, stream *mux.Stream, caps Capabilities) {
 	defer stream.Close()
 	if err := stream.AcceptOpen(ctx); err != nil {
 		return
@@ -195,7 +195,11 @@ func serveFile(ctx context.Context, stream *mux.Stream) {
 		fileError(stream, reader, errors.New("invalid agent file path"))
 		return
 	}
-	if request.Operation == "upload" && request.Size >= 0 {
+	if request.Operation == "upload" && !caps.Upload {
+		fileError(stream, reader, errors.New("agent upload is disabled"))
+	} else if request.Operation == "download" && !caps.Download {
+		fileError(stream, reader, errors.New("agent download is disabled"))
+	} else if request.Operation == "upload" && request.Size >= 0 {
 		serveUpload(stream, reader, request)
 	} else if request.Operation == "download" {
 		serveDownload(stream, request)

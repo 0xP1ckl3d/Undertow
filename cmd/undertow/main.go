@@ -195,7 +195,7 @@ func serve(args []string) error {
 	}
 	log.Printf("client enrollment mode: %s", *authMode)
 	if *authMode == "none" {
-		log.Print("WARNING: --auth none allows anyone who can reach this server to enroll, access the network, run commands, and transfer files on agents unless those agents use --deny-exec; use token or password enrollment for real deployments")
+		log.Print("WARNING: --auth none allows anyone who can reach this server to enroll, access the network, run commands, and transfer files on agents unless agents restrict those capabilities with --deny; use token or password enrollment for real deployments")
 	}
 	localNetworks, err := tun.ExistingNetworks()
 	if err != nil {
@@ -379,7 +379,7 @@ func agent(args []string) error {
 	interval := f.Duration("probe-interval", time.Second, "time between probes; 0 sends as fast as the window allows")
 	profileFlag := f.String("payload-profile", "auto", "DNS payload profile: auto, large, or small")
 	probe := f.Bool("probe", false, "run Phase 1 echo probes instead of TCP socket handling")
-	denyExec := f.Bool("deny-exec", false, "disable remote command execution and file transfer on this agent")
+	deny := f.String("deny", "", "comma-separated agent capabilities to disable: pivot,exec,upload,download")
 	var advertise advertisedRoutes
 	f.Var(&advertise, "advertise-route", "IPv4 CIDR offered for client acceptance; repeatable")
 	if err := f.Parse(args); err != nil {
@@ -387,6 +387,10 @@ func agent(args []string) error {
 	}
 	if f.NArg() != 0 {
 		return fmt.Errorf("unexpected agent argument %q; use 'undertow agent --server ...'", f.Arg(0))
+	}
+	caps, err := pivot.ParseDenied(*deny)
+	if err != nil {
+		return err
 	}
 	handled, cleanup, err := lifecycle.handle(args)
 	if err != nil || handled {
@@ -460,10 +464,10 @@ func agent(args []string) error {
 			err = runProbes(ctx, c, *probeSize, *probeCount, *interval)
 		} else {
 			streamMux := mux.New(ctx, c, false)
-			if sendErr := control.SendInventory(ctx, streamMux, advertise); sendErr != nil {
+			if sendErr := control.SendInventory(ctx, streamMux, advertise, caps); sendErr != nil {
 				log.Printf("inventory: %v", sendErr)
 			}
-			pivot.ServeAgentWithExec(ctx, streamMux, !*denyExec)
+			pivot.ServeAgentWithCapabilities(ctx, streamMux, caps)
 			streamMux.Close()
 			err = io.EOF
 		}

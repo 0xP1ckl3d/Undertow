@@ -16,17 +16,25 @@ import (
 // ServeAgent handles stream opens with ordinary TCP sockets. It never listens
 // on the agent or changes its host routes or adapters.
 func ServeAgent(ctx context.Context, m *mux.Mux) {
-	ServeAgentWithExec(ctx, m, true)
+	ServeAgentWithCapabilities(ctx, m, DefaultCapabilities())
 }
 
+// ServeAgentWithExec remains for internal callers that used the former
+// combined execution/file-transfer switch.
 func ServeAgentWithExec(ctx context.Context, m *mux.Mux, allowExec bool) {
+	caps := DefaultCapabilities()
+	caps.Exec, caps.Upload, caps.Download = allowExec, allowExec, allowExec
+	ServeAgentWithCapabilities(ctx, m, caps)
+}
+
+func ServeAgentWithCapabilities(ctx context.Context, m *mux.Mux, caps Capabilities) {
 	for {
 		s, err := m.Accept(ctx)
 		if err != nil {
 			return
 		}
 		if s.Destination() == ExecDestination {
-			if !allowExec {
+			if !caps.Exec {
 				s.Fail(errors.New("agent command execution is disabled"))
 				continue
 			}
@@ -34,11 +42,15 @@ func ServeAgentWithExec(ctx context.Context, m *mux.Mux, allowExec bool) {
 			continue
 		}
 		if s.Destination() == FileDestination {
-			if !allowExec {
+			if !caps.Upload && !caps.Download {
 				s.Fail(errors.New("agent file transfer is disabled"))
 				continue
 			}
-			go serveFile(ctx, s)
+			go serveFile(ctx, s, caps)
+			continue
+		}
+		if !caps.Pivot {
+			s.Fail(errors.New("agent pivot is disabled"))
 			continue
 		}
 		go serveSocket(ctx, s)

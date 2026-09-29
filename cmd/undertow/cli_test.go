@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"undertow/internal/control"
+	"undertow/internal/pivot"
 )
 
 func TestLocalClientConsoleRPC(t *testing.T) {
@@ -34,8 +35,9 @@ func TestLocalClientConsoleRPC(t *testing.T) {
 }
 
 func TestStatusShowsAgentAndVPNHostnames(t *testing.T) {
+	report := pivot.Capabilities{Pivot: true, Exec: false, Upload: false, Download: true}.Report()
 	data, err := json.Marshal(map[string]any{
-		"agents":  []control.AgentInfo{{ID: "agent-one", Hostname: "agent-host"}},
+		"agents":  []control.AgentInfo{{ID: "agent-one", Hostname: "agent-host", Capabilities: &report}},
 		"clients": []control.ClientInfo{{SessionID: 7, Hostname: "vpn-host"}},
 	})
 	if err != nil {
@@ -47,6 +49,9 @@ func TestStatusShowsAgentAndVPNHostnames(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), "agent-host") || !strings.Contains(output.String(), "vpn-host") {
 		t.Fatalf("hostnames missing from status: %s", output.String())
+	}
+	if !strings.Contains(output.String(), "supported=pivot,exec,upload,download allowed=pivot,download") {
+		t.Fatalf("agent capabilities missing from status: %s", output.String())
 	}
 }
 
