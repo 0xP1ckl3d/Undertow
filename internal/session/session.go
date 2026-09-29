@@ -23,6 +23,9 @@ const (
 	maxQueued    = 4096
 	maxPriority  = 256
 	maxPending   = 64
+	// Completed mux messages can briefly outpace the mux reader during a
+	// 100-flow burst. This queue is separate from the 64-packet wire window.
+	maxDelivered = 128
 )
 
 var ErrClosed = errors.New("session closed")
@@ -140,7 +143,7 @@ func NewWithFragment(id uint64, keys security.Keys, client bool, size int) (*Ses
 	if err != nil {
 		return nil, err
 	}
-	return &Session{id: id, tx: tx, rx: rx, txPrefix: txPrefix, rxPrefix: rxPrefix, received: make(map[uint64]bool), seen: make(map[uint64]bool), pending: make(map[uint64]*pending), reassembly: make(map[uint64]*assembly), deliver: make(chan []byte, 64), wake: make(chan struct{}, 1), done: make(chan struct{}), cwnd: 16, fragmentSize: size, fragmentCeiling: size, peerWindow: maxPending}, nil
+	return &Session{id: id, tx: tx, rx: rx, txPrefix: txPrefix, rxPrefix: rxPrefix, received: make(map[uint64]bool), seen: make(map[uint64]bool), pending: make(map[uint64]*pending), reassembly: make(map[uint64]*assembly), deliver: make(chan []byte, maxDelivered), wake: make(chan struct{}, 1), done: make(chan struct{}), cwnd: 16, fragmentSize: size, fragmentCeiling: size, peerWindow: maxPending}, nil
 }
 
 func NewAdaptive(id uint64, keys security.Keys, client bool, size int) (*Session, error) {

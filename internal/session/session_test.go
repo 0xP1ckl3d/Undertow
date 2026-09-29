@@ -95,6 +95,42 @@ func TestRetransmittedPacketRestoresLostACK(t *testing.T) {
 	}
 }
 
+func TestCompletedMessageBurstKeepsPacketWindowBounded(t *testing.T) {
+	sender, receiver := pair(t)
+	defer sender.Close()
+	defer receiver.Close()
+	now := time.Now()
+	for i := 0; i < 100; i++ {
+		message := []byte{byte(i + 1)}
+		if err := sender.Send(context.Background(), message); err != nil {
+			t.Fatal(err)
+		}
+		wire, err := sender.NextPacket(now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := receiver.Process(wire, now); err != nil {
+			t.Fatalf("message %d: %v", i, err)
+		}
+		ack, err := receiver.NextPacket(now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := sender.Process(ack, now); err != nil {
+			t.Fatal(err)
+		}
+		if receiver.Stats().ReceiveWindow != maxPending {
+			t.Fatal("packet receive window changed during message burst")
+		}
+	}
+	for i := 0; i < 100; i++ {
+		message, err := receiver.Recv(context.Background())
+		if err != nil || !bytes.Equal(message, []byte{byte(i + 1)}) {
+			t.Fatalf("message %d: %x, %v", i, message, err)
+		}
+	}
+}
+
 // This deterministic carrier drops and reorders encrypted packets without waiting
 // for wall-clock timers, so retransmission behavior is repeatable in CI.
 func TestDeterministicLossyCarrier(t *testing.T) {
