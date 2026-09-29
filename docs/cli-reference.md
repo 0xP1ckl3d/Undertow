@@ -122,7 +122,7 @@ These commands run on the server host and use its loopback API. All accept `--co
 | `undertow status [--json]` | Connected agents and VPN clients separately, their hostnames, selected agent, route state, counters. |
 | `undertow console` | Interactive console attached to the running server's loopback API. |
 | `undertow agent list [--json]` | Alias of `status`; also shows VPN clients. |
-| `undertow agent show AGENT_ID` | Detailed JSON for one agent. |
+| `undertow agent show AGENT_ID [--json]` | Detailed human view, or JSON, for one agent. |
 | `undertow agent select AGENT_ID` | Set selected agent for operations that use the selection. |
 | `undertow route add CIDR [--via AGENT_ID]` | Configure an internal prefix; explicit owner recommended. |
 | `undertow route list [--json]` | Show configured and active routes. |
