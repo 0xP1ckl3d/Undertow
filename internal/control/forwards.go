@@ -84,6 +84,8 @@ func (m *Manager) AddClientForward(ctx context.Context, clientID uint64, agentID
 		return ForwardInfo{}, err
 	}
 	if result.Error != "" {
+		_, _ = io.Copy(io.Discard, stream)
+		_ = stream.CloseWrite()
 		_ = stream.Close()
 		return ForwardInfo{}, errors.New(result.Error)
 	}

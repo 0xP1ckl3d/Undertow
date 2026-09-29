@@ -78,16 +78,16 @@ func ServeAgentListener(ctx context.Context, session *mux.Mux, stream *mux.Strea
 	}
 	var request ListenerRequest
 	if err := json.NewDecoder(io.LimitReader(stream, 1024)).Decode(&request); err != nil {
-		_ = json.NewEncoder(stream).Encode(ListenerResult{Error: "invalid listener request"})
+		writeListenerError(stream, "invalid listener request")
 		return
 	}
 	if _, valid := ForwardID(AgentForwardDestination(request.ID), "forward"); !valid || ValidateForwardAddress(request.Bind, false) != nil {
-		_ = json.NewEncoder(stream).Encode(ListenerResult{Error: "invalid listener address or ID"})
+		writeListenerError(stream, "invalid listener address or ID")
 		return
 	}
 	listener, err := net.Listen("tcp4", request.Bind)
 	if err != nil {
-		_ = json.NewEncoder(stream).Encode(ListenerResult{Error: err.Error()})
+		writeListenerError(stream, err.Error())
 		return
 	}
 	defer listener.Close()
@@ -118,6 +118,12 @@ func ServeAgentListener(ctx context.Context, session *mux.Mux, stream *mux.Strea
 			bridge(ctx, conn, upstream)
 		}(conn)
 	}
+}
+
+func writeListenerError(stream *mux.Stream, message string) {
+	_ = json.NewEncoder(stream).Encode(ListenerResult{Error: message})
+	_ = stream.CloseWrite()
+	_, _ = io.Copy(io.Discard, stream)
 }
 
 func ServeClientForward(ctx context.Context, stream *mux.Stream) {
