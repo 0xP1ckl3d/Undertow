@@ -183,7 +183,7 @@ func (s *Server) handle(ctx context.Context, addr *net.UDPAddr, b []byte) {
 	if len(m.Payload) >= 84+128 && len(m.Payload) <= 84+800 && m.Payload[0] == security.PayloadProbe {
 		// Equal-size echo avoids amplifying an unauthenticated request.
 		out = m.Payload
-	} else if (len(m.Payload) == 106 || len(m.Payload) == 108) && m.Payload[0] == security.Hello {
+	} else if (len(m.Payload) == 106 || len(m.Payload) == 108) && m.Payload[0] == security.Hello && !s.isKnownSession(m.Payload) {
 		source := addr.IP.String()
 		if !security.CheckCookie(s.cookieSecret[:], source, m.Payload, time.Now()) {
 			out, _ = security.MakeCookie(s.cookieSecret[:], source, m.Payload, time.Now())
@@ -308,4 +308,16 @@ func (s *Server) handle(ctx context.Context, addr *net.UDPAddr, b []byte) {
 		return
 	}
 	_, _ = s.conn.WriteToUDP(resp, addr)
+}
+
+// Encrypted packets can have the same size and first byte as a client hello.
+// An existing session ID takes precedence over the handshake shape.
+func (s *Server) isKnownSession(payload []byte) bool {
+	if len(payload) < 10 {
+		return false
+	}
+	s.mu.RLock()
+	known := s.peers[binary.BigEndian.Uint64(payload[2:10])] != nil
+	s.mu.RUnlock()
+	return known
 }

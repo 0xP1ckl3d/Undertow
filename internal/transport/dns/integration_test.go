@@ -156,3 +156,52 @@ func TestPasswordAndOpenEnrollmentOverDNS(t *testing.T) {
 		})
 	}
 }
+
+func TestEncryptedPacketsAtHelloLengths(t *testing.T) {
+	_, identity, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, clientKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := bytes.Repeat([]byte{42}, 32)
+	srv, err := Listen("127.0.0.1:0", "t.undertow.invalid", identity, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	go func() { _ = srv.Serve(ctx) }()
+	go func() {
+		peer := <-srv.Accepted()
+		for {
+			message, err := peer.Session.Recv(ctx)
+			if err != nil {
+				return
+			}
+			if err := peer.Session.Send(ctx, message); err != nil {
+				return
+			}
+		}
+	}()
+	client, err := DialProfile(ctx, srv.Addr().String(), "t.undertow.invalid", security.Fingerprint(identity), token, clientKey, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	for _, size := range []int{22, 24} {
+		message := bytes.Repeat([]byte{byte(size)}, size)
+		if err := client.Send(ctx, message); err != nil {
+			t.Fatal(err)
+		}
+		got, err := client.Recv(ctx)
+		if err != nil {
+			t.Fatalf("%d-byte message: %v", size, err)
+		}
+		if !bytes.Equal(got, message) {
+			t.Fatalf("%d-byte message was corrupted", size)
+		}
+	}
+}

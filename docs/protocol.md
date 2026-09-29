@@ -36,6 +36,8 @@ Legacy payload profile `0` uses 800 byte fragments and profile `1` uses 320 byte
 
 Every encrypted packet has a 50 byte header, zero or one encrypted fragment, and a 16 byte GCM tag. The complete header is authenticated as additional data. The 12 byte GCM nonce is the directional four byte prefix followed by the eight byte packet nonce sequence. Retransmissions reuse the original encrypted packet bytes, including its nonce; a new poll or data packet gets a new nonce sequence.
 
+Encrypted packets can be 106 or 108 bytes long, matching a client hello's length and first byte. The server checks the session ID against existing sessions before classifying either length as a new hello.
+
 | Offset | Size | Field |
 | ---: | ---: | --- |
 | 0 | 1 | Packet format version, currently `1` |
