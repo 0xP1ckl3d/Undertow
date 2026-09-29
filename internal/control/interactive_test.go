@@ -287,7 +287,8 @@ func TestVPNClientInteractiveRelay(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer local.Close()
-	if err := local.Send([]byte("again")); err != nil {
+	// Unix PTYs use canonical input by default, so terminate the command line.
+	if err := local.Send([]byte("again\n")); err != nil {
 		t.Fatal(err)
 	}
 	output.Reset()
