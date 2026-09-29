@@ -11,9 +11,13 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
+	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
+	"undertow/internal/control"
 	"undertow/internal/pivot"
 	"undertow/internal/routing"
 )
@@ -34,11 +38,21 @@ func consoleCommand(args []string) error {
 	caller := func(_ context.Context, method, path string, body any) ([]byte, error) {
 		return callControl(options, method, path, body)
 	}
-	return runConsole(ctx, os.Stdin, os.Stdout, caller, nil, nil, nil)
+	return runConsole(ctx, os.Stdin, os.Stdout, caller, nil, nil, nil, nil)
 }
 
-func runConsole(ctx context.Context, input io.Reader, output io.Writer, call consoleCaller, clientID func() uint64, quit func(), clientRoutes clientRouteAction) error {
-	fmt.Fprintln(output, "Interactive console. Type help for commands; quit to exit.")
+func runConsole(ctx context.Context, input io.Reader, output io.Writer, call consoleCaller, clientID func() uint64, quit func(), clientRoutes clientRouteAction, events <-chan string) error {
+	fmt.Fprintln(output, "Interactive console. Type agents to list agents, help for commands.")
+	vpnClient := clientID != nil
+	selectedID, selectedLabel := "", ""
+	known := make(map[string]control.AgentInfo)
+	if agents, err := consoleAgents(ctx, call); err == nil {
+		for _, agent := range agents {
+			known[agent.ID] = agent
+		}
+	}
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
 	scanner := bufio.NewScanner(input)
 	scanner.Buffer(make([]byte, 4096), 8192)
 	lines := make(chan string)
@@ -53,8 +67,16 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 		}
 		scanDone <- scanner.Err()
 	}()
+	promptShown := false
 	for {
-		fmt.Fprint(output, "undertow> ")
+		if !promptShown {
+			if selectedID == "" {
+				fmt.Fprint(output, "undertow> ")
+			} else {
+				fmt.Fprintf(output, "undertow[%s]> ", selectedLabel)
+			}
+			promptShown = true
+		}
 		var line string
 		select {
 		case <-ctx.Done():
@@ -65,6 +87,39 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 			}
 			return err
 		case line = <-lines:
+			promptShown = false
+		case event := <-events:
+			fmt.Fprintf(output, "\n[%s]\n", event)
+			promptShown = false
+			continue
+		case <-ticker.C:
+			agents, err := consoleAgents(ctx, call)
+			if err != nil {
+				continue
+			}
+			next := make(map[string]control.AgentInfo, len(agents))
+			emitted := false
+			for _, agent := range agents {
+				next[agent.ID] = agent
+				if _, ok := known[agent.ID]; !ok {
+					fmt.Fprintf(output, "\n[Agent connected: %s (%s)]\n", consoleAgentName(agent), shortAgentID(agent.ID))
+					emitted = true
+				}
+			}
+			for id, agent := range known {
+				if _, ok := next[id]; !ok {
+					fmt.Fprintf(output, "\n[Agent lost: %s (%s)]\n", consoleAgentName(agent), shortAgentID(id))
+					emitted = true
+					if selectedID == id {
+						selectedID, selectedLabel = "", ""
+					}
+				}
+			}
+			known = next
+			if emitted {
+				promptShown = false
+			}
+			continue
 		}
 		args, err := splitConsoleCommand(line)
 		if err != nil {
@@ -80,14 +135,172 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 			}
 			return nil
 		}
+		if args[0] == "help" {
+			printConsoleHelp(output, vpnClient, selectedID != "")
+			continue
+		}
+		if args[0] == "back" {
+			if selectedID == "" {
+				fmt.Fprintln(output, "Already at the main menu.")
+			} else {
+				selectedID, selectedLabel = "", ""
+			}
+			continue
+		}
+		if args[0] == "agents" || args[0] == "use" || args[0] == "select" {
+			agents, err := consoleAgents(ctx, call)
+			if err != nil {
+				fmt.Fprintln(output, "error:", err)
+				continue
+			}
+			if args[0] == "agents" || len(args) == 1 {
+				printConsoleAgents(output, agents)
+				continue
+			}
+			if len(args) != 2 {
+				fmt.Fprintln(output, "error: use AGENT_NUMBER or AGENT_ID")
+				continue
+			}
+			agent, err := findConsoleAgent(agents, args[1])
+			if err != nil {
+				fmt.Fprintln(output, "error:", err)
+				continue
+			}
+			selectedID, selectedLabel = agent.ID, consoleAgentName(agent)
+			fmt.Fprintf(output, "Selected %s (%s). Type help for agent commands.\n", selectedLabel, agent.ID)
+			continue
+		}
+		if selectedID != "" {
+			switch args[0] {
+			case "exec":
+				args = append([]string{"exec", selectedID}, args[1:]...)
+			case "route":
+				if len(args) == 3 && (args[1] == "add" || args[1] == "accept") {
+					args = append(args, selectedID)
+				} else if vpnClient && len(args) == 3 && args[1] == "del" {
+					args = append(args, selectedID)
+				}
+			case "routes":
+				args = append(args, selectedID)
+			}
+		}
 		ownClientID := uint64(0)
 		if clientID != nil {
 			ownClientID = clientID()
 		}
-		if err := runConsoleCommand(ctx, output, call, clientID != nil, ownClientID, clientRoutes, args); err != nil {
+		if err := runConsoleCommand(ctx, output, call, vpnClient, ownClientID, clientRoutes, args); err != nil {
 			fmt.Fprintln(output, "error:", err)
 		}
 	}
+}
+
+func consoleAgents(ctx context.Context, call consoleCaller) ([]control.AgentInfo, error) {
+	data, err := call(ctx, http.MethodGet, "/v1/status", nil)
+	if err != nil {
+		return nil, err
+	}
+	var status struct {
+		Agents []control.AgentInfo `json:"agents"`
+	}
+	if err := json.Unmarshal(data, &status); err != nil {
+		return nil, err
+	}
+	sort.Slice(status.Agents, func(i, j int) bool {
+		if status.Agents[i].Hostname != status.Agents[j].Hostname {
+			return status.Agents[i].Hostname < status.Agents[j].Hostname
+		}
+		return status.Agents[i].ID < status.Agents[j].ID
+	})
+	return status.Agents, nil
+}
+
+func shortAgentID(id string) string {
+	if len(id) > 12 {
+		return id[:12]
+	}
+	return id
+}
+
+func consoleAgentName(agent control.AgentInfo) string {
+	if agent.Hostname != "" {
+		return agent.Hostname
+	}
+	return shortAgentID(agent.ID)
+}
+
+func printConsoleAgents(output io.Writer, agents []control.AgentInfo) {
+	fmt.Fprintf(output, "Agents (%d):\n", len(agents))
+	for i, agent := range agents {
+		fmt.Fprintf(output, "  %d  %-20s  %s  %s  routes=%d\n", i+1, consoleAgentName(agent), shortAgentID(agent.ID), agent.VirtualIP, len(agent.AdvertisedRoutes))
+	}
+	if len(agents) > 0 {
+		fmt.Fprintln(output, "Use an agent with: use NUMBER")
+	}
+}
+
+func findConsoleAgent(agents []control.AgentInfo, target string) (control.AgentInfo, error) {
+	if n, err := strconv.Atoi(target); err == nil {
+		if n > 0 && n <= len(agents) {
+			return agents[n-1], nil
+		}
+		return control.AgentInfo{}, errors.New("agent number is out of range")
+	}
+	var match control.AgentInfo
+	for _, agent := range agents {
+		if agent.ID == target || strings.HasPrefix(agent.ID, target) || agent.Hostname == target {
+			if match.ID != "" {
+				return control.AgentInfo{}, errors.New("agent name or ID prefix is ambiguous; use its number")
+			}
+			match = agent
+		}
+	}
+	if match.ID == "" {
+		return control.AgentInfo{}, errors.New("agent not found; type agents")
+	}
+	return match, nil
+}
+
+func printConsoleHelp(output io.Writer, vpnClient, selected bool) {
+	if selected {
+		fmt.Fprint(output, `Agent commands:
+  exec PROGRAM [ARGS]    Run a program on the selected agent
+  routes                 Show routes and advertisements
+  route add CIDR         Add a route through this agent
+  route del CIDR         Remove a route
+  status                 Show full status
+  back                   Return to the main menu
+  help                   Show this menu
+  quit                   Exit the console
+Quote paths or arguments containing spaces. Programs run without a shell.
+`)
+		if vpnClient {
+			fmt.Fprintln(output, "  route accept CIDR      Accept an advertised route from this agent")
+		}
+		return
+	}
+	if vpnClient {
+		fmt.Fprint(output, `VPN client menu:
+  agents                 List connected agents by number
+  use NUMBER             Enter an agent (ID prefix or hostname also works)
+  status                 Show agents, VPN clients, and routes
+  routes                 Show advertised and locally accepted routes
+  internal on|off        Change this client's global pivot mode
+  help                   Show this menu
+  quit                   Stop the VPN and exit
+Inside an agent, use exec PROGRAM, route accept CIDR, or route add CIDR.
+`)
+		return
+	}
+	fmt.Fprint(output, `Server operator menu:
+  agents                 List connected agents by number
+  use NUMBER             Enter an agent (ID prefix or hostname also works)
+  status                 Show agents, VPN clients, and routes
+  routes                 Show global routes
+  route del CIDR         Remove a global route
+  help                   Show this menu
+  quit                   Exit the console
+Inside an agent, use exec PROGRAM or route add CIDR.
+`)
 }
 
 func splitConsoleCommand(line string) ([]string, error) {
@@ -173,6 +386,9 @@ Quote arguments containing spaces. Commands run only when submitted.
 		if vpnClient && clientRoutes != nil {
 			return clientRoutes(ctx, args, output)
 		}
+		if len(args) > 2 {
+			return errors.New("use routes")
+		}
 		data, err := call(ctx, http.MethodGet, "/v1/status", nil)
 		if err != nil {
 			return err
@@ -185,6 +401,9 @@ Quote arguments containing spaces. Commands run only when submitted.
 		}
 		fmt.Fprintf(output, "Routes (%d)\n", len(status.Routes))
 		for _, route := range status.Routes {
+			if len(args) == 2 && route.AgentID != args[1] {
+				continue
+			}
 			fmt.Fprintf(output, "%s via %s active=%t\n", route.Prefix, route.AgentID, route.Active)
 		}
 		return nil

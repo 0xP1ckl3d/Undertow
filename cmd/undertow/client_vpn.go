@@ -99,15 +99,24 @@ func clientCommand(args []string) error {
 	}
 	ctx, stop := commandContext()
 	defer stop()
+	if *interactive {
+		logFile, err := os.OpenFile(*lifecycle.logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+		if err != nil {
+			return fmt.Errorf("open interactive log: %w", err)
+		}
+		log.SetOutput(logFile)
+		defer func() { log.SetOutput(os.Stderr); _ = logFile.Close() }()
+	}
 	savedRoutes, err := loadClientRoutes(*routesFile)
 	if err != nil {
 		return err
 	}
-	live := &liveClientConsole{routeFile: *routesFile, routes: savedRoutes, serverIP: serverIP, tunnelPrefix: prefix.Masked()}
+	live := &liveClientConsole{routeFile: *routesFile, routes: savedRoutes, serverIP: serverIP, tunnelPrefix: prefix.Masked(), events: make(chan string, 16)}
 	if *interactive {
 		go func() {
-			if err := runConsole(ctx, os.Stdin, os.Stdout, live.call, live.id, stop, live.routeCommand); err != nil && ctx.Err() == nil {
+			if err := runConsole(ctx, os.Stdin, os.Stdout, live.call, live.id, stop, live.routeCommand, live.events); err != nil && ctx.Err() == nil {
 				log.Printf("console: %v", err)
+				live.notify("Console failed: " + err.Error())
 				stop()
 			}
 		}()
@@ -142,6 +151,7 @@ func clientCommand(args []string) error {
 			err = runVPN(ctx, c, serverIP, *internal, *tunName, *address, prefix, *verifyURL, live.set)
 			c.Close()
 			if err != nil && !errors.Is(err, io.EOF) && ctx.Err() == nil {
+				live.notify("VPN error: " + err.Error())
 				return err
 			}
 		}
@@ -171,8 +181,16 @@ type liveClientConsole struct {
 	active       map[string]bool
 	routeFile    string
 	routes       []control.AcceptedRoute
+	events       chan string
 	serverIP     netip.Addr
 	tunnelPrefix netip.Prefix
+}
+
+func (c *liveClientConsole) notify(message string) {
+	select {
+	case c.events <- message:
+	default:
+	}
 }
 
 func (c *liveClientConsole) id() uint64 {

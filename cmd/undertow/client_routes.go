@@ -93,7 +93,10 @@ func (c *liveClientConsole) set(session *mux.Mux, id uint64, device *tun.Device)
 	c.mu.Unlock()
 	c.routeMu.Unlock()
 	if session != nil {
+		c.notify("VPN connected")
 		go c.restoreLoop(session)
+	} else {
+		c.notify("VPN disconnected")
 	}
 }
 
@@ -163,7 +166,7 @@ func (c *liveClientConsole) activateRoute(ctx context.Context, route control.Acc
 func (c *liveClientConsole) routeCommand(ctx context.Context, args []string, output io.Writer) error {
 	c.routeMu.Lock()
 	defer c.routeMu.Unlock()
-	if len(args) == 1 && args[0] == "routes" {
+	if (len(args) == 1 || len(args) == 2) && args[0] == "routes" {
 		data, err := c.call(ctx, http.MethodGet, "/v1/status", nil)
 		if err != nil {
 			return err
@@ -176,12 +179,18 @@ func (c *liveClientConsole) routeCommand(ctx context.Context, args []string, out
 		}
 		fmt.Fprintln(output, "Advertised routes:")
 		for _, agent := range status.Agents {
+			if len(args) == 2 && agent.ID != args[1] {
+				continue
+			}
 			for _, prefix := range agent.AdvertisedRoutes {
 				fmt.Fprintf(output, "  %s via %s\n", prefix, agent.ID)
 			}
 		}
 		fmt.Fprintln(output, "Accepted local routes:")
 		for _, route := range c.routes {
+			if len(args) == 2 && route.AgentID != args[1] {
+				continue
+			}
 			kind := "advertised"
 			if route.Manual {
 				kind = "manual"
@@ -217,7 +226,7 @@ func (c *liveClientConsole) routeCommand(ctx context.Context, args []string, out
 		fmt.Fprintf(output, "Local route %s via %s accepted and saved.\n", route.Prefix, route.AgentID)
 		return nil
 	}
-	if len(args) == 3 && args[0] == "route" && args[1] == "del" {
+	if (len(args) == 3 || len(args) == 4) && args[0] == "route" && args[1] == "del" {
 		prefix, err := netip.ParsePrefix(args[2])
 		if err != nil || !prefix.Addr().Is4() {
 			return errors.New("route del requires an IPv4 CIDR")
@@ -226,6 +235,9 @@ func (c *liveClientConsole) routeCommand(ctx context.Context, args []string, out
 		for i, route := range c.routes {
 			if route.Prefix != key {
 				continue
+			}
+			if len(args) == 4 && route.AgentID != args[3] {
+				return errors.New("route belongs to a different agent")
 			}
 			updated := append(append([]control.AcceptedRoute(nil), c.routes[:i]...), c.routes[i+1:]...)
 			wasActive := c.active[route.Prefix]

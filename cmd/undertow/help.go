@@ -195,6 +195,9 @@ advertised routes or add manual local routes through agents, change their
 own internal mode, and execute on agents that allow it. Accepted routes
 are restored on reconnect. Server global route and selection controls
 remain on the server host. No extra token is needed.
+Type 'agents', then 'use 1' to enter an agent. Run 'exec id' or 'route add
+CIDR' there; 'back' returns to the main menu. Important connection and agent
+events appear in the console; routine logs go to --log-file.
 `
 	case "console":
 		body = `undertow console — interactive operator console on the server host
@@ -206,6 +209,8 @@ route del, select, exec, help, and quit inside the console. Agent execution
 is enabled on agents by default and runs a named program with arguments,
 without an implicit shell. Use 'undertow console' on the server host;
 'undertow client --vpn --interactive ...' opens a VPN client console.
+In either console, type 'agents' to list numbered agents, 'use 1' to enter
+one, 'help' for the current menu, and 'back' to return to the main menu.
 `
 	case "status":
 		body = `undertow status — inspect agents, VPN clients, and routes
