@@ -18,6 +18,10 @@ import (
 type scriptOpener func(context.Context, string, string, []byte) (*pivot.InteractiveSession, error)
 
 func readMemoryFile(path string, limit int64) ([]byte, error) {
+	return readMemoryFileOption(path, limit, false)
+}
+
+func readMemoryFileOption(path string, limit int64, allowEmpty bool) ([]byte, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -27,7 +31,7 @@ func readMemoryFile(path string, limit int64) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(source) == 0 || int64(len(source)) > limit {
+	if (!allowEmpty && len(source) == 0) || int64(len(source)) > limit {
 		return nil, fmt.Errorf("source must contain 1 to %d bytes", limit)
 	}
 	return source, nil

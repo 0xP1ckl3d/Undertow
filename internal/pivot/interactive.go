@@ -75,8 +75,10 @@ func StartInteractive(ctx context.Context, stream interface {
 	}
 	session := &InteractiveSession{stream: stream, reader: reader}
 	ready := make(chan struct{})
-	defer close(ready)
+	watchStopped := make(chan struct{})
+	defer func() { close(ready); <-watchStopped }()
 	go func() {
+		defer close(watchStopped)
 		select {
 		case <-ctx.Done():
 			_ = stream.Close()

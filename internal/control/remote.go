@@ -105,7 +105,7 @@ func clientRequestAllowed(request *http.Request, clientID uint64) bool {
 		return true
 	}
 	parts := strings.Split(path, "/")
-	if len(parts) == 6 && parts[1] == "v1" && parts[2] == "agents" && parts[3] != "" && parts[4] == "scripts" && parts[5] == "jobs" && !strings.ContainsAny(parts[3], "%\\") {
+	if len(parts) == 6 && parts[1] == "v1" && parts[2] == "agents" && parts[3] != "" && (parts[4] == "scripts" || parts[4] == "wasm") && parts[5] == "jobs" && !strings.ContainsAny(parts[3], "%\\") {
 		return true
 	}
 	return len(parts) == 5 && parts[1] == "v1" && parts[2] == "agents" && parts[3] != "" && (parts[4] == "exec" || parts[4] == "jobs") && !strings.ContainsAny(parts[3], "%\\")

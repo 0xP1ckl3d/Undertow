@@ -157,7 +157,7 @@ func TestStatusShowsAgentAndVPNHostnames(t *testing.T) {
 	if !strings.Contains(output.String(), "agent-host") || !strings.Contains(output.String(), "vpn-host") {
 		t.Fatalf("hostnames missing from status: %s", output.String())
 	}
-	if !strings.Contains(output.String(), "supported=pivot,exec,hostops,interactive,scripts,upload,download,listeners allowed=pivot,download") {
+	if !strings.Contains(output.String(), "supported=pivot,exec,hostops,interactive,scripts,wasm,upload,download,listeners allowed=pivot,download") {
 		t.Fatalf("agent capabilities missing from status: %s", output.String())
 	}
 }

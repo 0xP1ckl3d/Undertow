@@ -283,6 +283,19 @@ Server console: use AGENT_ID
 Server console: run-script powershell ./audit.ps1
 ```
 
+### In-process WebAssembly execution
+
+`run-wasm` sends a WASI module through Undertow and instantiates it directly from memory in the agent's pure-Go runtime. It needs no temporary module file. The console can supply arguments and optional stdin; stdout and stderr stream separately. Background WASM runs use the same job manager, including bounded retained output and cancellation. The independent `wasm` capability controls this operation. Agent limits are a 4 MiB module, 64 KiB stdin, 16 MiB guest linear memory, 4 MiB combined output, a two-minute runtime and two simultaneous runs. No filesystem is preopened and no host network socket is supplied to the guest.
+
+```text
+VPN client console: use 1
+VPN client console: run-wasm ./tool.wasm audit
+VPN client console: run-wasm --stdin ./input.txt ./tool.wasm
+VPN client console: run-wasm --background ./long-task.wasm
+VPN client console: job output JOB_ID
+Agent: undertow agent --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key --deny=wasm
+```
+
 ### Upload and download
 
 File transfer streams through the server to the selected agent, verifies SHA-256, and refuses to overwrite an existing destination. The client console shows bytes, total, percentage, and current rate; Ctrl-] cancels and removes partial temporary files. Upload and download permissions are separate capabilities.
@@ -296,7 +309,7 @@ VPN client keyboard during a transfer: Ctrl-] to cancel
 
 ### Granular agent capabilities
 
-All capabilities are enabled by default: `pivot`, `exec`, `hostops`, `interactive`, `scripts`, `upload`, `download`, and `listeners`. Deny any combination at agent startup; the server and agent enforce the operation at the relevant stream.
+All capabilities are enabled by default: `pivot`, `exec`, `hostops`, `interactive`, `scripts`, `wasm`, `upload`, `download`, and `listeners`. Deny any combination at agent startup; the server and agent enforce the operation at the relevant stream.
 
 ```text
 Agent: undertow agent --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key --deny=exec,upload

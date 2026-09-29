@@ -190,6 +190,43 @@ func TestSelectedAgentStartsMemoryScriptJob(t *testing.T) {
 	}
 }
 
+func TestSelectedAgentStartsMemoryWASMJob(t *testing.T) {
+	module, err := os.ReadFile(filepath.Join("..", "..", "internal", "pivot", "testdata", "wasm_args.wasm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "tool.wasm")
+	if err := os.WriteFile(path, module, 0600); err != nil {
+		t.Fatal(err)
+	}
+	seen := false
+	caller := func(_ context.Context, method, route string, body any) ([]byte, error) {
+		if route == "/v1/status" {
+			return json.Marshal(map[string]any{"agents": []control.AgentInfo{{ID: "agent-a"}}})
+		}
+		if method == "POST" && route == "/v1/agents/agent-a/wasm/jobs" {
+			encoded, _ := json.Marshal(body)
+			var request struct {
+				Source []byte   `json:"source"`
+				Args   []string `json:"args"`
+			}
+			if json.Unmarshal(encoded, &request) != nil || !bytes.Equal(request.Source, module) || !reflect.DeepEqual(request.Args, []string{"audit"}) {
+				t.Fatalf("WASM request=%s", encoded)
+			}
+			seen = true
+			return json.Marshal(control.JobInfo{ID: "wasm-job", AgentID: "agent-a", Kind: "wasm"})
+		}
+		return nil, fmt.Errorf("unexpected %s %s", method, route)
+	}
+	var output bytes.Buffer
+	if err := runConsole(context.Background(), strings.NewReader("use 1\nrun-wasm --background \""+path+"\" audit\nquit\n"), &output, caller, nil, nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !seen || !strings.Contains(output.String(), "WASM job wasm-job started") {
+		t.Fatalf("request seen=%t output=%s", seen, output.String())
+	}
+}
+
 func TestSelectedAgentShowUsesCurrentStatus(t *testing.T) {
 	caller := func(_ context.Context, method, path string, _ any) ([]byte, error) {
 		if method != "GET" || path != "/v1/status" {

@@ -132,7 +132,7 @@ Usage: undertow agent --server IP:PORT [--fingerprint HEX | --trust-on-first-use
   --password-file PATH    Read password from file instead.
   --agent-key PATH         Agent Ed25519 identity (default agent.key).
   --deny LIST              Disable agent capabilities independently. Names:
-                           pivot,exec,hostops,interactive,scripts,upload,download,listeners.
+                           pivot,exec,hostops,interactive,scripts,wasm,upload,download,listeners.
   --advertise-route CIDR    Offer an additional IPv4 route to VPN clients;
                            repeatable. Up IPv4 interfaces are also offered.
   --domain NAME            Match server --domain (default t.undertow.invalid).
@@ -240,6 +240,10 @@ Use 'run-script bash LOCAL_FILE' or 'run-script powershell LOCAL_FILE' to send
 source to the agent's interpreter without storing a script there. Add
 '--background' before the language to keep it in the job list. --deny=scripts
 blocks these runs independently of exec and interactive sessions.
+Use 'run-wasm MODULE_FILE [ARGS]' to execute a WASI module from memory. Add
+'--background' to make a job; '--stdin LOCAL_FILE' supplies up to 64 KiB of
+stdin. --deny=wasm blocks it independently. Modules are limited to 4 MiB,
+16 MiB guest memory, 4 MiB output, 2 minutes and two concurrent agent runs.
 Use 'job start PROGRAM [ARGS]' inside the agent menu for a task that should
 continue while the console is detached. 'jobs', 'job show ID', 'job output ID',
 and 'job cancel ID' manage it.

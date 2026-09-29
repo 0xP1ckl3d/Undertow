@@ -36,6 +36,8 @@ func runConsoleJobCommand(ctx context.Context, output io.Writer, call consoleCal
 			label := strings.Join(job.Argv, " ")
 			if job.Kind == "script" {
 				label = job.Language + " script"
+			} else if job.Kind == "wasm" {
+				label = "WASM module " + label
 			}
 			fmt.Fprintf(output, "  %s  %-10s  %-12s  %s  %s\n", job.ID, job.State, shortAgentID(job.AgentID), job.Started.Local().Format("2006-01-02 15:04:05"), label)
 		}

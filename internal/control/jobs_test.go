@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/netip"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -57,6 +58,45 @@ func TestScriptJobUsesExistingLifecycle(t *testing.T) {
 	}
 	if _, err := manager.Job(803, job.ID, true); err == nil {
 		t.Fatal("script job crossed client ownership")
+	}
+}
+
+func TestWASMJobExitAndCancellation(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	manager := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	server, agent := forwardAuditAgent(t, ctx, manager, "wasm-agent", 811, pivot.DefaultCapabilities())
+	defer server.Close()
+	defer agent.Close()
+	exitModule, err := os.ReadFile(filepath.Join("..", "pivot", "testdata", "wasm_exit2.wasm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	exited, err := manager.StartWASMJob(ctx, 812, "wasm-agent", exitModule, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed := waitJob(t, manager, 812, exited.ID, func(j JobInfo) bool { return j.State == "failed" })
+	if failed.ExitCode == nil || *failed.ExitCode != 2 || failed.Kind != "wasm" {
+		t.Fatalf("WASM exit job=%+v", failed)
+	}
+	loopModule, err := os.ReadFile(filepath.Join("..", "pivot", "testdata", "wasm_loop.wasm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	running, err := manager.StartWASMJob(ctx, 812, "wasm-agent", loopModule, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manager.AgentList()[0].ActiveJobs != 1 {
+		t.Fatal("running WASM job not counted")
+	}
+	if err := manager.CancelJob(812, running.ID); err != nil {
+		t.Fatal(err)
+	}
+	cancelled := waitJob(t, manager, 812, running.ID, func(j JobInfo) bool { return j.State == "cancelled" })
+	if cancelled.Ended == nil || manager.AgentList()[0].ActiveJobs != 0 {
+		t.Fatalf("WASM job cancellation=%+v", cancelled)
 	}
 }
 

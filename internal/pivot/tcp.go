@@ -65,6 +65,14 @@ func ServeAgentWithCapabilities(ctx context.Context, m *mux.Mux, caps Capabiliti
 			go serveScript(ctx, s)
 			continue
 		}
+		if s.Destination() == WASMDestination {
+			if !caps.WASM {
+				s.Fail(errors.New("agent wasm execution is disabled"))
+				continue
+			}
+			go serveWASM(ctx, s)
+			continue
+		}
 		if s.Destination() == FileDestination {
 			if !caps.Upload && !caps.Download {
 				s.Fail(errors.New("agent file transfer is disabled"))

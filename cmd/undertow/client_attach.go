@@ -78,10 +78,13 @@ func attachClientAt(path string) error {
 	script := func(ctx context.Context, agentID, language string, source []byte) (*pivot.InteractiveSession, error) {
 		return openAttachedScript(ctx, path, agentID, language, source)
 	}
+	wasm := func(ctx context.Context, agentID string, module []byte, args []string, stdin []byte) (*pivot.InteractiveSession, error) {
+		return openAttachedWASM(ctx, path, agentID, module, args, stdin)
+	}
 	transfer := func(ctx context.Context, request clientFileRequest, progress func(pivot.TransferProgress)) (pivot.FileMessage, error) {
 		return attachedTransfer(ctx, path, request, progress)
 	}
-	return runConsole(ctx, os.Stdin, os.Stdout, caller, clientID, quit, routes, nil, consoleFeatures{open: opener, script: script, transfer: transfer})
+	return runConsole(ctx, os.Stdin, os.Stdout, caller, clientID, quit, routes, nil, consoleFeatures{open: opener, script: script, wasm: wasm, transfer: transfer})
 }
 
 func openAttachedInteractive(ctx context.Context, path, agentID string, request pivot.InteractiveRequest) (*pivot.InteractiveSession, error) {
@@ -98,6 +101,14 @@ func openAttachedScript(ctx context.Context, path, agentID, language string, sou
 		return nil, err
 	}
 	return pivot.StartMemorySession(ctx, conn, reader, pivot.MemoryRequest{Language: language, Size: len(source)}, source)
+}
+
+func openAttachedWASM(ctx context.Context, path, agentID string, module []byte, args []string, stdin []byte) (*pivot.InteractiveSession, error) {
+	conn, reader, err := openAttachedSession(ctx, path, agentID, "wasm")
+	if err != nil {
+		return nil, err
+	}
+	return pivot.StartMemorySession(ctx, conn, reader, pivot.MemoryRequest{Args: args, Stdin: stdin, Size: len(module)}, module)
 }
 
 func openAttachedSession(ctx context.Context, path, agentID, action string) (*net.TCPConn, *bufio.Reader, error) {

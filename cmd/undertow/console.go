@@ -29,6 +29,7 @@ type clientTransferAction func(context.Context, clientFileRequest, func(pivot.Tr
 type consoleFeatures struct {
 	open     interactiveOpener
 	script   scriptOpener
+	wasm     wasmOpener
 	transfer clientTransferAction
 }
 
@@ -58,7 +59,10 @@ func consoleCommand(args []string) error {
 	script := func(ctx context.Context, agentID, language string, source []byte) (*pivot.InteractiveSession, error) {
 		return openControlScript(ctx, options, agentID, language, source)
 	}
-	return runConsole(ctx, os.Stdin, os.Stdout, caller, nil, nil, nil, nil, consoleFeatures{open: opener, script: script})
+	wasm := func(ctx context.Context, agentID string, module []byte, args []string, stdin []byte) (*pivot.InteractiveSession, error) {
+		return openControlWASM(ctx, options, agentID, module, args, stdin)
+	}
+	return runConsole(ctx, os.Stdin, os.Stdout, caller, nil, nil, nil, nil, consoleFeatures{open: opener, script: script, wasm: wasm})
 }
 
 func runConsole(ctx context.Context, input io.Reader, output io.Writer, call consoleCaller, clientID func() uint64, quit func(), clientRoutes clientRouteAction, events <-chan string, features ...consoleFeatures) error {
@@ -277,6 +281,8 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 				args = append([]string{"exec", selectedID}, args[1:]...)
 			case "run-script":
 				args = append([]string{"run-script", selectedID}, args[1:]...)
+			case "run-wasm":
+				args = append([]string{"run-wasm", selectedID}, args[1:]...)
 			case "pwd", "ls", "stat", "mkdir", "rm", "whoami", "ps", "privileges", "env", "interfaces", "dns", "route-table":
 				args = append([]string{args[0], selectedID}, args[1:]...)
 			case "upload", "download":
@@ -311,6 +317,16 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 				open = features[0].script
 			}
 			if err := runConsoleScript(ctx, output, editor, call, open, args); err != nil {
+				fmt.Fprintln(output, "error:", err)
+			}
+			continue
+		}
+		if args[0] == "run-wasm" {
+			var open wasmOpener
+			if len(features) != 0 {
+				open = features[0].wasm
+			}
+			if err := runConsoleWASM(ctx, output, editor, call, open, args); err != nil {
 				fmt.Fprintln(output, "error:", err)
 			}
 			continue
@@ -393,6 +409,7 @@ func printConsoleHelp(output io.Writer, vpnClient, selected bool) {
   exec PROGRAM [ARGS]    Run a program on the selected agent
   shell [PROGRAM ARGS]   Open a live shell; Ctrl-] closes only this shell
   run-script [--background] bash|powershell LOCAL_FILE Run source from memory
+  run-wasm [--background] [--stdin FILE] MODULE [ARGS] Run WASI module
   job start PROGRAM [ARGS] Start a background task
   jobs                   List this agent's tasks
   job show|output|cancel ID Inspect or stop a task
@@ -442,7 +459,7 @@ Quote paths or arguments containing spaces. Programs run without a shell.
   help                   Show this menu
   background             Detach console; keep VPN running
   quit                   Stop the VPN and exit
-Inside an agent, use shell, exec PROGRAM, run-script, upload LOCAL REMOTE, download REMOTE LOCAL, or route accept CIDR.
+Inside an agent, use shell, exec PROGRAM, run-script, run-wasm, upload LOCAL REMOTE, download REMOTE LOCAL, or route accept CIDR.
 Host commands: pwd, ls, stat, mkdir, rm, whoami, ps, privileges, env, interfaces, dns, route-table.
 `)
 		return
@@ -457,7 +474,7 @@ Host commands: pwd, ls, stat, mkdir, rm, whoami, ps, privileges, env, interfaces
   route del CIDR         Remove a global route
   help                   Show this menu
   quit                   Exit the console
-Inside an agent, use shell, exec PROGRAM, run-script or route add CIDR.
+Inside an agent, use shell, exec PROGRAM, run-script, run-wasm or route add CIDR.
 Host commands: pwd, ls, stat, mkdir, rm, whoami, ps, privileges, env, interfaces, dns, route-table.
 `)
 }
@@ -537,6 +554,7 @@ func runConsoleCommand(ctx context.Context, output io.Writer, call consoleCaller
   forward del AGENT_ID BIND      Stop one TCP forward
   exec AGENT_ID PROGRAM [ARGS]   Run one program on an agent
   run-script AGENT_ID [--background] bash|powershell LOCAL_FILE
+  run-wasm AGENT_ID [--background] [--stdin FILE] MODULE [ARGS]
   job start AGENT_ID PROGRAM ... Start a background task
   jobs; job show|output|cancel ID Inspect or stop tasks
   HOST_OP AGENT_ID [ARGS]        Host operations; type use NUMBER then help
@@ -556,6 +574,7 @@ Quote arguments containing spaces.
   select AGENT_ID                Select the default agent
   exec AGENT_ID PROGRAM [ARGS]   Run one program on an agent
   run-script AGENT_ID [--background] bash|powershell LOCAL_FILE
+  run-wasm AGENT_ID [--background] [--stdin FILE] MODULE [ARGS]
   job start AGENT_ID PROGRAM ... Start a background task
   jobs; job show|output|cancel ID Inspect or stop tasks
   HOST_OP AGENT_ID [ARGS]        Host operations; type use NUMBER then help

@@ -42,6 +42,14 @@ func openControlScript(ctx context.Context, options operatorOptions, agentID, la
 	return pivot.StartMemorySession(ctx, conn, reader, pivot.MemoryRequest{Language: language, Size: len(source)}, source)
 }
 
+func openControlWASM(ctx context.Context, options operatorOptions, agentID string, module []byte, args []string, stdin []byte) (*pivot.InteractiveSession, error) {
+	conn, reader, err := openControlSession(ctx, options, agentID, "wasm")
+	if err != nil {
+		return nil, err
+	}
+	return pivot.StartMemorySession(ctx, conn, reader, pivot.MemoryRequest{Args: args, Stdin: stdin, Size: len(module)}, module)
+}
+
 func openControlSession(ctx context.Context, options operatorOptions, agentID, operation string) (*net.TCPConn, *bufio.Reader, error) {
 	token, err := os.ReadFile(options.tokenFile)
 	if err != nil {

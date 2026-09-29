@@ -210,3 +210,19 @@ VPN client console: job cancel JOB_ID
 ```
 
 For a Windows agent, replace the command with `run-script powershell ./audit.ps1`. Undertow sends source through the encrypted connection directly to the interpreter's stdin; the agent does not need the local path or a temporary script file. The independent `scripts` capability controls this operation. A 1 MiB source and 10 minute runtime limit apply.
+
+## 11. Run an in-memory WASI module
+
+Place a WASI `.wasm` module on the VPN client machine and select an agent:
+
+```text
+VPN client console: agents
+VPN client console: use 1
+VPN client console: run-wasm ./tool.wasm audit
+VPN client console: run-wasm --stdin ./input.txt ./tool.wasm
+VPN client console: run-wasm --background ./long-task.wasm
+VPN client console: jobs
+VPN client console: job output JOB_ID
+```
+
+The agent instantiates the module in a pure-Go runtime without a temporary module file. The guest receives only explicit arguments and stdin, and no filesystem mount or host network access. `--deny=wasm` disables this operation without disabling scripts, one-shot exec or other jobs. Module, stdin, runtime, memory, output and concurrency limits apply as listed in [the console reference](console.md).

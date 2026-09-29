@@ -25,6 +25,7 @@ const ScriptSourceLimit = 1 << 20
 type MemoryRequest struct {
 	Language string   `json:"language,omitempty"`
 	Args     []string `json:"args,omitempty"`
+	Stdin    []byte   `json:"stdin,omitempty"`
 	Size     int      `json:"size"`
 }
 
@@ -60,7 +61,7 @@ func validateScriptRequest(request MemoryRequest, source []byte) error {
 	if request.Language != "bash" && request.Language != "powershell" {
 		return errors.New("script interpreter must be bash or powershell")
 	}
-	if len(request.Args) != 0 {
+	if len(request.Args) != 0 || len(request.Stdin) != 0 {
 		return errors.New("script arguments are not supported yet")
 	}
 	return nil
@@ -79,8 +80,10 @@ func StartMemorySession(ctx context.Context, stream interface {
 	}
 	session := &InteractiveSession{stream: stream, reader: reader}
 	ready := make(chan struct{})
-	defer close(ready)
+	watchStopped := make(chan struct{})
+	defer func() { close(ready); <-watchStopped }()
 	go func() {
+		defer close(watchStopped)
 		select {
 		case <-ctx.Done():
 			_ = stream.Close()
@@ -199,7 +202,7 @@ func serveScript(ctx context.Context, stream *mux.Stream) {
 		return
 	}
 	var request MemoryRequest
-	if json.Unmarshal(line, &request) != nil || request.Size < 1 || request.Size > ScriptSourceLimit || request.Language != "bash" && request.Language != "powershell" || len(request.Args) != 0 {
+	if json.Unmarshal(line, &request) != nil || request.Size < 1 || request.Size > ScriptSourceLimit || request.Language != "bash" && request.Language != "powershell" || len(request.Args) != 0 || len(request.Stdin) != 0 {
 		RejectInteractive(stream, errors.New("invalid script request"))
 		return
 	}

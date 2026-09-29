@@ -37,6 +37,14 @@ func OpenClientInteractive(ctx context.Context, client *mux.Mux, agentID string,
 }
 
 func OpenClientScript(ctx context.Context, client *mux.Mux, agentID, language string, source []byte) (*pivot.InteractiveSession, error) {
+	return openClientMemory(ctx, client, agentID, "script", pivot.MemoryRequest{Language: language, Size: len(source)}, source)
+}
+
+func OpenClientWASM(ctx context.Context, client *mux.Mux, agentID string, module []byte, args []string, stdin []byte) (*pivot.InteractiveSession, error) {
+	return openClientMemory(ctx, client, agentID, "wasm", pivot.MemoryRequest{Args: args, Stdin: stdin, Size: len(module)}, module)
+}
+
+func openClientMemory(ctx context.Context, client *mux.Mux, agentID, kind string, request pivot.MemoryRequest, source []byte) (*pivot.InteractiveSession, error) {
 	if client == nil {
 		return nil, errors.New("VPN session is not connected")
 	}
@@ -44,11 +52,11 @@ func OpenClientScript(ctx context.Context, client *mux.Mux, agentID, language st
 	if err != nil {
 		return nil, err
 	}
-	if err := json.NewEncoder(stream).Encode(interactiveRelayRequest{AgentID: agentID, Kind: "script"}); err != nil {
+	if err := json.NewEncoder(stream).Encode(interactiveRelayRequest{AgentID: agentID, Kind: kind}); err != nil {
 		stream.Close()
 		return nil, err
 	}
-	return pivot.StartMemorySession(ctx, stream, bufio.NewReader(stream), pivot.MemoryRequest{Language: language, Size: len(source)}, source)
+	return pivot.StartMemorySession(ctx, stream, bufio.NewReader(stream), request, source)
 }
 
 func BridgeClientInteractive(ctx context.Context, client *mux.Mux, agentID string, local net.Conn) error {
@@ -57,6 +65,10 @@ func BridgeClientInteractive(ctx context.Context, client *mux.Mux, agentID strin
 
 func BridgeClientScript(ctx context.Context, client *mux.Mux, agentID string, local net.Conn) error {
 	return bridgeClientInteractive(ctx, client, agentID, "script", local)
+}
+
+func BridgeClientWASM(ctx context.Context, client *mux.Mux, agentID string, local net.Conn) error {
+	return bridgeClientInteractive(ctx, client, agentID, "wasm", local)
 }
 
 func bridgeClientInteractive(ctx context.Context, client *mux.Mux, agentID, kind string, local net.Conn) error {
@@ -124,6 +136,8 @@ func (m *Manager) ServeInteractiveRelay(ctx context.Context, client *mux.Stream)
 	destination := pivot.InteractiveDestination
 	if request.Kind == "script" {
 		destination = pivot.ScriptDestination
+	} else if request.Kind == "wasm" {
+		destination = pivot.WASMDestination
 	} else if request.Kind != "" {
 		pivot.RejectInteractive(client, errors.New("unknown task kind"))
 		return
@@ -166,6 +180,8 @@ func (m *Manager) interactiveHandler(w http.ResponseWriter, r *http.Request) {
 	destination := pivot.InteractiveDestination
 	if r.URL.Path == "/v1/agents/"+r.PathValue("id")+"/script" {
 		destination = pivot.ScriptDestination
+	} else if r.URL.Path == "/v1/agents/"+r.PathValue("id")+"/wasm" {
+		destination = pivot.WASMDestination
 	}
 	upstream, err := agent.Open(r.Context(), destination)
 	if err != nil {

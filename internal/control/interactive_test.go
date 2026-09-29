@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -34,6 +35,88 @@ func TestRelayInteractiveHelper(t *testing.T) {
 	_, _ = os.Stdout.Write([]byte("relay:"))
 	_, _ = os.Stdout.Write(buffer)
 	os.Exit(0)
+}
+
+func TestWASMRelayConnectAndRemoteJob(t *testing.T) {
+	module, err := os.ReadFile(filepath.Join("..", "pivot", "testdata", "wasm_args.wasm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+	manager := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	serverAgent, agent := forwardAuditAgent(t, ctx, manager, "wasm-agent", 724, pivot.DefaultCapabilities())
+	defer serverAgent.Close()
+	defer agent.Close()
+	serverVPN, clientVPN := forwardAuditPair(ctx)
+	defer serverVPN.Close()
+	defer clientVPN.Close()
+	go pivot.ServeVPNInteractive(ctx, serverVPN, manager.ResolveEgress, func() bool { return false }, func(ctx context.Context, stream *mux.Stream) {
+		manager.ServeInteractiveRelay(ctx, stream)
+	})
+	readResult := func(session *pivot.InteractiveSession) {
+		t.Helper()
+		defer session.Close()
+		var output strings.Builder
+		for {
+			kind, data, err := session.Read()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if kind == pivot.InteractiveOutput {
+				output.Write(data)
+			}
+			if kind == pivot.InteractiveError {
+				t.Fatalf("WASM error: %s", data)
+			}
+			if kind == pivot.InteractiveExit {
+				if len(data) != 4 || binary.BigEndian.Uint32(data) != 0 || !strings.Contains(output.String(), "relay-wasm") {
+					t.Fatalf("exit=%v output=%q", data, output.String())
+				}
+				return
+			}
+		}
+	}
+	live, err := OpenClientWASM(ctx, clientVPN, "wasm-agent", module, []string{"relay-wasm"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readResult(live)
+	httpServer := httptest.NewServer(manager.handler("operator-secret"))
+	defer httpServer.Close()
+	conn, err := net.Dial("tcp", strings.TrimPrefix(httpServer.URL, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := fmt.Fprintf(conn, "CONNECT /v1/agents/wasm-agent/wasm HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer operator-secret\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	reader := bufio.NewReader(conn)
+	response, err := http.ReadResponse(reader, &http.Request{Method: http.MethodConnect})
+	if err != nil || response.StatusCode != 200 {
+		t.Fatalf("CONNECT response=%v error=%v", response, err)
+	}
+	local, err := pivot.StartMemorySession(ctx, conn.(*net.TCPConn), reader, pivot.MemoryRequest{Size: len(module), Args: []string{"relay-wasm"}}, module)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readResult(local)
+	remoteServer, remoteClient := forwardAuditClient(t, ctx, manager, 725)
+	defer remoteServer.Close()
+	defer remoteClient.Close()
+	data, err := CallRemote(ctx, remoteClient, "POST", "/v1/agents/wasm-agent/wasm/jobs", map[string]any{"source": module, "args": []string{"relay-wasm"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var job JobInfo
+	if err := json.Unmarshal(data, &job); err != nil {
+		t.Fatal(err)
+	}
+	finished := waitJob(t, manager, 725, job.ID, func(j JobInfo) bool { return j.State == "completed" })
+	if finished.Kind != "wasm" || !strings.Contains(finished.Output, "relay-wasm") {
+		t.Fatalf("remote WASM job=%+v", finished)
+	}
 }
 
 func TestScriptRelayConnectAndRemoteJob(t *testing.T) {

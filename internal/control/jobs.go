@@ -87,6 +87,29 @@ func (m *Manager) StartScriptJob(ctx context.Context, owner uint64, agentID, lan
 	return m.registerJob(owner, agentID, state.mux, session, JobInfo{AgentID: agentID, Kind: "script", Language: language})
 }
 
+func (m *Manager) StartWASMJob(ctx context.Context, owner uint64, agentID string, module []byte, args []string, stdin []byte) (JobInfo, error) {
+	if len(module) == 0 || len(module) > pivot.WASMModuleLimit || len(stdin) > pivot.WASMStdinLimit {
+		return JobInfo{}, errors.New("WASM module or stdin exceeds its size limit")
+	}
+	m.mu.RLock()
+	state := m.agents[agentID]
+	count := len(m.jobs)
+	m.mu.RUnlock()
+	if state == nil {
+		return JobInfo{}, errors.New("agent is not connected")
+	}
+	if count >= 512 {
+		return JobInfo{}, errors.New("job limit reached")
+	}
+	startCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	session, err := pivot.OpenWASM(startCtx, state.mux, module, args, stdin)
+	if err != nil {
+		return JobInfo{}, err
+	}
+	return m.registerJob(owner, agentID, state.mux, session, JobInfo{AgentID: agentID, Kind: "wasm", Argv: append([]string(nil), args...)})
+}
+
 func (m *Manager) registerJob(owner uint64, agentID string, agent *mux.Mux, session *pivot.InteractiveSession, info JobInfo) (JobInfo, error) {
 	var random [8]byte
 	if _, err := rand.Read(random[:]); err != nil {
@@ -110,6 +133,7 @@ func (m *Manager) registerJob(owner uint64, agentID string, agent *mux.Mux, sess
 
 func (m *Manager) collectJob(job *jobState) {
 	defer job.session.Close()
+	taskError := false
 	for {
 		kind, data, err := job.session.Read()
 		if err != nil {
@@ -128,7 +152,7 @@ func (m *Manager) collectJob(job *jobState) {
 			}
 			code := int(int32(binary.BigEndian.Uint32(data)))
 			state := "completed"
-			if code != 0 {
+			if code != 0 || taskError {
 				state = "failed"
 			}
 			m.finishJob(job, state, &code)
@@ -137,8 +161,7 @@ func (m *Manager) collectJob(job *jobState) {
 			m.mu.Lock()
 			appendJobOutput(job, data)
 			m.mu.Unlock()
-			m.finishJob(job, "failed", nil)
-			return
+			taskError = true
 		}
 	}
 }
@@ -250,6 +273,23 @@ func (m *Manager) jobHTTPHandlers(muxer *http.ServeMux) {
 			return
 		}
 		job, err := m.StartScriptJob(r.Context(), jobOwner(r.Context()), r.PathValue("id"), request.Language, request.Source)
+		if err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		jsonReply(w, http.StatusCreated, job)
+	})
+	muxer.HandleFunc("POST /v1/agents/{id}/wasm/jobs", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Source []byte   `json:"source"`
+			Stdin  []byte   `json:"stdin,omitempty"`
+			Args   []string `json:"args,omitempty"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 6<<20)).Decode(&request); err != nil {
+			http.Error(w, "invalid WASM job request", 400)
+			return
+		}
+		job, err := m.StartWASMJob(r.Context(), jobOwner(r.Context()), r.PathValue("id"), request.Source, request.Args, request.Stdin)
 		if err != nil {
 			http.Error(w, err.Error(), 400)
 			return
