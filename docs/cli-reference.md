@@ -57,7 +57,7 @@ The server may require privilege to bind UDP/53 or create a proxy interface. A s
 | `--advertise-route CIDR` | None | Offer an additional IPv4 subnet to VPN clients; repeatable. Up IPv4 interface subnets are offered automatically. |
 | `--domain NAME` | `t.undertow.invalid` | Must match the server. |
 | `--auth`, `--token`, `--token-file`, `--password`, `--password-file` | See above | Enrollment. |
-| `--payload-profile auto\|large\|small` | `auto` | Direct-DNS payload size; auto can fall back to small. |
+| `--payload-profile auto\|large\|small` | `auto` | `auto` probes the path for a 128–800 byte fragment size and adjusts future fragments after loss; `large` and `small` force legacy 800 and 320 byte profiles. |
 | `--probe` | Off | Run encrypted echo probes against a `--probe-echo` server instead of socket operations. |
 | `--probe-count N` | `0` | Number of probes; zero runs continuously. |
 | `--probe-size BYTES` | `64` | Echo payload size, 16 through 65536 bytes. |
@@ -82,7 +82,7 @@ The agent makes no interface or host route changes. Its local key must differ fo
 | `--auth`, `--token`, `--token-file`, `--password`, `--password-file` | See above | Enrollment. |
 | `--tun-name NAME` | `undertow-vpn` | Client TUN/Wintun name. |
 | `--tunnel-address CIDR` | `172.16.253.1/24` | Client interface IPv4 address/network. |
-| `--payload-profile auto\|large\|small` | `auto` | Direct-DNS payload size. |
+| `--payload-profile auto\|large\|small` | `auto` | Automatic 128–800 byte path discovery and adjustment, or a forced legacy profile. |
 | `--verify-url URL` | `https://api.ipify.org` | Public IPv4 check after routes are installed. Empty disables it. |
 | `--interactive` | Automatic in a terminal | Force an attached console when input is redirected. |
 | `--routes-file PATH` | `client-routes.json` | Persist this client's accepted and manual agent routes. The file is created locally, not copied from the server. |

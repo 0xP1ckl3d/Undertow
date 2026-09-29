@@ -1,6 +1,7 @@
 package dns
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -45,7 +46,68 @@ type AdaptiveStats struct {
 }
 
 func Dial(ctx context.Context, serverAddr, domain, fingerprint string, token []byte, agentKey ed25519.PrivateKey) (*Client, error) {
-	return DialProfile(ctx, serverAddr, domain, fingerprint, token, agentKey, 0)
+	return DialAdaptive(ctx, serverAddr, domain, fingerprint, token, agentKey)
+}
+
+func DialAdaptive(ctx context.Context, serverAddr, domain, fingerprint string, token []byte, agentKey ed25519.PrivateKey) (*Client, error) {
+	size, err := DiscoverPayloadSize(ctx, serverAddr, domain)
+	if err != nil {
+		return nil, fmt.Errorf("DNS payload discovery: %w", err)
+	}
+	return dialWithSize(ctx, serverAddr, domain, fingerprint, token, agentKey, security.AdaptiveProfile, size)
+}
+
+// DiscoverPayloadSize tests both DNS directions before establishing a session.
+// The server echoes a same-sized probe, so a successful candidate confirms
+// that both the query and response fit the current path.
+func DiscoverPayloadSize(ctx context.Context, serverAddr, domain string) (int, error) {
+	host, _, err := net.SplitHostPort(serverAddr)
+	if err != nil || net.ParseIP(host) == nil {
+		return 0, errors.New("direct DNS requires a server IP literal")
+	}
+	server, err := net.ResolveUDPAddr("udp", serverAddr)
+	if err != nil {
+		return 0, err
+	}
+	conn, err := net.DialUDP("udp", nil, server)
+	if err != nil {
+		return 0, err
+	}
+	defer conn.Close()
+	domain = strings.ToLower(strings.TrimSuffix(domain, ".")) + "."
+	sizes := [...]int{128, 192, 256, 320, 384, 448, 512, 576, 640, 704, 768, 800}
+	best, lo, hi := -1, 0, len(sizes)-1
+	for lo <= hi {
+		mid := lo + (hi-lo)/2
+		probe := make([]byte, 84+sizes[mid])
+		probe[0] = security.PayloadProbe
+		if _, err = rand.Read(probe[1:]); err != nil {
+			return 0, err
+		}
+		passed := false
+		for attempt := 0; attempt < 3 && ctx.Err() == nil; attempt++ {
+			attemptCtx, cancel := context.WithTimeout(ctx, 650*time.Millisecond)
+			response, probeErr := exchange(attemptCtx, conn, domain, probe)
+			cancel()
+			if probeErr == nil && bytes.Equal(response, probe) {
+				passed = true
+				break
+			}
+		}
+		if passed {
+			best = mid
+			lo = mid + 1
+		} else {
+			hi = mid - 1
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	if best < 0 {
+		return 0, errors.New("server did not answer payload probes")
+	}
+	return sizes[best], nil
 }
 
 // DiscoverFingerprint reads the server identity for an explicit trust-on-first-
@@ -94,10 +156,21 @@ func DiscoverFingerprint(ctx context.Context, serverAddr, domain string) (string
 }
 
 func DialProfile(ctx context.Context, serverAddr, domain, fingerprint string, token []byte, agentKey ed25519.PrivateKey, profile byte) (*Client, error) {
+	if profile > 1 {
+		return nil, errors.New("invalid payload profile")
+	}
+	size := 800
+	if profile == 1 {
+		size = 320
+	}
+	return dialWithSize(ctx, serverAddr, domain, fingerprint, token, agentKey, profile, size)
+}
+
+func dialWithSize(ctx context.Context, serverAddr, domain, fingerprint string, token []byte, agentKey ed25519.PrivateKey, profile byte, size int) (*Client, error) {
 	if len(token) < 32 || len(agentKey) != ed25519.PrivateKeySize {
 		return nil, errors.New("agent key and 32-byte token required")
 	}
-	if profile > 1 {
+	if profile > security.AdaptiveProfile {
 		return nil, errors.New("invalid payload profile")
 	}
 	host, _, err := net.SplitHostPort(serverAddr)
@@ -125,6 +198,7 @@ func DialProfile(ctx context.Context, serverAddr, domain, fingerprint string, to
 		return nil, err
 	}
 	hs.Profile = profile
+	hs.FragmentSize = uint16(size)
 	var response []byte
 	for i := 0; i < 4; i++ {
 		response, err = exchange(ctx, conn, domain, hs.Hello())
@@ -146,11 +220,12 @@ func DialProfile(ctx context.Context, serverAddr, domain, fingerprint string, to
 	if err != nil {
 		return nil, err
 	}
-	fragSize := 800
-	if profile == 1 {
-		fragSize = 320
+	var sess *session.Session
+	if profile == security.AdaptiveProfile {
+		sess, err = session.NewAdaptive(hs.SessionID, keys, true, size)
+	} else {
+		sess, err = session.NewWithFragment(hs.SessionID, keys, true, size)
 	}
-	sess, err := session.NewWithFragment(hs.SessionID, keys, true, fragSize)
 	if err != nil {
 		return nil, err
 	}
@@ -343,19 +418,21 @@ func exchangeBuffer(ctx context.Context, conn *net.UDPConn, domain string, paylo
 	if _, err = conn.Write(b); err != nil {
 		return nil, err
 	}
-	n, err := conn.Read(buf)
-	if err != nil {
-		return nil, err
+	for {
+		n, readErr := conn.Read(buf)
+		if readErr != nil {
+			return nil, readErr
+		}
+		m, decodeErr := decode(buf[:n], false)
+		if decodeErr != nil || !m.Response || m.ID != id || m.Name != name {
+			continue // Delayed response to an earlier query on this socket.
+		}
+		if m.RCode != 0 {
+			return nil, errors.New("DNS response error")
+		}
+		if len(m.Payload) == 0 {
+			return nil, io.ErrUnexpectedEOF
+		}
+		return m.Payload, nil
 	}
-	m, err := Decode(buf[:n])
-	if err != nil {
-		return nil, err
-	}
-	if !m.Response || m.ID != id || m.Name != name || m.RCode != 0 {
-		return nil, errors.New("DNS response mismatch")
-	}
-	if len(m.Payload) == 0 {
-		return nil, io.ErrUnexpectedEOF
-	}
-	return m.Payload, nil
 }

@@ -50,49 +50,54 @@ type assembly struct {
 }
 
 type Stats struct {
-	TXBytes           uint64
-	RXBytes           uint64
-	TXPackets         uint64
-	RXPackets         uint64
-	Retransmits       uint64
-	Duplicates        uint64
-	RTT               time.Duration
-	InFlight          int
-	Queued            int
-	CongestionWindow  int
-	PeerReceiveWindow int
-	ReceiveWindow     int
+	TXBytes            uint64
+	RXBytes            uint64
+	TXPackets          uint64
+	RXPackets          uint64
+	Retransmits        uint64
+	Duplicates         uint64
+	RTT                time.Duration
+	InFlight           int
+	Queued             int
+	CongestionWindow   int
+	PeerReceiveWindow  int
+	ReceiveWindow      int
+	FragmentSize       int
+	PayloadAdjustments uint64
 }
 
 type Session struct {
-	mu           sync.Mutex
-	id           uint64
-	tx           cipher.AEAD
-	rx           cipher.AEAD
-	txPrefix     [4]byte
-	rxPrefix     [4]byte
-	nonceSeq     uint64
-	dataSeq      uint64
-	peerAckBase  uint64
-	msgSeq       uint64
-	ackBase      uint64
-	received     map[uint64]bool
-	seen         map[uint64]bool
-	maxSeen      uint64
-	ackDirty     bool
-	pending      map[uint64]*pending
-	queue        []fragment
-	priority     []fragment
-	reassembly   map[uint64]*assembly
-	deliver      chan []byte
-	wake         chan struct{}
-	done         chan struct{}
-	closed       bool
-	stats        Stats
-	cwnd         int
-	ackCount     int
-	fragmentSize int
-	peerWindow   int
+	mu              sync.Mutex
+	id              uint64
+	tx              cipher.AEAD
+	rx              cipher.AEAD
+	txPrefix        [4]byte
+	rxPrefix        [4]byte
+	nonceSeq        uint64
+	dataSeq         uint64
+	peerAckBase     uint64
+	msgSeq          uint64
+	ackBase         uint64
+	received        map[uint64]bool
+	seen            map[uint64]bool
+	maxSeen         uint64
+	ackDirty        bool
+	pending         map[uint64]*pending
+	queue           []fragment
+	priority        []fragment
+	reassembly      map[uint64]*assembly
+	deliver         chan []byte
+	wake            chan struct{}
+	done            chan struct{}
+	closed          bool
+	stats           Stats
+	cwnd            int
+	ackCount        int
+	fragmentSize    int
+	peerWindow      int
+	fragmentCeiling int
+	adaptivePayload bool
+	successAcks     int
 }
 
 func New(id uint64, keys security.Keys, client bool) (*Session, error) {
@@ -135,7 +140,15 @@ func NewWithFragment(id uint64, keys security.Keys, client bool, size int) (*Ses
 	if err != nil {
 		return nil, err
 	}
-	return &Session{id: id, tx: tx, rx: rx, txPrefix: txPrefix, rxPrefix: rxPrefix, received: make(map[uint64]bool), seen: make(map[uint64]bool), pending: make(map[uint64]*pending), reassembly: make(map[uint64]*assembly), deliver: make(chan []byte, 64), wake: make(chan struct{}, 1), done: make(chan struct{}), cwnd: 16, fragmentSize: size, peerWindow: maxPending}, nil
+	return &Session{id: id, tx: tx, rx: rx, txPrefix: txPrefix, rxPrefix: rxPrefix, received: make(map[uint64]bool), seen: make(map[uint64]bool), pending: make(map[uint64]*pending), reassembly: make(map[uint64]*assembly), deliver: make(chan []byte, 64), wake: make(chan struct{}, 1), done: make(chan struct{}), cwnd: 16, fragmentSize: size, fragmentCeiling: size, peerWindow: maxPending}, nil
+}
+
+func NewAdaptive(id uint64, keys security.Keys, client bool, size int) (*Session, error) {
+	s, err := NewWithFragment(id, keys, client, size)
+	if err == nil {
+		s.adaptivePayload = true
+	}
+	return s, err
 }
 
 func (s *Session) ID() uint64            { return s.id }
@@ -178,12 +191,13 @@ func (s *Session) enqueue(ctx context.Context, b []byte, priority bool) error {
 		return ErrQueueFull
 	}
 	s.msgSeq++
+	payload := append([]byte(nil), b...)
 	for o := 0; o < len(b); o += s.fragmentSize {
 		end := o + s.fragmentSize
 		if end > len(b) {
 			end = len(b)
 		}
-		f := fragment{id: s.msgSeq, total: uint32(len(b)), offset: uint32(o), data: append([]byte(nil), b[o:end]...)}
+		f := fragment{id: s.msgSeq, total: uint32(len(b)), offset: uint32(o), data: payload[o:end]}
 		if priority {
 			s.priority = append(s.priority, f)
 		} else {
@@ -233,6 +247,7 @@ func (s *Session) Stats() Stats {
 	v.CongestionWindow = s.cwnd
 	v.PeerReceiveWindow = s.peerWindow
 	v.ReceiveWindow = maxPending - len(s.received)
+	v.FragmentSize = s.fragmentSize
 	return v
 }
 
@@ -276,6 +291,11 @@ func (s *Session) NextPacket(now time.Time) ([]byte, error) {
 		oldest.fast = false
 		oldest.sent = now
 		oldest.retries++
+		if s.adaptivePayload && s.fragmentSize > 128 {
+			s.fragmentSize = max(128, s.fragmentSize-64)
+			s.successAcks = 0
+			s.stats.PayloadAdjustments++
+		}
 		s.cwnd /= 2
 		if s.cwnd < 2 {
 			s.cwnd = 2
@@ -283,7 +303,7 @@ func (s *Session) NextPacket(now time.Time) ([]byte, error) {
 		s.stats.Retransmits++
 		s.stats.TXPackets++
 		s.stats.TXBytes += uint64(len(oldest.wire))
-		return append([]byte(nil), oldest.wire...), nil
+		return oldest.wire, nil
 	}
 	var data []byte
 	var dataSeq uint64
@@ -291,9 +311,11 @@ func (s *Session) NextPacket(now time.Time) ([]byte, error) {
 		var f fragment
 		if len(s.priority) > 0 {
 			f = s.priority[0]
+			s.priority[0] = fragment{}
 			s.priority = s.priority[1:]
 		} else {
 			f = s.queue[0]
+			s.queue[0] = fragment{}
 			s.queue = s.queue[1:]
 		}
 		s.dataSeq++
@@ -306,7 +328,7 @@ func (s *Session) NextPacket(now time.Time) ([]byte, error) {
 		copy(data[18:], f.data)
 	}
 	s.nonceSeq++
-	h := make([]byte, headerSize)
+	h := make([]byte, headerSize, headerSize+len(data)+s.tx.Overhead())
 	h[0] = 1
 	if dataSeq != 0 {
 		h[1] = 1
@@ -325,16 +347,16 @@ func (s *Session) NextPacket(now time.Time) ([]byte, error) {
 	binary.BigEndian.PutUint64(h[36:44], bits)
 	binary.BigEndian.PutUint32(h[44:48], maxPending-uint32(len(s.received)))
 	binary.BigEndian.PutUint16(h[48:50], uint16(len(data)))
-	nonce := make([]byte, 12)
-	copy(nonce, s.txPrefix[:])
+	var nonce [12]byte
+	copy(nonce[:], s.txPrefix[:])
 	binary.BigEndian.PutUint64(nonce[4:], s.nonceSeq)
-	wire := s.tx.Seal(h, nonce, data, h)
+	wire := s.tx.Seal(h, nonce[:], data, h)
 	s.ackDirty = false
 	if len(wire) > maxPacket {
 		return nil, errors.New("encrypted packet too large")
 	}
 	if dataSeq != 0 {
-		s.pending[dataSeq] = &pending{wire: append([]byte(nil), wire...), sent: now}
+		s.pending[dataSeq] = &pending{wire: wire, sent: now}
 	}
 	// A single wake token only releases one pending DNS poll. Hand another
 	// token to the next poll while sendable fragments remain.
@@ -358,10 +380,10 @@ func (s *Session) Process(wire []byte, now time.Time) error {
 	if nonceSeq == 0 {
 		return errors.New("zero packet nonce")
 	}
-	nonce := make([]byte, 12)
-	copy(nonce, s.rxPrefix[:])
+	var nonce [12]byte
+	copy(nonce[:], s.rxPrefix[:])
 	binary.BigEndian.PutUint64(nonce[4:], nonceSeq)
-	plain, err := s.rx.Open(nil, nonce, wire[headerSize:], h)
+	plain, err := s.rx.Open(nil, nonce[:], wire[headerSize:], h)
 	if err != nil {
 		return err
 	}
@@ -425,6 +447,14 @@ func (s *Session) Process(wire []byte, now time.Time) error {
 		}
 	}
 	s.ackCount += newAcks
+	if s.adaptivePayload && newAcks > 0 {
+		s.successAcks += newAcks
+		if s.successAcks >= 64 && s.fragmentSize < s.fragmentCeiling {
+			s.fragmentSize = min(s.fragmentCeiling, s.fragmentSize+64)
+			s.successAcks = 0
+			s.stats.PayloadAdjustments++
+		}
+	}
 	if s.ackCount >= s.cwnd && s.cwnd < maxPending {
 		s.cwnd++
 		s.ackCount = 0
@@ -477,7 +507,7 @@ func (s *Session) Process(wire []byte, now time.Time) error {
 	total := binary.BigEndian.Uint32(plain[8:12])
 	off := binary.BigEndian.Uint32(plain[12:16])
 	n := int(binary.BigEndian.Uint16(plain[16:18]))
-	if id == 0 || total == 0 || total > maxMessage || n == 0 || n != len(plain)-18 || uint64(off)+uint64(n) > uint64(total) {
+	if id == 0 || total == 0 || total > maxMessage || n == 0 || n > s.fragmentCeiling || n != len(plain)-18 || uint64(off)+uint64(n) > uint64(total) {
 		return errors.New("invalid fragment")
 	}
 	if err = s.addFragment(id, total, off, plain[18:], now); err != nil {

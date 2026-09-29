@@ -61,6 +61,7 @@ type Server struct {
 	accepted     chan *Peer
 	limit        chan struct{}
 	closed       chan struct{}
+	packetPool   sync.Pool
 }
 
 func Listen(addr, domain string, identity ed25519.PrivateKey, token []byte) (*Server, error) {
@@ -79,6 +80,7 @@ func Listen(addr, domain string, identity ed25519.PrivateKey, token []byte) (*Se
 		return nil, err
 	}
 	s := &Server{conn: c, domain: strings.ToLower(strings.TrimSuffix(domain, ".")) + ".", identity: identity, token: append([]byte(nil), token...), peers: make(map[uint64]*Peer), accepted: make(chan *Peer, 128), limit: make(chan struct{}, 1024), closed: make(chan struct{})}
+	s.packetPool.New = func() any { return make([]byte, maxDNS) }
 	if _, err = rand.Read(s.cookieSecret[:]); err != nil {
 		c.Close()
 		return nil, err
@@ -105,10 +107,11 @@ func (s *Server) Serve(ctx context.Context) error {
 	defer s.Close()
 	go func() { <-ctx.Done(); s.Close() }()
 	go s.sweep(ctx)
-	buf := make([]byte, maxDNS)
 	for {
+		buf := s.packetPool.Get().([]byte)
 		n, addr, err := s.conn.ReadFromUDP(buf)
 		if err != nil {
+			s.packetPool.Put(buf)
 			select {
 			case <-s.closed:
 				return nil
@@ -119,10 +122,13 @@ func (s *Server) Serve(ctx context.Context) error {
 		select {
 		case s.limit <- struct{}{}:
 		default:
+			s.packetPool.Put(buf)
 			continue
 		}
-		packet := append([]byte(nil), buf[:n]...)
-		go func() { defer func() { <-s.limit }(); s.handle(ctx, addr, packet) }()
+		go func() {
+			defer func() { s.packetPool.Put(buf); <-s.limit }()
+			s.handle(ctx, addr, buf[:n])
+		}()
 	}
 }
 
@@ -169,12 +175,15 @@ func (s *Server) sweep(ctx context.Context) {
 }
 
 func (s *Server) handle(ctx context.Context, addr *net.UDPAddr, b []byte) {
-	m, err := Decode(b)
+	m, err := decode(b, false)
 	if err != nil || m.Response || !strings.HasSuffix(m.Name, "."+s.domain) {
 		return
 	}
 	var out []byte
-	if len(m.Payload) == 106 && m.Payload[0] == security.Hello {
+	if len(m.Payload) >= 84+128 && len(m.Payload) <= 84+800 && m.Payload[0] == security.PayloadProbe {
+		// Equal-size echo avoids amplifying an unauthenticated request.
+		out = m.Payload
+	} else if (len(m.Payload) == 106 || len(m.Payload) == 108) && m.Payload[0] == security.Hello {
 		source := addr.IP.String()
 		if !security.CheckCookie(s.cookieSecret[:], source, m.Payload, time.Now()) {
 			out, _ = security.MakeCookie(s.cookieSecret[:], source, m.Payload, time.Now())
@@ -216,8 +225,14 @@ func (s *Server) handle(ctx context.Context, addr *net.UDPAddr, b []byte) {
 			fragSize := 800
 			if hs.Profile == 1 {
 				fragSize = 320
+			} else if hs.Profile == security.AdaptiveProfile {
+				fragSize = int(hs.FragmentSize)
 			}
-			sess, err = session.NewWithFragment(sid, keys, false, fragSize)
+			if hs.Profile == security.AdaptiveProfile {
+				sess, err = session.NewAdaptive(sid, keys, false, fragSize)
+			} else {
+				sess, err = session.NewWithFragment(sid, keys, false, fragSize)
+			}
 			if err != nil {
 				s.mu.Unlock()
 				return

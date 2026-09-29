@@ -424,19 +424,18 @@ func agent(args []string) error {
 	if err != nil {
 		return err
 	}
-	var profile byte
-	if *profileFlag == "small" {
-		profile = 1
-	}
-	failures := 0
 	for {
-		c, err := dns.DialProfile(ctx, *server, *domain, pinnedFingerprint, token, key, profile)
-		if err != nil {
-			failures++
-			if *profileFlag == "auto" && failures >= 3 && profile == 0 {
+		var c *dns.Client
+		if *profileFlag == "auto" {
+			c, err = dns.DialAdaptive(ctx, *server, *domain, pinnedFingerprint, token, key)
+		} else {
+			profile := byte(0)
+			if *profileFlag == "small" {
 				profile = 1
-				log.Print("switching to small DNS payload profile")
 			}
+			c, err = dns.DialProfile(ctx, *server, *domain, pinnedFingerprint, token, key, profile)
+		}
+		if err != nil {
 			if ctx.Err() != nil {
 				return nil
 			}
@@ -448,7 +447,6 @@ func agent(args []string) error {
 				continue
 			}
 		}
-		failures = 0
 		if savePin {
 			if err := saveServerFingerprint(*fingerprintFile, pinnedFingerprint); err != nil {
 				c.Close()
@@ -461,7 +459,7 @@ func agent(args []string) error {
 			c.Close()
 			return err
 		}
-		log.Printf("connected: session=%d agent=%s", c.Session.ID(), security.Fingerprint(key))
+		log.Printf("connected: session=%d agent=%s fragment=%d", c.Session.ID(), security.Fingerprint(key), c.Session.Stats().FragmentSize)
 		if *probe || *probeCount > 0 {
 			err = runProbes(ctx, c, *probeSize, *probeCount, *interval)
 		} else {
@@ -475,12 +473,8 @@ func agent(args []string) error {
 		}
 		stats, q, r := c.Stats()
 		adaptive := c.AdaptiveStats()
-		log.Printf("session finished: queries=%d responses=%d tx=%d rx=%d retransmits=%d rtt=%s queued=%d in_flight=%d cwnd=%d peer_window=%d dns_outstanding=%d dns_target=%d dns_health_window=%d", q, r, stats.TXBytes, stats.RXBytes, stats.Retransmits, stats.RTT, stats.Queued, stats.InFlight, stats.CongestionWindow, stats.PeerReceiveWindow, adaptive.Outstanding, adaptive.Target, adaptive.HealthWindow)
+		log.Printf("session finished: queries=%d responses=%d tx=%d rx=%d retransmits=%d rtt=%s fragment=%d payload_adjustments=%d queued=%d in_flight=%d cwnd=%d peer_window=%d dns_outstanding=%d dns_target=%d dns_health_window=%d", q, r, stats.TXBytes, stats.RXBytes, stats.Retransmits, stats.RTT, stats.FragmentSize, stats.PayloadAdjustments, stats.Queued, stats.InFlight, stats.CongestionWindow, stats.PeerReceiveWindow, adaptive.Outstanding, adaptive.Target, adaptive.HealthWindow)
 		c.Close()
-		if *profileFlag == "auto" && profile == 0 && err != nil {
-			profile = 1
-			log.Print("switching to small DNS payload profile after transport loss")
-		}
 		if *probeCount > 0 && err == nil {
 			return nil
 		}

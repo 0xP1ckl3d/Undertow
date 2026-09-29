@@ -78,6 +78,12 @@ func Encode(m Message) ([]byte, error) {
 }
 
 func Decode(b []byte) (Message, error) {
+	return decode(b, true)
+}
+
+// decode with copyPayload=false borrows the caller's packet buffer. Callers
+// must finish processing the payload before reusing that buffer.
+func decode(b []byte, copyPayload bool) (Message, error) {
 	var m Message
 	if len(b) < 12 || len(b) > maxDNS {
 		return m, ErrMalformed
@@ -106,7 +112,10 @@ func Decode(b []byte) (Message, error) {
 	if o+rdlen != len(b) || rdlen < 4 || binary.BigEndian.Uint16(b[o:o+2]) != optionCode || int(binary.BigEndian.Uint16(b[o+2:o+4])) != rdlen-4 {
 		return m, ErrMalformed
 	}
-	m.Payload = append([]byte(nil), b[o+4:]...)
+	m.Payload = b[o+4:]
+	if copyPayload {
+		m.Payload = append([]byte(nil), m.Payload...)
+	}
 	return m, nil
 }
 

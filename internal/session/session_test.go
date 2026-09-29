@@ -31,6 +31,26 @@ func pair(t *testing.T) (*Session, *Session) {
 	return a, b
 }
 
+func TestAdaptiveFragmentBackoff(t *testing.T) {
+	a, _ := pair(t)
+	a.adaptivePayload = true
+	defer a.Close()
+	if err := a.Send(context.Background(), bytes.Repeat([]byte{7}, 700)); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if _, err := a.NextPacket(now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.NextPacket(now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	stats := a.Stats()
+	if stats.FragmentSize != 736 || stats.PayloadAdjustments != 1 || stats.Retransmits != 1 {
+		t.Fatalf("unexpected adaptive stats: %+v", stats)
+	}
+}
+
 // This deterministic carrier drops and reorders encrypted packets without waiting
 // for wall-clock timers, so retransmission behavior is repeatable in CI.
 func TestDeterministicLossyCarrier(t *testing.T) {

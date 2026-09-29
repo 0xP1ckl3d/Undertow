@@ -97,3 +97,43 @@ func TestHandshakePinAuthAndCookie(t *testing.T) {
 		t.Fatal("accepted modified signature")
 	}
 }
+
+func TestAdaptiveHelloBindsFragmentSize(t *testing.T) {
+	_, serverKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := NewClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.Profile = AdaptiveProfile
+	client.FragmentSize = 512
+	secret := bytes.Repeat([]byte{0x42}, 32)
+	cookie, err := MakeCookie(secret, "127.0.0.1", client.Hello(), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.AcceptCookie(cookie); err != nil {
+		t.Fatal(err)
+	}
+	hello := client.Hello()
+	if !CheckCookie(secret, "127.0.0.1", hello, time.Now()) {
+		t.Fatal("adaptive cookie rejected")
+	}
+	modified := append([]byte(nil), hello...)
+	modified[67]++
+	if CheckCookie(secret, "127.0.0.1", modified, time.Now()) {
+		t.Fatal("fragment size was not cookie-bound")
+	}
+	serverHello, state, err := NewServerHello(serverKey, hello, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.FragmentSize != 512 {
+		t.Fatalf("negotiated fragment size=%d", state.FragmentSize)
+	}
+	if _, err := client.VerifyServerHello(serverHello, Fingerprint(serverKey)); err != nil {
+		t.Fatal(err)
+	}
+}

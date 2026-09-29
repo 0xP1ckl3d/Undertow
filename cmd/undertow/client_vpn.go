@@ -199,12 +199,17 @@ func clientCommand(args []string) error {
 	if err != nil {
 		return err
 	}
-	profile := byte(0)
-	if *profileFlag == "small" {
-		profile = 1
-	}
 	for ctx.Err() == nil {
-		c, err := dns.DialProfile(ctx, *server, *domain, pinnedFingerprint, token, key, profile)
+		var c *dns.Client
+		if *profileFlag == "auto" {
+			c, err = dns.DialAdaptive(ctx, *server, *domain, pinnedFingerprint, token, key)
+		} else {
+			profile := byte(0)
+			if *profileFlag == "small" {
+				profile = 1
+			}
+			c, err = dns.DialProfile(ctx, *server, *domain, pinnedFingerprint, token, key, profile)
+		}
 		if err == nil {
 			if savePin {
 				if err := saveServerFingerprint(*fingerprintFile, pinnedFingerprint); err != nil {
@@ -225,10 +230,6 @@ func clientCommand(args []string) error {
 			return nil
 		}
 		log.Printf("VPN session ended: %v", err)
-		if *profileFlag == "auto" && profile == 0 {
-			profile = 1
-			log.Print("switching to small DNS payload profile")
-		}
 		select {
 		case <-ctx.Done():
 			return nil

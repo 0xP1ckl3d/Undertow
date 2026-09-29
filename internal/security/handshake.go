@@ -17,12 +17,14 @@ import (
 )
 
 const (
-	Hello       = 1
-	Cookie      = 2
-	ServerHello = 3
-	Auth        = 4
-	AuthOK      = 5
-	AuthReject  = 6
+	Hello           = 1
+	Cookie          = 2
+	ServerHello     = 3
+	Auth            = 4
+	AuthOK          = 5
+	AuthReject      = 6
+	PayloadProbe    = 7
+	AdaptiveProfile = 2
 )
 
 var ErrHandshake = errors.New("invalid handshake")
@@ -35,12 +37,13 @@ type Keys struct {
 }
 
 type ClientState struct {
-	Ephemeral  *ecdh.PrivateKey
-	Nonce      [32]byte
-	Cookie     [40]byte
-	Profile    byte
-	Transcript []byte
-	SessionID  uint64
+	Ephemeral    *ecdh.PrivateKey
+	Nonce        [32]byte
+	Cookie       [40]byte
+	Profile      byte
+	FragmentSize uint16
+	Transcript   []byte
+	SessionID    uint64
 }
 
 func NewClient() (*ClientState, error) {
@@ -54,13 +57,35 @@ func NewClient() (*ClientState, error) {
 }
 
 func (s *ClientState) Hello() []byte {
-	b := make([]byte, 1+32+32+1+40)
+	length := 1 + 32 + 32 + 1 + 40
+	if s.Profile == AdaptiveProfile {
+		length += 2
+	}
+	b := make([]byte, length)
 	b[0] = Hello
 	copy(b[1:33], s.Nonce[:])
 	copy(b[33:65], s.Ephemeral.PublicKey().Bytes())
 	b[65] = s.Profile
-	copy(b[66:], s.Cookie[:])
+	cookieOffset := 66
+	if s.Profile == AdaptiveProfile {
+		binary.BigEndian.PutUint16(b[66:68], s.FragmentSize)
+		cookieOffset = 68
+	}
+	copy(b[cookieOffset:], s.Cookie[:])
 	return b
+}
+
+func helloCookieOffset(hello []byte) (int, bool) {
+	if len(hello) == 106 && hello[0] == Hello && hello[65] <= 1 {
+		return 66, true
+	}
+	if len(hello) == 108 && hello[0] == Hello && hello[65] == AdaptiveProfile {
+		size := binary.BigEndian.Uint16(hello[66:68])
+		if size >= 128 && size <= 800 {
+			return 68, true
+		}
+	}
+	return 0, false
 }
 
 func (s *ClientState) AcceptCookie(b []byte) error {
@@ -72,7 +97,8 @@ func (s *ClientState) AcceptCookie(b []byte) error {
 }
 
 func MakeCookie(secret []byte, source string, hello []byte, now time.Time) ([]byte, error) {
-	if len(hello) != 106 || hello[0] != Hello || hello[65] > 1 {
+	cookieOffset, valid := helloCookieOffset(hello)
+	if !valid {
 		return nil, ErrHandshake
 	}
 	b := make([]byte, 41)
@@ -80,38 +106,40 @@ func MakeCookie(secret []byte, source string, hello []byte, now time.Time) ([]by
 	binary.BigEndian.PutUint64(b[1:9], uint64(now.Unix()/30))
 	mac := hmac.New(sha256.New, secret)
 	mac.Write([]byte(source))
-	mac.Write(hello[1:66])
+	mac.Write(hello[1:cookieOffset])
 	mac.Write(b[1:9])
 	copy(b[9:], mac.Sum(nil))
 	return b, nil
 }
 
 func CheckCookie(secret []byte, source string, hello []byte, now time.Time) bool {
-	if len(hello) != 106 || hello[0] != Hello || hello[65] > 1 {
+	cookieOffset, valid := helloCookieOffset(hello)
+	if !valid {
 		return false
 	}
-	bucket := binary.BigEndian.Uint64(hello[66:74])
+	bucket := binary.BigEndian.Uint64(hello[cookieOffset : cookieOffset+8])
 	current := uint64(now.Unix() / 30)
 	if bucket > current || current-bucket > 1 {
 		return false
 	}
 	mac := hmac.New(sha256.New, secret)
 	mac.Write([]byte(source))
-	mac.Write(hello[1:66])
-	mac.Write(hello[66:74])
-	return hmac.Equal(mac.Sum(nil), hello[74:106])
+	mac.Write(hello[1:cookieOffset])
+	mac.Write(hello[cookieOffset : cookieOffset+8])
+	return hmac.Equal(mac.Sum(nil), hello[cookieOffset+8:])
 }
 
 type ServerState struct {
-	Ephemeral  *ecdh.PrivateKey
-	Transcript []byte
-	SessionID  uint64
-	Profile    byte
+	Ephemeral    *ecdh.PrivateKey
+	Transcript   []byte
+	SessionID    uint64
+	Profile      byte
+	FragmentSize uint16
 }
 
 // NewServerHello signs the complete negotiation context and returns ephemeral state.
 func NewServerHello(identity ed25519.PrivateKey, hello []byte, sid uint64) ([]byte, *ServerState, error) {
-	if len(hello) != 106 || hello[0] != Hello || hello[65] > 1 || sid == 0 {
+	if _, valid := helloCookieOffset(hello); !valid || sid == 0 {
 		return nil, nil, ErrHandshake
 	}
 	k, err := ecdh.X25519().GenerateKey(rand.Reader)
@@ -129,7 +157,11 @@ func NewServerHello(identity ed25519.PrivateKey, hello []byte, sid uint64) ([]by
 	transcript := append([]byte("undertow phase1 direct-dns handshake"), hello...)
 	transcript = append(transcript, b[:105]...)
 	copy(b[105:], ed25519.Sign(identity, transcript))
-	return b, &ServerState{Ephemeral: k, Transcript: transcript, SessionID: sid, Profile: hello[65]}, nil
+	state := &ServerState{Ephemeral: k, Transcript: transcript, SessionID: sid, Profile: hello[65]}
+	if state.Profile == AdaptiveProfile {
+		state.FragmentSize = binary.BigEndian.Uint16(hello[66:68])
+	}
+	return b, state, nil
 }
 
 func (s *ClientState) VerifyServerHello(b []byte, pinnedFingerprint string) (Keys, error) {
