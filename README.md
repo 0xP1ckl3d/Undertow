@@ -63,6 +63,8 @@ For a task that should run while you use the console, select an agent and enter 
 
 Agent inventory includes IPv4 routes with gateways, interfaces, route sources, and a separate default route. In the client console, `routes` shows candidates; after `use 1`, enter `route accept 10.20.0.0/16` for a reported network or `route add 10.20.0.0/16` for a manually known path. No server route command is required for this client-owned setup.
 
+`status` gives a short multi-agent view. Select an agent and type `show`, or run `undertow agent show AGENT_ID` on the server, for connection, transport, route, capability, job, and forwarding details. Add `--json` to the CLI command for structured output.
+
 Uploads and downloads display transfer progress and rate in the client console, including after attach. Press Ctrl-] to cancel a transfer. Completion reports the verified byte count and SHA-256 digest.
 
 For real deployments, use token or password enrollment. With `server --auth none`, anyone who can reach the listener can join, access network paths, and run commands on agents that allow execution.

@@ -156,6 +156,22 @@ func TestSelectedAgentStartsBackgroundJob(t *testing.T) {
 	}
 }
 
+func TestSelectedAgentShowUsesCurrentStatus(t *testing.T) {
+	caller := func(_ context.Context, method, path string, _ any) ([]byte, error) {
+		if method != "GET" || path != "/v1/status" {
+			return nil, fmt.Errorf("unexpected %s %s", method, path)
+		}
+		return json.Marshal(map[string]any{"agents": []control.AgentInfo{{ID: "agent-a", Hostname: "pivot-host", OS: "linux", Arch: "amd64", VirtualIP: "172.16.254.2", Routes: []control.NetworkRoute{{Prefix: "10.20.0.0/16", Gateway: "192.168.50.1"}}}}})
+	}
+	var output bytes.Buffer
+	if err := runConsole(context.Background(), strings.NewReader("use 1\nshow\nquit\n"), &output, caller, nil, nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "Agent agent-a") || !strings.Contains(output.String(), "10.20.0.0/16") {
+		t.Fatalf("agent show=%s", output.String())
+	}
+}
+
 func containsCall(calls []string, want string) bool {
 	for _, call := range calls {
 		if call == want {

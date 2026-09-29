@@ -163,16 +163,13 @@ func renderStatus(w io.Writer, data []byte) error {
 		return err
 	}
 	fmt.Fprintf(w, "Agents (%d)\n", len(status.Agents))
-	fmt.Fprintf(w, "%-18s %-16s %-24s %-18s %8s %8s %7s %4s\n", "ID", "Virtual IP", "Host", "Remote", "RX", "TX", "Streams", "Jobs")
+	fmt.Fprintf(w, "%-18s %-16s %-24s %-18s %8s %8s %7s %4s %4s\n", "ID", "Virtual IP", "Host", "Remote", "RX", "TX", "Streams", "Jobs", "Fwd")
 	for _, a := range status.Agents {
 		id := a.ID
 		if len(id) > 18 {
 			id = id[:18]
 		}
-		fmt.Fprintf(w, "%-18s %-16s %-24s %-18s %8d %8d %7d %4d\n", id, a.VirtualIP, a.Hostname, a.Remote, a.RXBytes, a.TXBytes, a.Streams, a.ActiveJobs)
-		for _, prefix := range a.AdvertisedRoutes {
-			fmt.Fprintf(w, "  advertised %s via %s\n", prefix, a.ID)
-		}
+		fmt.Fprintf(w, "%-18s %-16s %-24s %-18s %8d %8d %7d %4d %4d\n", id, a.VirtualIP, a.Hostname, a.Remote, a.RXBytes, a.TXBytes, a.Streams, a.ActiveJobs, a.ActiveForwards)
 		if a.Capabilities != nil {
 			fmt.Fprintf(w, "  capabilities supported=%s allowed=%s\n", strings.Join(a.Capabilities.Supported, ","), strings.Join(a.Capabilities.Allowed, ","))
 		} else {
@@ -193,6 +190,58 @@ func renderStatus(w io.Writer, data []byte) error {
 	}
 	if status.Selected != "" {
 		fmt.Fprintf(w, "Selected: %s\n", status.Selected)
+	}
+	return nil
+}
+
+func renderAgentShow(w io.Writer, a control.AgentInfo) error {
+	fmt.Fprintf(w, "Agent %s\n", a.ID)
+	fmt.Fprintf(w, "Host: %s  OS: %s/%s  Virtual IP: %s  Remote: %s\n", a.Hostname, a.OS, a.Arch, a.VirtualIP, a.Remote)
+	if !a.Connected.IsZero() {
+		fmt.Fprintf(w, "Connected: %s  Duration: %s\n", a.Connected.Local().Format(time.RFC3339), time.Since(a.Connected).Round(time.Second))
+	}
+	if !a.LastSeen.IsZero() {
+		fmt.Fprintf(w, "Last seen: %s ago\n", time.Since(a.LastSeen).Round(time.Second))
+	}
+	fmt.Fprintf(w, "RTT: %s  Encrypted RX/TX: %d/%d bytes  Current RX/TX: %.1f/%.1f KiB/s\n", a.RTT, a.RXBytes, a.TXBytes, a.RXRate/1024, a.TXRate/1024)
+	fmt.Fprintf(w, "Retransmits: %d  Duplicates: %d  CWND: %d  Queued: %d  In flight: %d\n", a.Retransmits, a.Duplicates, a.Window, a.Queued, a.InFlight)
+	fmt.Fprintf(w, "Receive window: %d  Peer receive window: %d  DNS fragment: %d bytes  Payload adjustments: %d\n", a.ReceiveWindow, a.PeerReceiveWindow, a.FragmentSize, a.PayloadAdjustments)
+	fmt.Fprintf(w, "Mux streams: %d  Active jobs: %d  Active TCP forwards: %d\n", a.Streams, a.ActiveJobs, a.ActiveForwards)
+	if a.Capabilities != nil {
+		fmt.Fprintf(w, "Capabilities: %s\n", strings.Join(a.Capabilities.Allowed, ", "))
+	} else {
+		fmt.Fprintln(w, "Capabilities: unknown (older agent)")
+	}
+	if len(a.Interfaces) > 0 {
+		fmt.Fprintln(w, "Interfaces:")
+		for _, iface := range a.Interfaces {
+			fmt.Fprintf(w, "  %s\n", iface)
+		}
+	}
+	if len(a.AdvertisedRoutes) > 0 {
+		fmt.Fprintln(w, "Advertised networks:")
+		for _, prefix := range a.AdvertisedRoutes {
+			fmt.Fprintf(w, "  %s\n", prefix)
+		}
+	}
+	if len(a.Routes) > 0 {
+		fmt.Fprintln(w, "Discovered IPv4 routes:")
+		for _, route := range a.Routes {
+			kind := "direct"
+			if !route.Direct {
+				kind = "via " + route.Gateway
+			}
+			fmt.Fprintf(w, "  %-18s %-22s interface=%s type=%s source=%s\n", route.Prefix, kind, route.Interface, route.Type, route.Source)
+		}
+	}
+	if a.DefaultRoute != nil {
+		fmt.Fprintf(w, "Default route: via %s interface=%s source=%s\n", a.DefaultRoute.Gateway, a.DefaultRoute.Interface, a.DefaultRoute.Source)
+	}
+	if len(a.Forwards) > 0 {
+		fmt.Fprintln(w, "TCP forwards:")
+		for _, forward := range a.Forwards {
+			fmt.Fprintf(w, "  %s -> %s (id %s)\n", forward.Bind, forward.Target, forward.ID)
+		}
 	}
 	return nil
 }
@@ -219,7 +268,14 @@ func agentCommand(args []string) error {
 		if err != nil {
 			return err
 		}
-		return printJSON(data)
+		if o.json {
+			return printJSON(data)
+		}
+		var agent control.AgentInfo
+		if err := json.Unmarshal(data, &agent); err != nil {
+			return err
+		}
+		return renderAgentShow(os.Stdout, agent)
 	case "select":
 		if len(o.positional) != 2 {
 			return errors.New("usage: undertow agent select ID")

@@ -32,29 +32,38 @@ type RouteDevice interface {
 }
 
 type AgentInfo struct {
-	ID               string                  `json:"id"`
-	SessionID        uint64                  `json:"session_id"`
-	VirtualIP        string                  `json:"virtual_ip"`
-	Remote           string                  `json:"remote"`
-	Hostname         string                  `json:"hostname,omitempty"`
-	OS               string                  `json:"os,omitempty"`
-	Arch             string                  `json:"arch,omitempty"`
-	Interfaces       []string                `json:"interfaces,omitempty"`
-	AdvertisedRoutes []string                `json:"advertised_routes,omitempty"`
-	Routes           []NetworkRoute          `json:"routes,omitempty"`
-	DefaultRoute     *NetworkRoute           `json:"default_route,omitempty"`
-	Capabilities     *pivot.CapabilityReport `json:"capabilities,omitempty"`
-	Connected        time.Time               `json:"connected"`
-	LastSeen         time.Time               `json:"last_seen"`
-	RTT              time.Duration           `json:"rtt_ns"`
-	RXBytes          uint64                  `json:"rx_bytes"`
-	TXBytes          uint64                  `json:"tx_bytes"`
-	Retransmits      uint64                  `json:"retransmits"`
-	Streams          int                     `json:"streams"`
-	InFlight         int                     `json:"in_flight"`
-	Queued           int                     `json:"queued"`
-	Window           int                     `json:"congestion_window"`
-	ActiveJobs       int                     `json:"active_jobs"`
+	ID                 string                  `json:"id"`
+	SessionID          uint64                  `json:"session_id"`
+	VirtualIP          string                  `json:"virtual_ip"`
+	Remote             string                  `json:"remote"`
+	Hostname           string                  `json:"hostname,omitempty"`
+	OS                 string                  `json:"os,omitempty"`
+	Arch               string                  `json:"arch,omitempty"`
+	Interfaces         []string                `json:"interfaces,omitempty"`
+	AdvertisedRoutes   []string                `json:"advertised_routes,omitempty"`
+	Routes             []NetworkRoute          `json:"routes,omitempty"`
+	DefaultRoute       *NetworkRoute           `json:"default_route,omitempty"`
+	Capabilities       *pivot.CapabilityReport `json:"capabilities,omitempty"`
+	Connected          time.Time               `json:"connected"`
+	LastSeen           time.Time               `json:"last_seen"`
+	RTT                time.Duration           `json:"rtt_ns"`
+	RXBytes            uint64                  `json:"rx_bytes"`
+	TXBytes            uint64                  `json:"tx_bytes"`
+	Retransmits        uint64                  `json:"retransmits"`
+	Duplicates         uint64                  `json:"duplicates"`
+	RXRate             float64                 `json:"rx_rate_bytes_per_second"`
+	TXRate             float64                 `json:"tx_rate_bytes_per_second"`
+	Streams            int                     `json:"streams"`
+	ActiveForwards     int                     `json:"active_forwards"`
+	Forwards           []ForwardInfo           `json:"forwards,omitempty"`
+	InFlight           int                     `json:"in_flight"`
+	Queued             int                     `json:"queued"`
+	Window             int                     `json:"congestion_window"`
+	ReceiveWindow      int                     `json:"receive_window"`
+	PeerReceiveWindow  int                     `json:"peer_receive_window"`
+	FragmentSize       int                     `json:"fragment_size"`
+	PayloadAdjustments uint64                  `json:"payload_adjustments"`
+	ActiveJobs         int                     `json:"active_jobs"`
 }
 
 type ClientInfo struct {
@@ -95,6 +104,11 @@ type agentState struct {
 	mux            *mux.Mux
 	inventory      AgentInfo
 	inventoryReady bool
+	rateAt         time.Time
+	rateRX         uint64
+	rateTX         uint64
+	rxRate         float64
+	txRate         float64
 }
 type Manager struct {
 	mu             sync.RWMutex
@@ -554,8 +568,8 @@ func (m *Manager) Only() *mux.Mux {
 }
 
 func (m *Manager) AgentList() []AgentInfo {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	out := make([]AgentInfo, 0, len(m.agents))
 	for _, state := range m.agents {
 		p := state.peer.Snapshot()
@@ -570,10 +584,29 @@ func (m *Manager) AgentList() []AgentInfo {
 		info.RXBytes = p.Transport.RXBytes
 		info.TXBytes = p.Transport.TXBytes
 		info.Retransmits = p.Transport.Retransmits
+		info.Duplicates = p.Transport.Duplicates
+		now := time.Now()
+		if elapsed := now.Sub(state.rateAt); !state.rateAt.IsZero() && elapsed >= 250*time.Millisecond {
+			state.rxRate = float64(p.Transport.RXBytes-state.rateRX) / elapsed.Seconds()
+			state.txRate = float64(p.Transport.TXBytes-state.rateTX) / elapsed.Seconds()
+		}
+		if state.rateAt.IsZero() || now.Sub(state.rateAt) >= 250*time.Millisecond {
+			state.rateAt, state.rateRX, state.rateTX = now, p.Transport.RXBytes, p.Transport.TXBytes
+		}
+		info.RXRate, info.TXRate = state.rxRate, state.txRate
 		info.Streams = state.mux.StreamCount()
 		info.InFlight = p.Transport.InFlight
 		info.Queued = p.Transport.Queued
 		info.Window = p.Transport.CongestionWindow
+		info.ReceiveWindow = p.Transport.ReceiveWindow
+		info.PeerReceiveWindow = p.Transport.PeerReceiveWindow
+		info.FragmentSize = p.Transport.FragmentSize
+		info.PayloadAdjustments = p.Transport.PayloadAdjustments
+		for _, forward := range m.forwards {
+			if forward.AgentID == info.ID {
+				info.ActiveForwards++
+			}
+		}
 		for _, job := range m.jobs {
 			if job.info.AgentID == info.ID && job.info.State == "running" {
 				info.ActiveJobs++
@@ -723,6 +756,7 @@ func (m *Manager) handler(token string) http.Handler {
 	muxer.HandleFunc("GET /v1/agents/{id}", func(w http.ResponseWriter, r *http.Request) {
 		for _, a := range m.AgentList() {
 			if a.ID == r.PathValue("id") {
+				a.Forwards = m.AgentForwards(a.ID)
 				jsonReply(w, http.StatusOK, a)
 				return
 			}

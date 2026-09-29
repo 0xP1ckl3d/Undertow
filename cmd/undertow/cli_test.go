@@ -162,6 +162,20 @@ func TestStatusShowsAgentAndVPNHostnames(t *testing.T) {
 	}
 }
 
+func TestAgentShowRendersDetailedTelemetry(t *testing.T) {
+	report := pivot.Capabilities{Pivot: true, HostOps: true, Interactive: true}.Report()
+	agent := control.AgentInfo{ID: "agent-a", Hostname: "pivot-host", OS: "windows", Arch: "amd64", VirtualIP: "172.16.254.2", Connected: time.Now().Add(-time.Minute), LastSeen: time.Now().Add(-time.Second), RTT: 25 * time.Millisecond, RXBytes: 12345, TXBytes: 6789, RXRate: 2048, TXRate: 1024, Retransmits: 3, Duplicates: 2, Window: 16, Queued: 5, InFlight: 7, Streams: 4, ActiveJobs: 1, ActiveForwards: 2, AdvertisedRoutes: []string{"192.168.50.0/24"}, Routes: []control.NetworkRoute{{Prefix: "10.20.0.0/16", Gateway: "192.168.50.1", Interface: "Ethernet", Source: "manual"}}, DefaultRoute: &control.NetworkRoute{Prefix: "0.0.0.0/0", Gateway: "192.168.50.1", Interface: "Ethernet"}, Capabilities: &report, Forwards: []control.ForwardInfo{{Bind: "0.0.0.0:8080", Target: "127.0.0.1:8080"}}}
+	var output bytes.Buffer
+	if err := renderAgentShow(&output, agent); err != nil {
+		t.Fatal(err)
+	}
+	for _, part := range []string{"pivot-host", "windows/amd64", "172.16.254.2", "25ms", "12345/6789", "Retransmits: 3", "Duplicates: 2", "CWND: 16", "Active jobs: 1", "Active TCP forwards: 2", "192.168.50.0/24", "10.20.0.0/16", "192.168.50.1", "0.0.0.0:8080 -> 127.0.0.1:8080", "pivot, hostops, interactive"} {
+		if !strings.Contains(output.String(), part) {
+			t.Fatalf("missing %q in %s", part, output.String())
+		}
+	}
+}
+
 func TestDuplicateModeArgumentIsRejected(t *testing.T) {
 	for _, tc := range []struct {
 		name string

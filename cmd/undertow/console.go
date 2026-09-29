@@ -261,6 +261,8 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 		}
 		if selectedID != "" {
 			switch args[0] {
+			case "show":
+				args = append([]string{"show", selectedID}, args[1:]...)
 			case "jobs":
 				args = append(args, selectedID)
 			case "job":
@@ -393,6 +395,7 @@ func printConsoleHelp(output io.Writer, vpnClient, selected bool) {
   route add CIDR         Add a route through this agent
   route del CIDR         Remove a route
   status                 Show full status
+  show                   Show detailed telemetry for this agent
   back                   Return to the main menu
   help                   Show this menu
   quit                   Exit the console
@@ -414,6 +417,7 @@ Quote paths or arguments containing spaces. Programs run without a shell.
   agents                 List connected agents by number
   use NUMBER             Enter an agent (ID prefix or hostname also works)
   status                 Show agents, VPN clients, and routes
+  agent show ID          Show detailed agent telemetry
   routes                 Show advertised and locally accepted routes
   internal on|off        Change this client's global pivot mode
   forward list           List this client's agent TCP forwards
@@ -430,6 +434,7 @@ Host commands: pwd, ls, stat, mkdir, rm, whoami, ps, privileges, env, interfaces
   agents                 List connected agents by number
   use NUMBER             Enter an agent (ID prefix or hostname also works)
   status                 Show agents, VPN clients, and routes
+  agent show ID          Show detailed agent telemetry
   routes                 Show global routes
   jobs                   List background tasks
   route del CIDR         Remove a global route
@@ -475,10 +480,33 @@ func splitConsoleCommand(line string) ([]string, error) {
 }
 
 func runConsoleCommand(ctx context.Context, output io.Writer, call consoleCaller, vpnClient bool, ownClientID uint64, clientRoutes clientRouteAction, args []string) error {
+	if args[0] == "agent" && len(args) == 3 && args[1] == "show" {
+		args = []string{"show", args[2]}
+	}
 	if args[0] == "jobs" || args[0] == "job" {
 		return runConsoleJobCommand(ctx, output, call, args)
 	}
 	switch args[0] {
+	case "show":
+		if len(args) != 2 {
+			return errors.New("use agent show AGENT_ID or select an agent and type show")
+		}
+		data, err := call(ctx, http.MethodGet, "/v1/status", nil)
+		if err != nil {
+			return err
+		}
+		var status struct {
+			Agents []control.AgentInfo `json:"agents"`
+		}
+		if err := json.Unmarshal(data, &status); err != nil {
+			return err
+		}
+		for _, agent := range status.Agents {
+			if agent.ID == args[1] {
+				return renderAgentShow(output, agent)
+			}
+		}
+		return errors.New("agent is not connected")
 	case "help":
 		if vpnClient {
 			fmt.Fprint(output, `VPN client commands:

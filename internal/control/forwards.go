@@ -130,6 +130,19 @@ func (m *Manager) ClientForwards(clientID uint64) []ForwardInfo {
 	return forwards
 }
 
+func (m *Manager) AgentForwards(agentID string) []ForwardInfo {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var out []ForwardInfo
+	for _, forward := range m.forwards {
+		if forward.AgentID == agentID {
+			out = append(out, forward.ForwardInfo)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Bind < out[j].Bind })
+	return out
+}
+
 func (m *Manager) DeleteClientForward(clientID uint64, agentID, bind string) error {
 	m.mu.Lock()
 	var stream *mux.Stream

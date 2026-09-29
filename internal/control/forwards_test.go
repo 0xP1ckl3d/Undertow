@@ -71,6 +71,9 @@ func TestVPNClientForwardsTCPThroughSelectedAgent(t *testing.T) {
 	if err := json.Unmarshal(data, &forward); err != nil || forward.Bind == "" {
 		t.Fatalf("invalid forward: %s: %v", data, err)
 	}
+	if listed := manager.AgentList(); len(listed) != 1 || listed[0].ActiveForwards != 1 || len(manager.AgentForwards("agent-a")) != 1 {
+		t.Fatalf("active forward absent from agent status: %+v", listed)
+	}
 	conn, err := net.DialTimeout("tcp4", forward.Bind, 2*time.Second)
 	if err != nil {
 		t.Fatal(err)

@@ -47,6 +47,8 @@ quit
 | `job show ID` | Either menu | Show task state, timestamps, exit status, and output size. |
 | `job output ID` | Either menu | Read retained output, including while the task runs. |
 | `job cancel ID` | Either menu | Stop a running task. |
+| `show` | Selected agent | Show detailed agent telemetry and discovered networks. |
+| `agent show AGENT_ID` | Main menu | Show that agent's detailed telemetry. |
 | `exec AGENT_ID PROGRAM [ARGS]` | Main menu | Start one program directly on the named agent. |
 | `HOST_OP AGENT_ID [ARGS]` | Main menu | Run a built-in host operation on the named agent. See the table below. |
 

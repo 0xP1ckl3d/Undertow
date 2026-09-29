@@ -239,6 +239,7 @@ Undertow without stopping the VPN. --deny=interactive blocks these sessions.
 Use 'job start PROGRAM [ARGS]' inside the agent menu for a task that should
 continue while the console is detached. 'jobs', 'job show ID', 'job output ID',
 and 'job cancel ID' manage it.
+Use 'show' in the selected agent menu for detailed telemetry and routes.
 Inside an agent, use built-in pwd, ls, stat, mkdir, rm, whoami, ps,
 privileges, env, interfaces, dns, and route-table commands. --deny=exec
 blocks arbitrary programs while leaving these built-ins available;
