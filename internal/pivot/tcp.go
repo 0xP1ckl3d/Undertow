@@ -57,6 +57,14 @@ func ServeAgentWithCapabilities(ctx context.Context, m *mux.Mux, caps Capabiliti
 			go serveInteractive(ctx, s)
 			continue
 		}
+		if s.Destination() == ScriptDestination {
+			if !caps.Scripts {
+				s.Fail(errors.New("agent scripts are disabled"))
+				continue
+			}
+			go serveScript(ctx, s)
+			continue
+		}
 		if s.Destination() == FileDestination {
 			if !caps.Upload && !caps.Download {
 				s.Fail(errors.New("agent file transfer is disabled"))

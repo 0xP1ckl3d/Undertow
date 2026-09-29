@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -153,6 +154,39 @@ func TestSelectedAgentStartsBackgroundJob(t *testing.T) {
 	}
 	if !slices.Contains(requests, "POST /v1/agents/agent-a/jobs") || !slices.Contains(requests, "GET /v1/jobs?agent_id=agent-a") {
 		t.Fatalf("requests=%v", requests)
+	}
+}
+
+func TestSelectedAgentStartsMemoryScriptJob(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "check.sh")
+	if err := os.WriteFile(path, []byte("echo script\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	seen := false
+	caller := func(_ context.Context, method, route string, body any) ([]byte, error) {
+		if route == "/v1/status" {
+			return json.Marshal(map[string]any{"agents": []control.AgentInfo{{ID: "agent-a"}}})
+		}
+		if method == "POST" && route == "/v1/agents/agent-a/scripts/jobs" {
+			encoded, _ := json.Marshal(body)
+			var request struct {
+				Language string `json:"language"`
+				Source   []byte `json:"source"`
+			}
+			if json.Unmarshal(encoded, &request) != nil || request.Language != "bash" || string(request.Source) != "echo script\n" {
+				t.Fatalf("script request=%s", encoded)
+			}
+			seen = true
+			return json.Marshal(control.JobInfo{ID: "script-job", AgentID: "agent-a", Kind: "script"})
+		}
+		return nil, fmt.Errorf("unexpected %s %s", method, route)
+	}
+	var output bytes.Buffer
+	if err := runConsole(context.Background(), strings.NewReader("use 1\nrun-script --background bash \""+path+"\"\nquit\n"), &output, caller, nil, nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !seen || !strings.Contains(output.String(), "Script job script-job started") {
+		t.Fatalf("request seen=%t output=%s", seen, output.String())
 	}
 }
 

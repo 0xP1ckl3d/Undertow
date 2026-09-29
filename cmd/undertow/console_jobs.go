@@ -33,7 +33,11 @@ func runConsoleJobCommand(ctx context.Context, output io.Writer, call consoleCal
 		}
 		fmt.Fprintf(output, "Jobs (%d):\n", len(jobs))
 		for _, job := range jobs {
-			fmt.Fprintf(output, "  %s  %-10s  %-12s  %s  %s\n", job.ID, job.State, shortAgentID(job.AgentID), job.Started.Local().Format("2006-01-02 15:04:05"), strings.Join(job.Argv, " "))
+			label := strings.Join(job.Argv, " ")
+			if job.Kind == "script" {
+				label = job.Language + " script"
+			}
+			fmt.Fprintf(output, "  %s  %-10s  %-12s  %s  %s\n", job.ID, job.State, shortAgentID(job.AgentID), job.Started.Local().Format("2006-01-02 15:04:05"), label)
 		}
 		return nil
 	}
@@ -86,7 +90,7 @@ func runConsoleJobCommand(ctx context.Context, output io.Writer, call consoleCal
 		}
 		return nil
 	}
-	fmt.Fprintf(output, "Job %s  agent=%s  state=%s  started=%s\n", job.ID, job.AgentID, job.State, job.Started.Local().Format(time.RFC3339))
+	fmt.Fprintf(output, "Job %s  agent=%s  type=%s  state=%s  started=%s\n", job.ID, job.AgentID, job.Kind, job.State, job.Started.Local().Format(time.RFC3339))
 	if job.Ended != nil {
 		fmt.Fprintf(output, "Ended: %s\n", job.Ended.Local().Format(time.RFC3339))
 	}

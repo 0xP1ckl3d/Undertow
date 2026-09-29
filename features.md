@@ -268,6 +268,21 @@ VPN client console: job output JOB_ID
 VPN client console: job cancel JOB_ID
 ```
 
+### Memory-backed script execution
+
+`run-script` reads a local file on the VPN client or server operator machine, sends its source through the encrypted Undertow session, and streams it into Bash or PowerShell stdin on the selected agent. The agent does not create a script file. Stdout and stderr stream separately for foreground runs; background runs use the same bounded job store as command jobs. Source is limited to 1 MiB and runtime to 10 minutes. The independent `scripts` capability controls both forms.
+
+```text
+VPN client: printf 'id\n' > check.sh
+VPN client console: use 1
+VPN client console: run-script bash ./check.sh
+VPN client console: run-script --background bash ./check.sh
+VPN client console: job output JOB_ID
+Server: printf 'whoami\n' > audit.ps1
+Server console: use AGENT_ID
+Server console: run-script powershell ./audit.ps1
+```
+
 ### Upload and download
 
 File transfer streams through the server to the selected agent, verifies SHA-256, and refuses to overwrite an existing destination. The client console shows bytes, total, percentage, and current rate; Ctrl-] cancels and removes partial temporary files. Upload and download permissions are separate capabilities.
@@ -281,7 +296,7 @@ VPN client keyboard during a transfer: Ctrl-] to cancel
 
 ### Granular agent capabilities
 
-All capabilities are enabled by default: `pivot`, `exec`, `hostops`, `interactive`, `upload`, `download`, and `listeners`. Deny any combination at agent startup; the server and agent enforce the operation at the relevant stream.
+All capabilities are enabled by default: `pivot`, `exec`, `hostops`, `interactive`, `scripts`, `upload`, `download`, and `listeners`. Deny any combination at agent startup; the server and agent enforce the operation at the relevant stream.
 
 ```text
 Agent: undertow agent --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key --deny=exec,upload

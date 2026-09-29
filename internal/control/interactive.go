@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"time"
 
 	"undertow/internal/mux"
 	"undertow/internal/pivot"
@@ -16,6 +17,7 @@ import (
 
 type interactiveRelayRequest struct {
 	AgentID string `json:"agent_id"`
+	Kind    string `json:"kind,omitempty"`
 }
 
 // OpenClientInteractive relays one client console session through the server.
@@ -34,7 +36,30 @@ func OpenClientInteractive(ctx context.Context, client *mux.Mux, agentID string,
 	return pivot.StartInteractive(ctx, stream, bufio.NewReader(stream), request)
 }
 
+func OpenClientScript(ctx context.Context, client *mux.Mux, agentID, language string, source []byte) (*pivot.InteractiveSession, error) {
+	if client == nil {
+		return nil, errors.New("VPN session is not connected")
+	}
+	stream, err := client.Open(ctx, pivot.InteractiveRelayDestination)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.NewEncoder(stream).Encode(interactiveRelayRequest{AgentID: agentID, Kind: "script"}); err != nil {
+		stream.Close()
+		return nil, err
+	}
+	return pivot.StartMemorySession(ctx, stream, bufio.NewReader(stream), pivot.MemoryRequest{Language: language, Size: len(source)}, source)
+}
+
 func BridgeClientInteractive(ctx context.Context, client *mux.Mux, agentID string, local net.Conn) error {
+	return bridgeClientInteractive(ctx, client, agentID, "", local)
+}
+
+func BridgeClientScript(ctx context.Context, client *mux.Mux, agentID string, local net.Conn) error {
+	return bridgeClientInteractive(ctx, client, agentID, "script", local)
+}
+
+func bridgeClientInteractive(ctx context.Context, client *mux.Mux, agentID, kind string, local net.Conn) error {
 	if client == nil {
 		return errors.New("VPN session is not connected")
 	}
@@ -42,7 +67,7 @@ func BridgeClientInteractive(ctx context.Context, client *mux.Mux, agentID strin
 	if err != nil {
 		return err
 	}
-	if err := json.NewEncoder(stream).Encode(interactiveRelayRequest{AgentID: agentID}); err != nil {
+	if err := json.NewEncoder(stream).Encode(interactiveRelayRequest{AgentID: agentID, Kind: kind}); err != nil {
 		stream.Close()
 		return err
 	}
@@ -50,7 +75,28 @@ func BridgeClientInteractive(ctx context.Context, client *mux.Mux, agentID strin
 		stream.Close()
 		return err
 	}
-	pivot.Bridge(ctx, local, stream)
+	defer stream.Close()
+	outputDone := make(chan struct{})
+	go func() { _, _ = io.Copy(stream, local); _ = stream.CloseWrite() }()
+	go func() {
+		_, err := io.Copy(local, stream)
+		if err != nil {
+			_ = stream.Close()
+		}
+		if tcp, ok := local.(*net.TCPConn); ok {
+			_ = tcp.CloseWrite()
+		}
+		close(outputDone)
+	}()
+	select {
+	case <-outputDone:
+	case <-ctx.Done():
+	case <-stream.Done():
+		select {
+		case <-outputDone:
+		case <-time.After(3 * time.Second):
+		}
+	}
 	return nil
 }
 
@@ -75,7 +121,14 @@ func (m *Manager) ServeInteractiveRelay(ctx context.Context, client *mux.Stream)
 		pivot.RejectInteractive(client, errors.New("agent is not connected"))
 		return
 	}
-	upstream, err := agent.Open(ctx, pivot.InteractiveDestination)
+	destination := pivot.InteractiveDestination
+	if request.Kind == "script" {
+		destination = pivot.ScriptDestination
+	} else if request.Kind != "" {
+		pivot.RejectInteractive(client, errors.New("unknown task kind"))
+		return
+	}
+	upstream, err := agent.Open(ctx, destination)
 	if err != nil {
 		pivot.RejectInteractive(client, err)
 		return
@@ -110,7 +163,11 @@ func (m *Manager) interactiveHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "agent is not connected", http.StatusNotFound)
 		return
 	}
-	upstream, err := agent.Open(r.Context(), pivot.InteractiveDestination)
+	destination := pivot.InteractiveDestination
+	if r.URL.Path == "/v1/agents/"+r.PathValue("id")+"/script" {
+		destination = pivot.ScriptDestination
+	}
+	upstream, err := agent.Open(r.Context(), destination)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
@@ -133,16 +190,22 @@ func (m *Manager) interactiveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The client waits for the CONNECT response before sending the request.
-	done := make(chan struct{}, 2)
-	go func() { _, _ = io.Copy(upstream, rw); _ = upstream.CloseWrite(); done <- struct{}{} }()
-	go func() { _, _ = io.Copy(conn, upstream); _ = conn.(*net.TCPConn).CloseWrite(); done <- struct{}{} }()
-	for i := 0; i < 2; i++ {
+	outputDone := make(chan struct{})
+	go func() { _, _ = io.Copy(upstream, rw); _ = upstream.CloseWrite() }()
+	go func() {
+		_, err := io.Copy(conn, upstream)
+		if err != nil {
+			_ = upstream.Close()
+		}
+		_ = conn.(*net.TCPConn).CloseWrite()
+		close(outputDone)
+	}()
+	select {
+	case <-outputDone:
+	case <-upstream.Done():
 		select {
-		case <-done:
-		case <-r.Context().Done():
-			return
-		case <-upstream.Done():
-			return
+		case <-outputDone:
+		case <-time.After(3 * time.Second):
 		}
 	}
 }

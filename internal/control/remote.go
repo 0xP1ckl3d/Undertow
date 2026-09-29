@@ -48,7 +48,7 @@ func (m *Manager) ServeRemote(ctx context.Context, token string, clientID uint64
 		}
 	}()
 	var request remoteRequest
-	if err := json.NewDecoder(io.LimitReader(stream, 16385)).Decode(&request); err != nil {
+	if err := json.NewDecoder(io.LimitReader(stream, 6<<20)).Decode(&request); err != nil {
 		writeRemoteResponse(stream, remoteResponse{Status: http.StatusBadRequest, Body: []byte("invalid request")})
 		return
 	}
@@ -105,6 +105,9 @@ func clientRequestAllowed(request *http.Request, clientID uint64) bool {
 		return true
 	}
 	parts := strings.Split(path, "/")
+	if len(parts) == 6 && parts[1] == "v1" && parts[2] == "agents" && parts[3] != "" && parts[4] == "scripts" && parts[5] == "jobs" && !strings.ContainsAny(parts[3], "%\\") {
+		return true
+	}
 	return len(parts) == 5 && parts[1] == "v1" && parts[2] == "agents" && parts[3] != "" && (parts[4] == "exec" || parts[4] == "jobs") && !strings.ContainsAny(parts[3], "%\\")
 }
 

@@ -209,9 +209,9 @@ func (e *consoleEditor) complete() {
 	if strings.ContainsAny(input, " \t") || e.cursor != len(e.line) {
 		return
 	}
-	commands := []string{"agents", "use", "agent", "status", "routes", "jobs", "job", "help", "quit", "exec", "shell", "pwd", "ls", "stat", "mkdir", "rm", "whoami", "ps", "privileges", "env", "interfaces", "dns", "route-table"}
+	commands := []string{"agents", "use", "agent", "status", "routes", "jobs", "job", "help", "quit", "exec", "shell", "run-script", "pwd", "ls", "stat", "mkdir", "rm", "whoami", "ps", "privileges", "env", "interfaces", "dns", "route-table"}
 	if e.selected {
-		commands = []string{"show", "exec", "shell", "jobs", "job", "routes", "route", "status", "back", "help", "quit", "pwd", "ls", "stat", "mkdir", "rm", "whoami", "ps", "privileges", "env", "interfaces", "dns", "route-table"}
+		commands = []string{"show", "exec", "shell", "run-script", "jobs", "job", "routes", "route", "status", "back", "help", "quit", "pwd", "ls", "stat", "mkdir", "rm", "whoami", "ps", "privileges", "env", "interfaces", "dns", "route-table"}
 		if e.vpn {
 			commands = append(commands, "upload", "download")
 		}

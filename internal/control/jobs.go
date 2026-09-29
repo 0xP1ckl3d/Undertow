@@ -21,6 +21,8 @@ const jobOutputLimit = 256 << 10
 type JobInfo struct {
 	ID              string     `json:"id"`
 	AgentID         string     `json:"agent_id"`
+	Kind            string     `json:"kind,omitempty"`
+	Language        string     `json:"language,omitempty"`
 	Argv            []string   `json:"argv"`
 	Started         time.Time  `json:"started"`
 	Ended           *time.Time `json:"ended,omitempty"`
@@ -59,15 +61,43 @@ func (m *Manager) StartJob(ctx context.Context, owner uint64, agentID string, ar
 	if err != nil {
 		return JobInfo{}, err
 	}
+	return m.registerJob(owner, agentID, state.mux, session, JobInfo{AgentID: agentID, Kind: "command", Argv: append([]string(nil), argv...)})
+}
+
+func (m *Manager) StartScriptJob(ctx context.Context, owner uint64, agentID, language string, source []byte) (JobInfo, error) {
+	if len(source) == 0 || len(source) > pivot.ScriptSourceLimit {
+		return JobInfo{}, errors.New("script source exceeds the 1 MiB limit or is empty")
+	}
+	m.mu.RLock()
+	state := m.agents[agentID]
+	count := len(m.jobs)
+	m.mu.RUnlock()
+	if state == nil {
+		return JobInfo{}, errors.New("agent is not connected")
+	}
+	if count >= 512 {
+		return JobInfo{}, errors.New("job limit reached")
+	}
+	startCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	session, err := pivot.OpenScript(startCtx, state.mux, language, source)
+	if err != nil {
+		return JobInfo{}, err
+	}
+	return m.registerJob(owner, agentID, state.mux, session, JobInfo{AgentID: agentID, Kind: "script", Language: language})
+}
+
+func (m *Manager) registerJob(owner uint64, agentID string, agent *mux.Mux, session *pivot.InteractiveSession, info JobInfo) (JobInfo, error) {
 	var random [8]byte
 	if _, err := rand.Read(random[:]); err != nil {
 		session.Close()
 		return JobInfo{}, err
 	}
 	now := time.Now().UTC()
-	job := &jobState{info: JobInfo{ID: hex.EncodeToString(random[:]), AgentID: agentID, Argv: append([]string(nil), argv...), Started: now, State: "running"}, owner: owner, agent: state.mux, session: session}
+	info.ID, info.Started, info.State = hex.EncodeToString(random[:]), now, "running"
+	job := &jobState{info: info, owner: owner, agent: agent, session: session}
 	m.mu.Lock()
-	if current := m.agents[agentID]; current == nil || current.mux != state.mux {
+	if current := m.agents[agentID]; current == nil || current.mux != agent {
 		m.mu.Unlock()
 		session.Close()
 		return JobInfo{}, errors.New("agent disconnected")
@@ -87,20 +117,9 @@ func (m *Manager) collectJob(job *jobState) {
 			return
 		}
 		switch kind {
-		case pivot.InteractiveOutput:
+		case pivot.InteractiveOutput, pivot.InteractiveStderr:
 			m.mu.Lock()
-			job.info.OutputBytes += uint64(len(data))
-			if len(data) >= jobOutputLimit {
-				job.output = append(job.output[:0], data[len(data)-jobOutputLimit:]...)
-				job.info.OutputTruncated = true
-			} else {
-				if excess := len(job.output) + len(data) - jobOutputLimit; excess > 0 {
-					copy(job.output, job.output[excess:])
-					job.output = job.output[:len(job.output)-excess]
-					job.info.OutputTruncated = true
-				}
-				job.output = append(job.output, data...)
-			}
+			appendJobOutput(job, data)
 			m.mu.Unlock()
 		case pivot.InteractiveExit:
 			if len(data) != 4 {
@@ -116,12 +135,27 @@ func (m *Manager) collectJob(job *jobState) {
 			return
 		case pivot.InteractiveError:
 			m.mu.Lock()
-			job.output = append(job.output, data...)
+			appendJobOutput(job, data)
 			m.mu.Unlock()
 			m.finishJob(job, "failed", nil)
 			return
 		}
 	}
+}
+
+func appendJobOutput(job *jobState, data []byte) {
+	job.info.OutputBytes += uint64(len(data))
+	if len(data) >= jobOutputLimit {
+		job.output = append(job.output[:0], data[len(data)-jobOutputLimit:]...)
+		job.info.OutputTruncated = true
+		return
+	}
+	if excess := len(job.output) + len(data) - jobOutputLimit; excess > 0 {
+		copy(job.output, job.output[excess:])
+		job.output = job.output[:len(job.output)-excess]
+		job.info.OutputTruncated = true
+	}
+	job.output = append(job.output, data...)
 }
 
 func (m *Manager) finishJob(job *jobState, state string, exitCode *int) {
@@ -200,6 +234,22 @@ func (m *Manager) jobHTTPHandlers(muxer *http.ServeMux) {
 			return
 		}
 		job, err := m.StartJob(r.Context(), jobOwner(r.Context()), r.PathValue("id"), request.Argv)
+		if err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		jsonReply(w, http.StatusCreated, job)
+	})
+	muxer.HandleFunc("POST /v1/agents/{id}/scripts/jobs", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Language string `json:"language"`
+			Source   []byte `json:"source"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 2<<20)).Decode(&request); err != nil {
+			http.Error(w, "invalid script job request", 400)
+			return
+		}
+		job, err := m.StartScriptJob(r.Context(), jobOwner(r.Context()), r.PathValue("id"), request.Language, request.Source)
 		if err != nil {
 			http.Error(w, err.Error(), 400)
 			return

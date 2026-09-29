@@ -193,3 +193,20 @@ forward list
 ```
 
 From another host that can reach the selected agent, run `curl http://AGENT_IP:8080/`. The agent's `0.0.0.0:8080` listener accepts connections on all its IPv4 interfaces and forwards them to the VPN client's loopback service. The agent's firewall must allow TCP/8080. Stop the listener with `forward del 0.0.0.0:8080`. The listener remains active when the console is detached with `background`, and closes when either endpoint disconnects. It is session scoped; add it again after reconnect. Use `agent --deny=listeners` to disallow agent-side forwarding while retaining other capabilities. See [console commands](console.md#expose-a-client-tcp-service-on-an-agent) for main-menu syntax and limits.
+
+## 10. Run a local script without storing it on the agent
+
+Prepare a Bash script on the VPN client, or a PowerShell script on either console machine, then select an agent with that interpreter installed:
+
+```text
+VPN client: printf 'id\n' > check.sh
+VPN client console: agents
+VPN client console: use 1
+VPN client console: run-script bash ./check.sh
+VPN client console: run-script --background bash ./check.sh
+VPN client console: jobs
+VPN client console: job output JOB_ID
+VPN client console: job cancel JOB_ID
+```
+
+For a Windows agent, replace the command with `run-script powershell ./audit.ps1`. Undertow sends source through the encrypted connection directly to the interpreter's stdin; the agent does not need the local path or a temporary script file. The independent `scripts` capability controls this operation. A 1 MiB source and 10 minute runtime limit apply.

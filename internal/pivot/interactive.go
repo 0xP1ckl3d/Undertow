@@ -23,6 +23,7 @@ const (
 	InteractiveReady      byte = 'R'
 	InteractiveInput      byte = 'I'
 	InteractiveOutput     byte = 'O'
+	InteractiveStderr     byte = 'D'
 	InteractiveResize     byte = 'Z'
 	InteractiveExit       byte = 'X'
 	InteractiveError      byte = 'E'

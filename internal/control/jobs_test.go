@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/netip"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -30,6 +31,33 @@ func TestJobHelperProcess(t *testing.T) {
 	}
 	fmt.Print("job finished\n")
 	os.Exit(0)
+}
+
+func TestScriptJobUsesExistingLifecycle(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+	manager := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	server, agent := forwardAuditAgent(t, ctx, manager, "script-agent", 801, pivot.DefaultCapabilities())
+	defer server.Close()
+	defer agent.Close()
+	language, source := "bash", []byte("echo script-job-output\n")
+	if runtime.GOOS == "windows" {
+		language, source = "powershell", []byte("[Console]::Out.WriteLine('script-job-output')\n")
+	}
+	job, err := manager.StartScriptJob(ctx, 802, "script-agent", language, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.Kind != "script" || job.Language != language || len(job.Argv) != 0 {
+		t.Fatalf("script job metadata=%+v", job)
+	}
+	finished := waitJob(t, manager, 802, job.ID, func(j JobInfo) bool { return j.State == "completed" })
+	if finished.ExitCode == nil || *finished.ExitCode != 0 || !strings.Contains(finished.Output, "script-job-output") {
+		t.Fatalf("script job result=%+v", finished)
+	}
+	if _, err := manager.Job(803, job.ID, true); err == nil {
+		t.Fatal("script job crossed client ownership")
+	}
 }
 
 func waitJob(t *testing.T, manager *Manager, owner uint64, id string, predicate func(JobInfo) bool) JobInfo {

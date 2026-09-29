@@ -184,6 +184,12 @@ func clientCommand(args []string) error {
 		live.mu.RUnlock()
 		return control.BridgeClientInteractive(ctx, session, agentID, conn)
 	})
+	setBackgroundScriptHandler(func(ctx context.Context, agentID string, conn net.Conn) error {
+		live.mu.RLock()
+		session := live.session
+		live.mu.RUnlock()
+		return control.BridgeClientScript(ctx, session, agentID, conn)
+	})
 	setBackgroundTransferHandler(func(ctx context.Context, encoded json.RawMessage, progress func(pivot.TransferProgress)) (pivot.FileMessage, error) {
 		return live.transferProgress(ctx, encoded, progress)
 	})
@@ -194,6 +200,12 @@ func clientCommand(args []string) error {
 			live.mu.RUnlock()
 			return control.OpenClientInteractive(ctx, session, agentID, request)
 		}
+		script := func(ctx context.Context, agentID, language string, source []byte) (*pivot.InteractiveSession, error) {
+			live.mu.RLock()
+			session := live.session
+			live.mu.RUnlock()
+			return control.OpenClientScript(ctx, session, agentID, language, source)
+		}
 		transfer := func(ctx context.Context, request clientFileRequest, progress func(pivot.TransferProgress)) (pivot.FileMessage, error) {
 			encoded, err := json.Marshal(request)
 			if err != nil {
@@ -202,7 +214,7 @@ func clientCommand(args []string) error {
 			return live.transferProgress(ctx, encoded, progress)
 		}
 		go func() {
-			if err := runConsole(ctx, os.Stdin, os.Stdout, live.call, live.id, stop, live.routeCommand, live.events, consoleFeatures{open: opener, transfer: transfer}); err != nil && ctx.Err() == nil {
+			if err := runConsole(ctx, os.Stdin, os.Stdout, live.call, live.id, stop, live.routeCommand, live.events, consoleFeatures{open: opener, script: script, transfer: transfer}); err != nil && ctx.Err() == nil {
 				log.Printf("console: %v", err)
 				live.notify("Console failed: " + err.Error())
 				stop()

@@ -61,6 +61,8 @@ For interactive operation, run `undertow console` on the server or start a clien
 
 For a task that should run while you use the console, select an agent and enter `job start PROGRAM [ARGS]`. Use `jobs`, `job show ID`, `job output ID`, and `job cancel ID` to manage it. Tasks remain visible after client console detach/reattach while the agent stays connected; output is retained up to 256 KiB per job.
 
+Use `run-script bash ./check.sh` or `run-script powershell ./audit.ps1` in a selected-agent console to stream local source into that interpreter on the agent without creating a script file there. Add `--background` before the interpreter to create a job. The independent `scripts` capability can be disabled with `agent --deny=scripts`.
+
 Agent inventory includes IPv4 routes with gateways, interfaces, route sources, and a separate default route. In the client console, `routes` shows candidates; after `use 1`, enter `route accept 10.20.0.0/16` for a reported network or `route add 10.20.0.0/16` for a manually known path. No server route command is required for this client-owned setup.
 
 `status` gives a short multi-agent view. Select an agent and type `show`, or run `undertow agent show AGENT_ID` on the server, for connection, transport, route, capability, job, and forwarding details. Add `--json` to the CLI command for structured output.

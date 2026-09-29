@@ -30,6 +30,7 @@ const backgroundPIDEnv = "UNDERTOW_BACKGROUND_PID_FILE"
 var backgroundStop <-chan struct{}
 var backgroundConsoleHandler func(context.Context, consoleRPCRequest) consoleRPCResponse
 var backgroundInteractiveHandler func(context.Context, string, net.Conn) error
+var backgroundScriptHandler func(context.Context, string, net.Conn) error
 var backgroundTransferHandler func(context.Context, json.RawMessage, func(pivot.TransferProgress)) (pivot.FileMessage, error)
 var backgroundConsoleMu sync.RWMutex
 
@@ -42,6 +43,12 @@ func setBackgroundConsoleHandler(handler func(context.Context, consoleRPCRequest
 func setBackgroundInteractiveHandler(handler func(context.Context, string, net.Conn) error) {
 	backgroundConsoleMu.Lock()
 	backgroundInteractiveHandler = handler
+	backgroundConsoleMu.Unlock()
+}
+
+func setBackgroundScriptHandler(handler func(context.Context, string, net.Conn) error) {
+	backgroundConsoleMu.Lock()
+	backgroundScriptHandler = handler
 	backgroundConsoleMu.Unlock()
 }
 
@@ -298,7 +305,7 @@ func startBackgroundControl(pidPath string) (func(), error) {
 			go func(conn net.Conn) {
 				defer conn.Close()
 				_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
-				line, err := bufio.NewReader(io.LimitReader(conn, 1<<20)).ReadString('\n')
+				line, err := bufio.NewReader(io.LimitReader(conn, 6<<20)).ReadString('\n')
 				if err != nil {
 					_, _ = io.WriteString(conn, "DENIED\n")
 					return
@@ -315,10 +322,13 @@ func startBackgroundControl(pidPath string) (func(), error) {
 					if err := json.Unmarshal([]byte(request), &input); err != nil {
 						response.Error = "invalid console request"
 					} else {
-						if input.Action == "interactive" {
+						if input.Action == "interactive" || input.Action == "script" {
 							_ = conn.SetDeadline(time.Time{})
 							backgroundConsoleMu.RLock()
 							interactive := backgroundInteractiveHandler
+							if input.Action == "script" {
+								interactive = backgroundScriptHandler
+							}
 							backgroundConsoleMu.RUnlock()
 							if interactive == nil {
 								_, _ = io.WriteString(conn, "ERROR client console is unavailable\n")

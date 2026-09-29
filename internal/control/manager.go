@@ -782,6 +782,7 @@ func (m *Manager) handler(token string) http.Handler {
 		jsonReply(w, http.StatusOK, result)
 	})
 	muxer.HandleFunc("CONNECT /v1/agents/{id}/interactive", m.interactiveHandler)
+	muxer.HandleFunc("CONNECT /v1/agents/{id}/script", m.interactiveHandler)
 	muxer.HandleFunc("POST /v1/selection", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			AgentID string `json:"agent_id"`

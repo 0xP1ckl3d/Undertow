@@ -53,7 +53,7 @@ The server may require privilege to bind UDP/53 or create a proxy interface. A s
 | `--fingerprint-file PATH` | `server.fingerprint` | Read saved pin or save a trust-on-first-use pin. |
 | `--trust-on-first-use` | Off | Discover the server pin for first connection. |
 | `--agent-key PATH` | `agent.key` | Stable agent Ed25519 identity. |
-| `--deny LIST` | None | Disable agent capabilities independently: `pivot`, `exec`, `hostops`, `interactive`, `upload`, `download`, `listeners`. For example, `--deny=exec,upload` still allows built-in host operations and interactive sessions. All are allowed by default. `listeners` controls agent-side TCP forwards. |
+| `--deny LIST` | None | Disable agent capabilities independently: `pivot`, `exec`, `hostops`, `interactive`, `scripts`, `upload`, `download`, `listeners`. For example, `--deny=exec,upload` still allows built-in host operations, interactive sessions and memory-backed scripts. All are allowed by default. `listeners` controls agent-side TCP forwards. |
 | `--advertise-route CIDR` | None | Offer an additional IPv4 subnet to VPN clients; repeatable. Up IPv4 interface subnets are offered automatically. |
 | `--domain NAME` | `t.undertow.invalid` | Must match the server. |
 | `--auth`, `--token`, `--token-file`, `--password`, `--password-file` | See above | Enrollment. |

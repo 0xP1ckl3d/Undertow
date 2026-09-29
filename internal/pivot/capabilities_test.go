@@ -16,11 +16,11 @@ func TestParseDeniedCapabilities(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if caps.Exec || caps.Upload || !caps.Pivot || !caps.HostOps || !caps.Download || !caps.Listeners {
+	if caps.Exec || caps.Upload || !caps.Pivot || !caps.HostOps || !caps.Scripts || !caps.Download || !caps.Listeners {
 		t.Fatalf("capabilities not independent: %+v", caps)
 	}
 	report := caps.Report()
-	if !reflect.DeepEqual(report.Supported, []string{"pivot", "exec", "hostops", "interactive", "upload", "download", "listeners"}) || !reflect.DeepEqual(report.Allowed, []string{"pivot", "hostops", "interactive", "download", "listeners"}) {
+	if !reflect.DeepEqual(report.Supported, []string{"pivot", "exec", "hostops", "interactive", "scripts", "upload", "download", "listeners"}) || !reflect.DeepEqual(report.Allowed, []string{"pivot", "hostops", "interactive", "scripts", "download", "listeners"}) {
 		t.Fatalf("report=%+v", report)
 	}
 	if _, err := ParseDenied("shell"); err == nil || !strings.Contains(err.Error(), "unknown agent capability") {
@@ -33,6 +33,10 @@ func TestParseDeniedCapabilities(t *testing.T) {
 	deniedHostOps, err := ParseDenied("hostops")
 	if err != nil || deniedHostOps.HostOps || !deniedHostOps.Exec {
 		t.Fatalf("hostops capability not independent: %+v, %v", deniedHostOps, err)
+	}
+	deniedScripts, err := ParseDenied("scripts")
+	if err != nil || deniedScripts.Scripts || !deniedScripts.Exec || !deniedScripts.Interactive {
+		t.Fatalf("scripts capability not independent: %+v, %v", deniedScripts, err)
 	}
 }
 

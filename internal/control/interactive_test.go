@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -11,6 +12,7 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -32,6 +34,88 @@ func TestRelayInteractiveHelper(t *testing.T) {
 	_, _ = os.Stdout.Write([]byte("relay:"))
 	_, _ = os.Stdout.Write(buffer)
 	os.Exit(0)
+}
+
+func TestScriptRelayConnectAndRemoteJob(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	manager := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	serverAgent, agent := forwardAuditAgent(t, ctx, manager, "script-agent", 714, pivot.DefaultCapabilities())
+	defer serverAgent.Close()
+	defer agent.Close()
+	language, source := "bash", []byte("echo relay-script\n")
+	if runtime.GOOS == "windows" {
+		language, source = "powershell", []byte("[Console]::Out.WriteLine('relay-script')\n")
+	}
+	serverVPN, clientVPN := forwardAuditPair(ctx)
+	defer serverVPN.Close()
+	defer clientVPN.Close()
+	go pivot.ServeVPNInteractive(ctx, serverVPN, manager.ResolveEgress, func() bool { return false }, func(ctx context.Context, stream *mux.Stream) {
+		manager.ServeInteractiveRelay(ctx, stream)
+	})
+	readResult := func(session *pivot.InteractiveSession) {
+		t.Helper()
+		defer session.Close()
+		var output strings.Builder
+		for {
+			kind, data, err := session.Read()
+			if err != nil {
+				t.Fatalf("script frame read: %v, output so far: %q", err, output.String())
+			}
+			if kind == pivot.InteractiveOutput {
+				output.Write(data)
+			}
+			if kind == pivot.InteractiveError {
+				t.Fatalf("script error: %s", data)
+			}
+			if kind == pivot.InteractiveExit {
+				if len(data) != 4 || binary.BigEndian.Uint32(data) != 0 || !strings.Contains(output.String(), "relay-script") {
+					t.Fatalf("exit=%v output=%q", data, output.String())
+				}
+				return
+			}
+		}
+	}
+	live, err := OpenClientScript(ctx, clientVPN, "script-agent", language, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readResult(live)
+	httpServer := httptest.NewServer(manager.handler("operator-secret"))
+	defer httpServer.Close()
+	conn, err := net.Dial("tcp", strings.TrimPrefix(httpServer.URL, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := fmt.Fprintf(conn, "CONNECT /v1/agents/script-agent/script HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer operator-secret\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	reader := bufio.NewReader(conn)
+	response, err := http.ReadResponse(reader, &http.Request{Method: http.MethodConnect})
+	if err != nil || response.StatusCode != 200 {
+		t.Fatalf("CONNECT response=%v error=%v", response, err)
+	}
+	local, err := pivot.StartMemorySession(ctx, conn.(*net.TCPConn), reader, pivot.MemoryRequest{Language: language, Size: len(source)}, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readResult(local)
+	remoteServer, remoteClient := forwardAuditClient(t, ctx, manager, 715)
+	defer remoteServer.Close()
+	defer remoteClient.Close()
+	data, err := CallRemote(ctx, remoteClient, "POST", "/v1/agents/script-agent/scripts/jobs", map[string]any{"language": language, "source": source})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var job JobInfo
+	if err := json.Unmarshal(data, &job); err != nil {
+		t.Fatal(err)
+	}
+	finished := waitJob(t, manager, 715, job.ID, func(j JobInfo) bool { return j.State == "completed" })
+	if !strings.Contains(finished.Output, "relay-script") {
+		t.Fatalf("remote script job=%+v", finished)
+	}
 }
 
 func TestVPNClientInteractiveRelay(t *testing.T) {

@@ -75,45 +75,64 @@ func attachClientAt(path string) error {
 	opener := func(ctx context.Context, agentID string, request pivot.InteractiveRequest) (*pivot.InteractiveSession, error) {
 		return openAttachedInteractive(ctx, path, agentID, request)
 	}
+	script := func(ctx context.Context, agentID, language string, source []byte) (*pivot.InteractiveSession, error) {
+		return openAttachedScript(ctx, path, agentID, language, source)
+	}
 	transfer := func(ctx context.Context, request clientFileRequest, progress func(pivot.TransferProgress)) (pivot.FileMessage, error) {
 		return attachedTransfer(ctx, path, request, progress)
 	}
-	return runConsole(ctx, os.Stdin, os.Stdout, caller, clientID, quit, routes, nil, consoleFeatures{open: opener, transfer: transfer})
+	return runConsole(ctx, os.Stdin, os.Stdout, caller, clientID, quit, routes, nil, consoleFeatures{open: opener, script: script, transfer: transfer})
 }
 
 func openAttachedInteractive(ctx context.Context, path, agentID string, request pivot.InteractiveRequest) (*pivot.InteractiveSession, error) {
-	raw, err := os.ReadFile(path)
+	conn, reader, err := openAttachedSession(ctx, path, agentID, "interactive")
 	if err != nil {
 		return nil, err
+	}
+	return pivot.StartInteractive(ctx, conn, reader, request)
+}
+
+func openAttachedScript(ctx context.Context, path, agentID, language string, source []byte) (*pivot.InteractiveSession, error) {
+	conn, reader, err := openAttachedSession(ctx, path, agentID, "script")
+	if err != nil {
+		return nil, err
+	}
+	return pivot.StartMemorySession(ctx, conn, reader, pivot.MemoryRequest{Language: language, Size: len(source)}, source)
+}
+
+func openAttachedSession(ctx context.Context, path, agentID, action string) (*net.TCPConn, *bufio.Reader, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, nil, err
 	}
 	var state backgroundState
 	if err := json.Unmarshal(raw, &state); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	host, _, err := net.SplitHostPort(state.Address)
 	if err != nil || host != "127.0.0.1" {
-		return nil, errors.New("invalid local client control address")
+		return nil, nil, errors.New("invalid local client control address")
 	}
 	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp4", state.Address)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	encoded, _ := json.Marshal(consoleRPCRequest{Action: "interactive", AgentID: agentID})
+	encoded, _ := json.Marshal(consoleRPCRequest{Action: action, AgentID: agentID})
 	if _, err := fmt.Fprintf(conn, "%s %s\n", state.Token, encoded); err != nil {
 		conn.Close()
-		return nil, err
+		return nil, nil, err
 	}
 	reader := bufio.NewReader(conn)
 	line, err := reader.ReadString('\n')
 	if err != nil {
 		conn.Close()
-		return nil, err
+		return nil, nil, err
 	}
 	if line != "OK\n" {
 		conn.Close()
-		return nil, errors.New(strings.TrimSpace(line))
+		return nil, nil, errors.New(strings.TrimSpace(line))
 	}
-	return pivot.StartInteractive(ctx, conn.(*net.TCPConn), reader, request)
+	return conn.(*net.TCPConn), reader, nil
 }
 
 func attachedTransfer(ctx context.Context, path string, request clientFileRequest, progress func(pivot.TransferProgress)) (pivot.FileMessage, error) {

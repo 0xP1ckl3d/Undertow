@@ -27,31 +27,47 @@ type operatorOptions struct {
 }
 
 func openControlInteractive(ctx context.Context, options operatorOptions, agentID string, request pivot.InteractiveRequest) (*pivot.InteractiveSession, error) {
-	token, err := os.ReadFile(options.tokenFile)
+	conn, reader, err := openControlSession(ctx, options, agentID, "interactive")
 	if err != nil {
 		return nil, err
+	}
+	return pivot.StartInteractive(ctx, conn, reader, request)
+}
+
+func openControlScript(ctx context.Context, options operatorOptions, agentID, language string, source []byte) (*pivot.InteractiveSession, error) {
+	conn, reader, err := openControlSession(ctx, options, agentID, "script")
+	if err != nil {
+		return nil, err
+	}
+	return pivot.StartMemorySession(ctx, conn, reader, pivot.MemoryRequest{Language: language, Size: len(source)}, source)
+}
+
+func openControlSession(ctx context.Context, options operatorOptions, agentID, operation string) (*net.TCPConn, *bufio.Reader, error) {
+	token, err := os.ReadFile(options.tokenFile)
+	if err != nil {
+		return nil, nil, err
 	}
 	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", options.address)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	path := "/v1/agents/" + url.PathEscape(agentID) + "/interactive"
+	path := "/v1/agents/" + url.PathEscape(agentID) + "/" + operation
 	if _, err := fmt.Fprintf(conn, "CONNECT %s HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer %s\r\n\r\n", path, strings.TrimSpace(string(token))); err != nil {
 		conn.Close()
-		return nil, err
+		return nil, nil, err
 	}
 	reader := bufio.NewReader(conn)
 	response, err := http.ReadResponse(reader, &http.Request{Method: http.MethodConnect})
 	if err != nil {
 		conn.Close()
-		return nil, err
+		return nil, nil, err
 	}
 	if response.StatusCode != http.StatusOK {
 		message, _ := io.ReadAll(io.LimitReader(response.Body, 1024))
 		conn.Close()
-		return nil, fmt.Errorf("interactive connection: %s: %s", response.Status, strings.TrimSpace(string(message)))
+		return nil, nil, fmt.Errorf("task connection: %s: %s", response.Status, strings.TrimSpace(string(message)))
 	}
-	return pivot.StartInteractive(ctx, conn.(*net.TCPConn), reader, request)
+	return conn.(*net.TCPConn), reader, nil
 }
 
 func parseOperator(args []string) (operatorOptions, error) {
