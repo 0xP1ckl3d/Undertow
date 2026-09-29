@@ -13,11 +13,13 @@ Undertow uses **direct UDP DNS**, addressed to a numeric server IP and port. The
 
 ## Build and first session
 
-Build Linux with `mkdir -p bin && go build -o bin/undertow ./cmd/undertow`. In Windows PowerShell use:
+Build Linux with `mkdir -p bin && go build -buildvcs=false -o bin/undertow ./cmd/undertow`. In Windows PowerShell use:
 
 ```powershell
 New-Item -ItemType Directory -Force .\bin | Out-Null
-go build -o .\bin\undertow.exe .\cmd\undertow
+go build -buildvcs=false -o .\bin\undertow.exe .\cmd\undertow
+if ($LASTEXITCODE -ne 0) { throw 'Build failed; bin\undertow.exe may be an older version' }
+.\bin\undertow.exe help agent
 ```
 
 In the examples below, `undertow` means `./bin/undertow` on Linux or `.\bin\undertow.exe` on Windows. Run from a directory containing your credential files, or use absolute paths.

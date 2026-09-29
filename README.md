@@ -58,14 +58,16 @@ Linux:
 
 ```sh
 mkdir -p bin
-go build -o bin/undertow ./cmd/undertow
+go build -buildvcs=false -o bin/undertow ./cmd/undertow
 ```
 
 Windows PowerShell:
 
 ```powershell
 New-Item -ItemType Directory -Force .\bin | Out-Null
-go build -o .\bin\undertow.exe .\cmd\undertow
+go build -buildvcs=false -o .\bin\undertow.exe .\cmd\undertow
+if ($LASTEXITCODE -ne 0) { throw 'Build failed; bin\undertow.exe may be an older version' }
+.\bin\undertow.exe help agent
 ```
 
 ## First connection
