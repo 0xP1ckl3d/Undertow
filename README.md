@@ -94,6 +94,8 @@ Back on the server, `sudo ./bin/undertow status` shows the connected agent when 
 - [Setup, roles, enrollment and fingerprints](docs/getting-started.md)
 - [Scenario commands: pivot, VPN, forwarding and lifecycle](docs/scenarios.md)
 - [All commands and flags](docs/cli-reference.md)
+- [Protocol version 1](docs/protocol.md)
+- [Performance tests and comparison method](docs/benchmarks.md)
 
 Undertow is experimental. Linux VPN egress and Linux pivot TCP, UDP, and ICMP have been exercised on separate hosts. Windows Wintun and the controlled iodine performance comparison still need acceptance testing. This code is [GPL-3.0-only](LICENSE); bundled third-party components keep their own licences.
 
