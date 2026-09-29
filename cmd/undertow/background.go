@@ -292,6 +292,9 @@ func startBackgroundControl(pidPath string) (func(), error) {
 					if err := json.Unmarshal([]byte(request), &input); err != nil {
 						response.Error = "invalid console request"
 					} else {
+						if input.Action == "transfer" {
+							_ = conn.SetDeadline(time.Now().Add(30 * time.Minute))
+						}
 						backgroundConsoleMu.RLock()
 						handler := backgroundConsoleHandler
 						backgroundConsoleMu.RUnlock()

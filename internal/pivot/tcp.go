@@ -33,6 +33,14 @@ func ServeAgentWithExec(ctx context.Context, m *mux.Mux, allowExec bool) {
 			go serveExec(ctx, s)
 			continue
 		}
+		if s.Destination() == FileDestination {
+			if !allowExec {
+				s.Fail(errors.New("agent file transfer is disabled"))
+				continue
+			}
+			go serveFile(ctx, s)
+			continue
+		}
 		go serveSocket(ctx, s)
 	}
 }
@@ -108,7 +116,7 @@ func ServeVPNInteractive(ctx context.Context, client *mux.Mux, resolve func(neti
 			return
 		}
 		go func(s *mux.Stream) {
-			if s.Destination() == ControlDestination {
+			if s.Destination() == ControlDestination || s.Destination() == FileDestination {
 				if control == nil {
 					s.Fail(errors.New("remote operator console is disabled"))
 				} else {

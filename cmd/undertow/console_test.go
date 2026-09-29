@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -166,5 +167,29 @@ func TestVPNConsoleCannotChangeServerRoutes(t *testing.T) {
 	}
 	if called {
 		t.Fatal("VPN client sent an operator request")
+	}
+}
+
+func TestInteractiveClientUploadUsesSelectedAgentAndAbsoluteLocalPath(t *testing.T) {
+	var request clientFileRequest
+	caller := func(_ context.Context, _, path string, body any) ([]byte, error) {
+		if path == "/v1/status" {
+			return json.Marshal(map[string]any{"agents": []control.AgentInfo{{ID: "agent-long-id", Hostname: "pivot-host"}}})
+		}
+		if path != "/v1/file/transfer" {
+			t.Fatalf("unexpected path %s", path)
+		}
+		request = body.(clientFileRequest)
+		return json.Marshal(pivot.FileMessage{OK: true, Size: 5, SHA256: "digest"})
+	}
+	var output bytes.Buffer
+	if err := runConsole(context.Background(), strings.NewReader("use 1\nupload ./source.bin /tmp/remote.bin\nquit\n"), &output, caller, func() uint64 { return 704 }, nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if request.AgentID != "agent-long-id" || request.Operation != "upload" || !filepath.IsAbs(request.LocalPath) || request.RemotePath != "/tmp/remote.bin" {
+		t.Fatalf("wrong transfer request: %+v", request)
+	}
+	if !strings.Contains(output.String(), "Upload complete: 5 bytes") {
+		t.Fatalf("missing transfer result: %q", output.String())
 	}
 }

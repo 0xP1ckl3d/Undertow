@@ -165,6 +165,9 @@ func (e *consoleEditor) complete() {
 	commands := []string{"agents", "use", "status", "routes", "help", "quit"}
 	if e.selected {
 		commands = []string{"exec", "routes", "route", "status", "back", "help", "quit"}
+		if e.vpn {
+			commands = append(commands, "upload", "download")
+		}
 	}
 	if e.vpn {
 		commands = append(commands, "background", "internal")

@@ -195,7 +195,7 @@ func serve(args []string) error {
 	}
 	log.Printf("client enrollment mode: %s", *authMode)
 	if *authMode == "none" {
-		log.Print("WARNING: --auth none allows anyone who can reach this server to enroll, access the network, and run commands on agents unless those agents use --deny-exec; use token or password enrollment for real deployments")
+		log.Print("WARNING: --auth none allows anyone who can reach this server to enroll, access the network, run commands, and transfer files on agents unless those agents use --deny-exec; use token or password enrollment for real deployments")
 	}
 	localNetworks, err := tun.ExistingNetworks()
 	if err != nil {
@@ -313,7 +313,11 @@ func serve(args []string) error {
 						pivot.ServeVPNInteractive(ctx, streamMux, func(destination netip.Addr) (*mux.Mux, bool) {
 							return manager.ResolveClientEgress(p.Session.ID(), destination)
 						}, func() bool { return true }, func(ctx context.Context, stream *mux.Stream) {
-							manager.ServeRemote(ctx, controlToken, p.Session.ID(), stream)
+							if stream.Destination() == pivot.FileDestination {
+								manager.ServeFileRelay(ctx, stream)
+							} else {
+								manager.ServeRemote(ctx, controlToken, p.Session.ID(), stream)
+							}
 						})
 						manager.UnregisterClient(p.Session.ID(), streamMux)
 						log.Printf("VPN client disconnected: session=%d", p.Session.ID())
@@ -375,7 +379,7 @@ func agent(args []string) error {
 	interval := f.Duration("probe-interval", time.Second, "time between probes; 0 sends as fast as the window allows")
 	profileFlag := f.String("payload-profile", "auto", "DNS payload profile: auto, large, or small")
 	probe := f.Bool("probe", false, "run Phase 1 echo probes instead of TCP socket handling")
-	denyExec := f.Bool("deny-exec", false, "disable operator executable commands on this agent")
+	denyExec := f.Bool("deny-exec", false, "disable remote command execution and file transfer on this agent")
 	var advertise advertisedRoutes
 	f.Var(&advertise, "advertise-route", "IPv4 CIDR offered for client acceptance; repeatable")
 	if err := f.Parse(args); err != nil {

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -24,6 +25,13 @@ import (
 
 type consoleCaller func(context.Context, string, string, any) ([]byte, error)
 type clientRouteAction func(context.Context, []string, io.Writer) error
+
+type clientFileRequest struct {
+	AgentID    string `json:"agent_id"`
+	Operation  string `json:"operation"`
+	LocalPath  string `json:"local_path"`
+	RemotePath string `json:"remote_path"`
+}
 
 func consoleCommand(args []string) error {
 	options, err := parseOperator(args)
@@ -211,6 +219,8 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 			switch args[0] {
 			case "exec":
 				args = append([]string{"exec", selectedID}, args[1:]...)
+			case "upload", "download":
+				args = append([]string{args[0], selectedID}, args[1:]...)
 			case "route":
 				if len(args) == 3 && (args[1] == "add" || args[1] == "accept") {
 					args = append(args, selectedID)
@@ -312,6 +322,8 @@ Quote paths or arguments containing spaces. Programs run without a shell.
 `)
 		if vpnClient {
 			fmt.Fprintln(output, "  route accept CIDR      Accept an advertised route from this agent")
+			fmt.Fprintln(output, "  upload LOCAL REMOTE    Copy a local file to this agent")
+			fmt.Fprintln(output, "  download REMOTE LOCAL  Copy a file from this agent")
 			fmt.Fprintln(output, "  background             Detach console; keep VPN running")
 		}
 		return
@@ -326,7 +338,7 @@ Quote paths or arguments containing spaces. Programs run without a shell.
   help                   Show this menu
   background             Detach console; keep VPN running
   quit                   Stop the VPN and exit
-Inside an agent, use exec PROGRAM, route accept CIDR, or route add CIDR.
+Inside an agent, use exec PROGRAM, upload LOCAL REMOTE, download REMOTE LOCAL, or route accept CIDR.
 `)
 		return
 	}
@@ -387,6 +399,8 @@ func runConsoleCommand(ctx context.Context, output io.Writer, call consoleCaller
   route add CIDR AGENT_ID        Add a manual local route via an agent
   route del CIDR                 Remove a locally accepted route
   exec AGENT_ID PROGRAM [ARGS]   Run one program on an agent
+  upload AGENT_ID LOCAL REMOTE   Copy a file to an agent
+  download AGENT_ID REMOTE LOCAL Copy a file from an agent
   internal on|off                Change this VPN client's pivot mode
   quit                           Stop the VPN and leave the console
 Quote arguments containing spaces.
@@ -498,6 +512,35 @@ Quote arguments containing spaces. Commands run only when submitted.
 			return errors.New(result.Error)
 		}
 		fmt.Fprintf(output, "[exit %d]\n", result.ExitCode)
+		return nil
+	case "upload", "download":
+		if !vpnClient {
+			return errors.New("file transfer is available in the VPN client console")
+		}
+		if len(args) != 4 {
+			return errors.New("use upload AGENT_ID LOCAL REMOTE or download AGENT_ID REMOTE LOCAL")
+		}
+		request := clientFileRequest{AgentID: args[1], Operation: args[0]}
+		if args[0] == "upload" {
+			request.LocalPath, request.RemotePath = args[2], args[3]
+		} else {
+			request.LocalPath, request.RemotePath = args[3], args[2]
+		}
+		local, err := filepath.Abs(request.LocalPath)
+		if err != nil {
+			return err
+		}
+		request.LocalPath = local
+		fmt.Fprintf(output, "%s in progress...\n", strings.Title(request.Operation))
+		data, err := call(ctx, http.MethodPost, "/v1/file/transfer", request)
+		if err != nil {
+			return err
+		}
+		var result pivot.FileMessage
+		if err := json.Unmarshal(data, &result); err != nil {
+			return err
+		}
+		fmt.Fprintf(output, "%s complete: %d bytes, SHA-256 %s\n", strings.Title(request.Operation), result.Size, result.SHA256)
 		return nil
 	case "internal":
 		if ownClientID == 0 {

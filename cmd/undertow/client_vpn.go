@@ -24,6 +24,7 @@ import (
 	"undertow/internal/control"
 	"undertow/internal/mux"
 	"undertow/internal/netstack"
+	"undertow/internal/pivot"
 	"undertow/internal/security"
 	"undertow/internal/transport/dns"
 	"undertow/internal/tun"
@@ -164,6 +165,13 @@ func clientCommand(args []string) error {
 				response.Error = err.Error()
 			}
 			response.Output = output.String()
+		case "transfer":
+			result, err := live.transfer(ctx, request.Body)
+			if err != nil {
+				response.Error = err.Error()
+			} else {
+				response.Data = result
+			}
 		default:
 			response.Error = "unknown client console command"
 		}
@@ -257,10 +265,32 @@ func (c *liveClientConsole) id() uint64 {
 }
 
 func (c *liveClientConsole) call(ctx context.Context, method, path string, body any) ([]byte, error) {
+	if path == "/v1/file/transfer" {
+		encoded, err := json.Marshal(body)
+		if err != nil {
+			return nil, err
+		}
+		return c.transfer(ctx, encoded)
+	}
 	c.mu.RLock()
 	session := c.session
 	c.mu.RUnlock()
 	return control.CallRemote(ctx, session, method, path, body)
+}
+
+func (c *liveClientConsole) transfer(ctx context.Context, encoded []byte) ([]byte, error) {
+	var input clientFileRequest
+	if err := json.Unmarshal(encoded, &input); err != nil {
+		return nil, errors.New("invalid file transfer request")
+	}
+	c.mu.RLock()
+	session := c.session
+	c.mu.RUnlock()
+	result, err := pivot.TransferFile(ctx, session, input.AgentID, input.Operation, input.LocalPath, input.RemotePath)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(result)
 }
 
 func runVPN(parent context.Context, c *dns.Client, serverIP netip.Addr, internal bool, name, address string, prefix netip.Prefix, verifyURL string, onActive func(*mux.Mux, uint64, *tun.Device)) error {

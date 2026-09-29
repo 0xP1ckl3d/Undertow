@@ -43,7 +43,11 @@ func attachClientAt(path string) error {
 		if err != nil {
 			return nil, err
 		}
-		response, err := callClientConsole(path, consoleRPCRequest{Action: "call", Method: method, Path: route, Body: encoded})
+		action := "call"
+		if route == "/v1/file/transfer" {
+			action = "transfer"
+		}
+		response, err := callClientConsole(path, consoleRPCRequest{Action: action, Method: method, Path: route, Body: encoded})
 		return response.Data, err
 	}
 	clientID := func() uint64 {
@@ -91,7 +95,11 @@ func callClientConsole(path string, request consoleRPCRequest) (consoleRPCRespon
 		return response, err
 	}
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
+	deadline := 30 * time.Second
+	if request.Action == "transfer" {
+		deadline = 30 * time.Minute
+	}
+	_ = conn.SetDeadline(time.Now().Add(deadline))
 	if _, err := fmt.Fprintf(conn, "%s %s\n", state.Token, encoded); err != nil {
 		return response, err
 	}
