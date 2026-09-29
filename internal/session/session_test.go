@@ -116,14 +116,15 @@ func TestRepeatedSACKDoesNotRetransmitSameGapRepeatedly(t *testing.T) {
 		}
 	}
 	for i := 0; i < 2; i++ {
-		ack, err := receiver.NextPacket(now.Add(time.Duration(i) * time.Millisecond))
+		tick := time.Duration(i) * 30 * time.Millisecond
+		ack, err := receiver.NextPacket(now.Add(tick))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := sender.Process(ack, now.Add(time.Duration(i+1)*time.Millisecond)); err != nil {
+		if err := sender.Process(ack, now.Add(tick+time.Millisecond)); err != nil {
 			t.Fatal(err)
 		}
-		out, err := sender.NextPacket(now.Add(time.Duration(i+2) * time.Millisecond))
+		out, err := sender.NextPacket(now.Add(tick + 30*time.Millisecond))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -136,6 +137,56 @@ func TestRepeatedSACKDoesNotRetransmitSameGapRepeatedly(t *testing.T) {
 	}
 	if sender.Stats().Retransmits != 1 {
 		t.Fatalf("retransmits=%d", sender.Stats().Retransmits)
+	}
+}
+
+func TestReorderedDNSRepliesDoNotTriggerFastRetransmit(t *testing.T) {
+	sender, receiver := pair(t)
+	defer sender.Close()
+	defer receiver.Close()
+	now := time.Now()
+	var packets [][]byte
+	for i := 0; i < 5; i++ {
+		if err := sender.Send(context.Background(), []byte{byte(i)}); err != nil {
+			t.Fatal(err)
+		}
+		wire, err := sender.NextPacket(now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		packets = append(packets, wire)
+	}
+	for _, wire := range packets[1:] {
+		if err := receiver.Process(wire, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ack, err := receiver.NextPacket(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sender.Process(ack, now.Add(time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	before, err := sender.NextPacket(now.Add(2 * time.Millisecond))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seq := binary.BigEndian.Uint64(before[20:28]); seq != 0 {
+		t.Fatalf("premature retransmission of sequence %d", seq)
+	}
+	if err := receiver.Process(packets[0], now.Add(3*time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	ack, err = receiver.NextPacket(now.Add(4 * time.Millisecond))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sender.Process(ack, now.Add(5*time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	if sender.Stats().Retransmits != 0 {
+		t.Fatal("reordered packet caused a retransmission")
 	}
 }
 
@@ -171,31 +222,31 @@ func TestSelectiveACKDoesNotSendPastReceiveWindow(t *testing.T) {
 	if err := sender.Process(ack, now.Add(time.Millisecond)); err != nil {
 		t.Fatal(err)
 	}
-	retry, err := sender.NextPacket(now.Add(2 * time.Millisecond))
+	retry, err := sender.NextPacket(now.Add(30 * time.Millisecond))
 	if err != nil || !bytes.Equal(retry, missing) {
 		t.Fatalf("missing packet was not retransmitted: %v", err)
 	}
-	if sender.HasWork(now.Add(3 * time.Millisecond)) {
+	if sender.HasWork(now.Add(31 * time.Millisecond)) {
 		t.Fatal("sender treated a SACK hole as free receive-window space")
 	}
-	blocked, err := sender.NextPacket(now.Add(3 * time.Millisecond))
+	blocked, err := sender.NextPacket(now.Add(31 * time.Millisecond))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if seq := binary.BigEndian.Uint64(blocked[20:28]); seq != 0 {
 		t.Fatalf("sent sequence %d beyond receiver window", seq)
 	}
-	if err := receiver.Process(retry, now.Add(4*time.Millisecond)); err != nil {
+	if err := receiver.Process(retry, now.Add(32*time.Millisecond)); err != nil {
 		t.Fatal(err)
 	}
-	ack, err = receiver.NextPacket(now.Add(5 * time.Millisecond))
+	ack, err = receiver.NextPacket(now.Add(33 * time.Millisecond))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := sender.Process(ack, now.Add(6*time.Millisecond)); err != nil {
+	if err := sender.Process(ack, now.Add(34*time.Millisecond)); err != nil {
 		t.Fatal(err)
 	}
-	next, err := sender.NextPacket(now.Add(7 * time.Millisecond))
+	next, err := sender.NextPacket(now.Add(35 * time.Millisecond))
 	if err != nil {
 		t.Fatal(err)
 	}

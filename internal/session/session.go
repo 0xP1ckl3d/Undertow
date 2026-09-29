@@ -247,7 +247,7 @@ func (s *Session) HasWork(now time.Time) bool {
 		return true
 	}
 	for _, p := range s.pending {
-		if p.fast || now.Sub(p.sent) >= s.rtoFor(p) {
+		if s.retransmitReady(p, now) {
 			return true
 		}
 	}
@@ -263,7 +263,7 @@ func (s *Session) NextPacket(now time.Time) ([]byte, error) {
 	}
 	var oldest *pending
 	for _, p := range s.pending {
-		if (p.fast || now.Sub(p.sent) >= s.rtoFor(p)) && (oldest == nil || p.sent.Before(oldest.sent)) {
+		if s.retransmitReady(p, now) && (oldest == nil || p.sent.Before(oldest.sent)) {
 			oldest = p
 		}
 	}
@@ -559,6 +559,22 @@ func (s *Session) rtoFor(p *pending) time.Duration {
 		return 5 * time.Second
 	}
 	return v
+}
+func (s *Session) retransmitReady(p *pending, now time.Time) bool {
+	age := now.Sub(p.sent)
+	if age >= s.rtoFor(p) {
+		return true
+	}
+	if !p.fast {
+		return false
+	}
+	// Concurrent DNS responses can reorder by a few milliseconds. Wait for
+	// the gap to persist before treating selective ACK evidence as loss.
+	delay := 2 * s.stats.RTT
+	if delay < 25*time.Millisecond {
+		delay = 25 * time.Millisecond
+	}
+	return age >= delay
 }
 func (s *Session) signal() {
 	select {
