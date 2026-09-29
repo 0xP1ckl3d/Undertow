@@ -30,6 +30,57 @@ type FileMessage struct {
 	SHA256    string `json:"sha256,omitempty"`
 }
 
+type TransferProgress struct {
+	Bytes   int64   `json:"bytes"`
+	Total   int64   `json:"total"`
+	Rate    float64 `json:"rate_bytes_per_second"`
+	Percent float64 `json:"percent"`
+}
+
+type transferProgressWriter struct {
+	ctx       context.Context
+	writer    io.Writer
+	total     int64
+	bytes     int64
+	lastBytes int64
+	last      time.Time
+	callback  func(TransferProgress)
+}
+
+func (w *transferProgressWriter) Write(p []byte) (int, error) {
+	if err := w.ctx.Err(); err != nil {
+		return 0, err
+	}
+	n, err := w.writer.Write(p)
+	w.bytes += int64(n)
+	w.emit(false)
+	if cancelErr := w.ctx.Err(); cancelErr != nil {
+		return n, cancelErr
+	}
+	return n, err
+}
+
+func (w *transferProgressWriter) emit(force bool) {
+	if w.callback == nil {
+		return
+	}
+	now := time.Now()
+	if !force && now.Sub(w.last) < 250*time.Millisecond {
+		return
+	}
+	elapsed := now.Sub(w.last).Seconds()
+	rate := float64(0)
+	if elapsed > 0 {
+		rate = float64(w.bytes-w.lastBytes) / elapsed
+	}
+	percent := float64(100)
+	if w.total > 0 {
+		percent = 100 * float64(w.bytes) / float64(w.total)
+	}
+	w.callback(TransferProgress{Bytes: w.bytes, Total: w.total, Rate: rate, Percent: percent})
+	w.last, w.lastBytes = now, w.bytes
+}
+
 func ReadFileMessage(reader *bufio.Reader) (FileMessage, error) {
 	var message FileMessage
 	line, err := reader.ReadSlice('\n')
@@ -64,6 +115,10 @@ func validTransferPath(path string) bool {
 // TransferFile streams a file through the connected VPN server to one agent.
 // Existing destination files are left untouched.
 func TransferFile(parent context.Context, session *mux.Mux, agentID, operation, localPath, remotePath string) (FileMessage, error) {
+	return TransferFileProgress(parent, session, agentID, operation, localPath, remotePath, nil)
+}
+
+func TransferFileProgress(parent context.Context, session *mux.Mux, agentID, operation, localPath, remotePath string, progress func(TransferProgress)) (FileMessage, error) {
 	var result FileMessage
 	if session == nil {
 		return result, errors.New("VPN session is not connected")
@@ -125,9 +180,15 @@ func TransferFile(parent context.Context, session *mux.Mux, agentID, operation, 
 	}
 	if operation == "upload" {
 		hash := sha256.New()
-		if _, err := io.CopyN(io.MultiWriter(stream, hash), source, size); err != nil {
+		writer := &transferProgressWriter{ctx: ctx, writer: io.MultiWriter(stream, hash), total: size, last: time.Now(), callback: progress}
+		writer.emit(true)
+		if err := ctx.Err(); err != nil {
 			return result, err
 		}
+		if _, err := io.CopyN(writer, source, size); err != nil {
+			return result, err
+		}
+		writer.emit(true)
 		if _, err := stream.Write(hash.Sum(nil)); err != nil {
 			return result, err
 		}
@@ -154,10 +215,17 @@ func TransferFile(parent context.Context, session *mux.Mux, agentID, operation, 
 	}
 	defer os.Remove(temp.Name())
 	hash := sha256.New()
-	if _, err := io.CopyN(io.MultiWriter(temp, hash), reader, ready.Size); err != nil {
+	writer := &transferProgressWriter{ctx: ctx, writer: io.MultiWriter(temp, hash), total: ready.Size, last: time.Now(), callback: progress}
+	writer.emit(true)
+	if err := ctx.Err(); err != nil {
 		temp.Close()
 		return result, err
 	}
+	if _, err := io.CopyN(writer, reader, ready.Size); err != nil {
+		temp.Close()
+		return result, err
+	}
+	writer.emit(true)
 	expected := make([]byte, sha256.Size)
 	if _, err := io.ReadFull(reader, expected); err != nil {
 		temp.Close()

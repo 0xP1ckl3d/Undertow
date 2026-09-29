@@ -95,6 +95,52 @@ func TestLocalClientInteractiveAttach(t *testing.T) {
 	}
 }
 
+func TestAttachedTransferStreamsProgressAndCancellation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "client.pid")
+	cleanup, err := startBackgroundControl(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	setBackgroundTransferHandler(func(_ context.Context, body json.RawMessage, progress func(pivot.TransferProgress)) (pivot.FileMessage, error) {
+		var request clientFileRequest
+		if err := json.Unmarshal(body, &request); err != nil {
+			return pivot.FileMessage{}, err
+		}
+		if request.AgentID != "agent-a" {
+			return pivot.FileMessage{}, fmt.Errorf("wrong agent %q", request.AgentID)
+		}
+		progress(pivot.TransferProgress{Bytes: 0, Total: 100})
+		progress(pivot.TransferProgress{Bytes: 100, Total: 100, Percent: 100, Rate: 1024})
+		return pivot.FileMessage{OK: true, Size: 100, SHA256: "abc"}, nil
+	})
+	defer setBackgroundTransferHandler(nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var updates []pivot.TransferProgress
+	result, err := attachedTransfer(ctx, path, clientFileRequest{AgentID: "agent-a", Operation: "upload", LocalPath: "source", RemotePath: "target"}, func(p pivot.TransferProgress) { updates = append(updates, p) })
+	if err != nil || !result.OK || len(updates) != 2 || updates[1].Bytes != 100 {
+		t.Fatalf("result=%+v progress=%+v err=%v", result, updates, err)
+	}
+	cancelled := make(chan struct{}, 1)
+	setBackgroundTransferHandler(func(ctx context.Context, _ json.RawMessage, progress func(pivot.TransferProgress)) (pivot.FileMessage, error) {
+		progress(pivot.TransferProgress{Bytes: 0, Total: 100})
+		<-ctx.Done()
+		cancelled <- struct{}{}
+		return pivot.FileMessage{}, ctx.Err()
+	})
+	cancelCtx, cancelTransfer := context.WithCancel(context.Background())
+	_, err = attachedTransfer(cancelCtx, path, clientFileRequest{AgentID: "agent-a", Operation: "upload"}, func(p pivot.TransferProgress) { cancelTransfer() })
+	if err == nil {
+		t.Fatal("cancelled attached transfer succeeded")
+	}
+	select {
+	case <-cancelled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("background transfer did not receive cancellation")
+	}
+}
+
 func TestStatusShowsAgentAndVPNHostnames(t *testing.T) {
 	report := pivot.Capabilities{Pivot: true, Exec: false, Upload: false, Download: true}.Report()
 	data, err := json.Marshal(map[string]any{

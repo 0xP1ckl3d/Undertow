@@ -27,7 +27,8 @@ func TestFileTransferBothDirectionsAndNoOverwrite(t *testing.T) {
 	if err := os.WriteFile(source, content, 0600); err != nil {
 		t.Fatal(err)
 	}
-	result, err := TransferFile(ctx, server, "agent-id", "upload", source, remote)
+	var uploadProgress []TransferProgress
+	result, err := TransferFileProgress(ctx, server, "agent-id", "upload", source, remote, func(p TransferProgress) { uploadProgress = append(uploadProgress, p) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,10 +40,14 @@ func TestFileTransferBothDirectionsAndNoOverwrite(t *testing.T) {
 	if result.Size != int64(len(content)) || result.SHA256 != hex.EncodeToString(hash[:]) {
 		t.Fatalf("upload result: %+v", result)
 	}
+	if len(uploadProgress) < 2 || uploadProgress[0].Bytes != 0 || uploadProgress[len(uploadProgress)-1].Bytes != int64(len(content)) || len(uploadProgress) > 30 {
+		t.Fatalf("upload progress=%+v", uploadProgress)
+	}
 	if _, err := TransferFile(ctx, server, "agent-id", "upload", source, remote); err == nil || !strings.Contains(err.Error(), "exists") {
 		t.Fatalf("upload overwrote existing file: %v", err)
 	}
-	result, err = TransferFile(ctx, server, "agent-id", "download", download, remote)
+	var downloadProgress []TransferProgress
+	result, err = TransferFileProgress(ctx, server, "agent-id", "download", download, remote, func(p TransferProgress) { downloadProgress = append(downloadProgress, p) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,8 +55,36 @@ func TestFileTransferBothDirectionsAndNoOverwrite(t *testing.T) {
 	if err != nil || !bytes.Equal(actual, content) || result.SHA256 != hex.EncodeToString(hash[:]) {
 		t.Fatalf("download content mismatch: %v, %+v", err, result)
 	}
+	if len(downloadProgress) < 2 || downloadProgress[0].Bytes != 0 || downloadProgress[len(downloadProgress)-1].Bytes != int64(len(content)) || len(downloadProgress) > 30 {
+		t.Fatalf("download progress=%+v", downloadProgress)
+	}
 	if _, err := TransferFile(ctx, server, "agent-id", "download", download, remote); err == nil || !strings.Contains(err.Error(), "exists") {
 		t.Fatalf("download overwrote existing file: %v", err)
+	}
+}
+
+func TestCancelledTransferLeavesNoDestination(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	server, agent := execTestMuxPair(ctx)
+	defer server.Close()
+	defer agent.Close()
+	go ServeAgentWithCapabilities(ctx, agent, DefaultCapabilities())
+	dir := t.TempDir()
+	source, remote := filepath.Join(dir, "source.bin"), filepath.Join(dir, "remote.bin")
+	if err := os.WriteFile(source, bytes.Repeat([]byte("x"), 64<<10), 0600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := TransferFileProgress(ctx, server, "agent-id", "upload", source, remote, func(p TransferProgress) {
+		if p.Bytes == 0 {
+			cancel()
+		}
+	})
+	if err == nil {
+		t.Fatal("cancelled transfer completed")
+	}
+	if _, err := os.Stat(remote); !os.IsNotExist(err) {
+		t.Fatalf("cancelled upload created destination: %v", err)
 	}
 }
 

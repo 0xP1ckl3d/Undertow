@@ -20,6 +20,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"undertow/internal/pivot"
 )
 
 const backgroundModeEnv = "UNDERTOW_BACKGROUND_CHILD"
@@ -28,6 +30,7 @@ const backgroundPIDEnv = "UNDERTOW_BACKGROUND_PID_FILE"
 var backgroundStop <-chan struct{}
 var backgroundConsoleHandler func(context.Context, consoleRPCRequest) consoleRPCResponse
 var backgroundInteractiveHandler func(context.Context, string, net.Conn) error
+var backgroundTransferHandler func(context.Context, json.RawMessage, func(pivot.TransferProgress)) (pivot.FileMessage, error)
 var backgroundConsoleMu sync.RWMutex
 
 func setBackgroundConsoleHandler(handler func(context.Context, consoleRPCRequest) consoleRPCResponse) {
@@ -40,6 +43,18 @@ func setBackgroundInteractiveHandler(handler func(context.Context, string, net.C
 	backgroundConsoleMu.Lock()
 	backgroundInteractiveHandler = handler
 	backgroundConsoleMu.Unlock()
+}
+
+func setBackgroundTransferHandler(handler func(context.Context, json.RawMessage, func(pivot.TransferProgress)) (pivot.FileMessage, error)) {
+	backgroundConsoleMu.Lock()
+	backgroundTransferHandler = handler
+	backgroundConsoleMu.Unlock()
+}
+
+type consoleTransferEvent struct {
+	Progress *pivot.TransferProgress `json:"progress,omitempty"`
+	Result   *pivot.FileMessage      `json:"result,omitempty"`
+	Error    string                  `json:"error,omitempty"`
 }
 
 type consoleRPCRequest struct {
@@ -309,6 +324,31 @@ func startBackgroundControl(pidPath string) (func(), error) {
 								_, _ = io.WriteString(conn, "ERROR client console is unavailable\n")
 							} else if err := interactive(context.Background(), input.AgentID, conn); err != nil {
 								_, _ = io.WriteString(conn, "ERROR "+err.Error()+"\n")
+							}
+							return
+						}
+						if input.Action == "transfer-stream" {
+							_ = conn.SetDeadline(time.Now().Add(30 * time.Minute))
+							backgroundConsoleMu.RLock()
+							transfer := backgroundTransferHandler
+							backgroundConsoleMu.RUnlock()
+							encoder := json.NewEncoder(conn)
+							if transfer == nil {
+								_ = encoder.Encode(consoleTransferEvent{Error: "client console is unavailable"})
+								return
+							}
+							transferCtx, cancel := context.WithCancel(context.Background())
+							defer cancel()
+							go func() { _, _ = io.Copy(io.Discard, conn); cancel() }()
+							result, err := transfer(transferCtx, input.Body, func(progress pivot.TransferProgress) {
+								if encoder.Encode(consoleTransferEvent{Progress: &progress}) != nil {
+									cancel()
+								}
+							})
+							if err != nil {
+								_ = encoder.Encode(consoleTransferEvent{Error: err.Error()})
+							} else {
+								_ = encoder.Encode(consoleTransferEvent{Result: &result})
 							}
 							return
 						}

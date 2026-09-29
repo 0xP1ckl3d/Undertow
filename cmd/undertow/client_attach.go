@@ -75,7 +75,10 @@ func attachClientAt(path string) error {
 	opener := func(ctx context.Context, agentID string, request pivot.InteractiveRequest) (*pivot.InteractiveSession, error) {
 		return openAttachedInteractive(ctx, path, agentID, request)
 	}
-	return runConsole(ctx, os.Stdin, os.Stdout, caller, clientID, quit, routes, nil, opener)
+	transfer := func(ctx context.Context, request clientFileRequest, progress func(pivot.TransferProgress)) (pivot.FileMessage, error) {
+		return attachedTransfer(ctx, path, request, progress)
+	}
+	return runConsole(ctx, os.Stdin, os.Stdout, caller, clientID, quit, routes, nil, consoleFeatures{open: opener, transfer: transfer})
 }
 
 func openAttachedInteractive(ctx context.Context, path, agentID string, request pivot.InteractiveRequest) (*pivot.InteractiveSession, error) {
@@ -111,6 +114,67 @@ func openAttachedInteractive(ctx context.Context, path, agentID string, request 
 		return nil, errors.New(strings.TrimSpace(line))
 	}
 	return pivot.StartInteractive(ctx, conn.(*net.TCPConn), reader, request)
+}
+
+func attachedTransfer(ctx context.Context, path string, request clientFileRequest, progress func(pivot.TransferProgress)) (pivot.FileMessage, error) {
+	var result pivot.FileMessage
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return result, err
+	}
+	var state backgroundState
+	if err := json.Unmarshal(raw, &state); err != nil {
+		return result, err
+	}
+	host, _, err := net.SplitHostPort(state.Address)
+	if err != nil || host != "127.0.0.1" {
+		return result, errors.New("invalid local client control address")
+	}
+	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp4", state.Address)
+	if err != nil {
+		return result, err
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(30 * time.Minute))
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = conn.Close()
+		case <-done:
+		}
+	}()
+	body, err := json.Marshal(request)
+	if err != nil {
+		return result, err
+	}
+	encoded, err := json.Marshal(consoleRPCRequest{Action: "transfer-stream", Body: body})
+	if err != nil {
+		return result, err
+	}
+	if _, err := fmt.Fprintf(conn, "%s %s\n", state.Token, encoded); err != nil {
+		return result, err
+	}
+	decoder := json.NewDecoder(bufio.NewReader(conn))
+	for {
+		var event consoleTransferEvent
+		if err := decoder.Decode(&event); err != nil {
+			if ctx.Err() != nil {
+				return result, ctx.Err()
+			}
+			return result, err
+		}
+		if event.Error != "" {
+			return result, errors.New(event.Error)
+		}
+		if event.Progress != nil && progress != nil {
+			progress(*event.Progress)
+		}
+		if event.Result != nil {
+			return *event.Result, nil
+		}
+	}
 }
 
 func callClientConsole(path string, request consoleRPCRequest) (consoleRPCResponse, error) {

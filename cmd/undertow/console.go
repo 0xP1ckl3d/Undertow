@@ -25,6 +25,11 @@ import (
 
 type consoleCaller func(context.Context, string, string, any) ([]byte, error)
 type clientRouteAction func(context.Context, []string, io.Writer) error
+type clientTransferAction func(context.Context, clientFileRequest, func(pivot.TransferProgress)) (pivot.FileMessage, error)
+type consoleFeatures struct {
+	open     interactiveOpener
+	transfer clientTransferAction
+}
 
 type clientFileRequest struct {
 	AgentID    string `json:"agent_id"`
@@ -49,10 +54,10 @@ func consoleCommand(args []string) error {
 	opener := func(ctx context.Context, agentID string, request pivot.InteractiveRequest) (*pivot.InteractiveSession, error) {
 		return openControlInteractive(ctx, options, agentID, request)
 	}
-	return runConsole(ctx, os.Stdin, os.Stdout, caller, nil, nil, nil, nil, opener)
+	return runConsole(ctx, os.Stdin, os.Stdout, caller, nil, nil, nil, nil, consoleFeatures{open: opener})
 }
 
-func runConsole(ctx context.Context, input io.Reader, output io.Writer, call consoleCaller, clientID func() uint64, quit func(), clientRoutes clientRouteAction, events <-chan string, openers ...interactiveOpener) error {
+func runConsole(ctx context.Context, input io.Reader, output io.Writer, call consoleCaller, clientID func() uint64, quit func(), clientRoutes clientRouteAction, events <-chan string, features ...consoleFeatures) error {
 	fmt.Fprintln(output, "Interactive console. Type agents to list agents, help for commands.")
 	vpnClient := clientID != nil
 	selectedID, selectedLabel := "", ""
@@ -245,11 +250,11 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 				fmt.Fprintln(output, "error: select an agent first with use AGENT_NUMBER")
 				continue
 			}
-			if len(openers) == 0 || openers[0] == nil {
+			if len(features) == 0 || features[0].open == nil {
 				fmt.Fprintln(output, "error: interactive agent sessions unavailable")
 				continue
 			}
-			if err := runInteractiveConsole(ctx, output, editor, openers[0], selectedID, args[1:]); err != nil {
+			if err := runInteractiveConsole(ctx, output, editor, features[0].open, selectedID, args[1:]); err != nil {
 				fmt.Fprintln(output, "error:", err)
 			}
 			continue
@@ -285,6 +290,12 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 		ownClientID := uint64(0)
 		if clientID != nil {
 			ownClientID = clientID()
+		}
+		if (args[0] == "upload" || args[0] == "download") && len(features) != 0 && features[0].transfer != nil {
+			if err := runConsoleTransfer(ctx, output, editor, features[0].transfer, args); err != nil {
+				fmt.Fprintln(output, "error:", err)
+			}
+			continue
 		}
 		if err := runConsoleCommand(ctx, output, call, vpnClient, ownClientID, clientRoutes, args); err != nil {
 			fmt.Fprintln(output, "error:", err)

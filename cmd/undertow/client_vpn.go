@@ -184,6 +184,9 @@ func clientCommand(args []string) error {
 		live.mu.RUnlock()
 		return control.BridgeClientInteractive(ctx, session, agentID, conn)
 	})
+	setBackgroundTransferHandler(func(ctx context.Context, encoded json.RawMessage, progress func(pivot.TransferProgress)) (pivot.FileMessage, error) {
+		return live.transferProgress(ctx, encoded, progress)
+	})
 	if *interactive {
 		opener := func(ctx context.Context, agentID string, request pivot.InteractiveRequest) (*pivot.InteractiveSession, error) {
 			live.mu.RLock()
@@ -191,8 +194,15 @@ func clientCommand(args []string) error {
 			live.mu.RUnlock()
 			return control.OpenClientInteractive(ctx, session, agentID, request)
 		}
+		transfer := func(ctx context.Context, request clientFileRequest, progress func(pivot.TransferProgress)) (pivot.FileMessage, error) {
+			encoded, err := json.Marshal(request)
+			if err != nil {
+				return pivot.FileMessage{}, err
+			}
+			return live.transferProgress(ctx, encoded, progress)
+		}
 		go func() {
-			if err := runConsole(ctx, os.Stdin, os.Stdout, live.call, live.id, stop, live.routeCommand, live.events, opener); err != nil && ctx.Err() == nil {
+			if err := runConsole(ctx, os.Stdin, os.Stdout, live.call, live.id, stop, live.routeCommand, live.events, consoleFeatures{open: opener, transfer: transfer}); err != nil && ctx.Err() == nil {
 				log.Printf("console: %v", err)
 				live.notify("Console failed: " + err.Error())
 				stop()
@@ -296,18 +306,22 @@ func (c *liveClientConsole) call(ctx context.Context, method, path string, body 
 }
 
 func (c *liveClientConsole) transfer(ctx context.Context, encoded []byte) ([]byte, error) {
-	var input clientFileRequest
-	if err := json.Unmarshal(encoded, &input); err != nil {
-		return nil, errors.New("invalid file transfer request")
-	}
-	c.mu.RLock()
-	session := c.session
-	c.mu.RUnlock()
-	result, err := pivot.TransferFile(ctx, session, input.AgentID, input.Operation, input.LocalPath, input.RemotePath)
+	result, err := c.transferProgress(ctx, encoded, nil)
 	if err != nil {
 		return nil, err
 	}
 	return json.Marshal(result)
+}
+
+func (c *liveClientConsole) transferProgress(ctx context.Context, encoded []byte, progress func(pivot.TransferProgress)) (pivot.FileMessage, error) {
+	var input clientFileRequest
+	if err := json.Unmarshal(encoded, &input); err != nil {
+		return pivot.FileMessage{}, errors.New("invalid file transfer request")
+	}
+	c.mu.RLock()
+	session := c.session
+	c.mu.RUnlock()
+	return pivot.TransferFileProgress(ctx, session, input.AgentID, input.Operation, input.LocalPath, input.RemotePath, progress)
 }
 
 func runVPN(parent context.Context, c *dns.Client, serverIP netip.Addr, vpn, internal bool, name, address string, prefix netip.Prefix, verifyURL string, onActive func(*mux.Mux, uint64, *tun.Device)) error {
