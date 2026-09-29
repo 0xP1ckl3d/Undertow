@@ -41,6 +41,8 @@ type AgentInfo struct {
 	Arch             string                  `json:"arch,omitempty"`
 	Interfaces       []string                `json:"interfaces,omitempty"`
 	AdvertisedRoutes []string                `json:"advertised_routes,omitempty"`
+	Routes           []NetworkRoute          `json:"routes,omitempty"`
+	DefaultRoute     *NetworkRoute           `json:"default_route,omitempty"`
 	Capabilities     *pivot.CapabilityReport `json:"capabilities,omitempty"`
 	Connected        time.Time               `json:"connected"`
 	LastSeen         time.Time               `json:"last_seen"`
@@ -180,8 +182,16 @@ func (m *Manager) SetClientRoute(sessionID uint64, prefix netip.Prefix, agentID 
 			break
 		}
 	}
+	if !advertised {
+		for _, route := range agent.inventory.Routes {
+			if route.Prefix == prefix.String() {
+				advertised = true
+				break
+			}
+		}
+	}
 	if !manual && !advertised {
-		return errors.New("agent has not advertised this route")
+		return errors.New("agent has not advertised or discovered this route")
 	}
 	client.accepted[prefix] = AcceptedRoute{Prefix: prefix.String(), AgentID: agentID, Manual: manual}
 	return nil
@@ -315,6 +325,11 @@ func (m *Manager) receiveInventory(id string, streamMux *mux.Mux) {
 
 // UpdateInventory applies the first agent control message and later refreshes.
 func (m *Manager) UpdateInventory(id string, streamMux *mux.Mux, b []byte) {
+	var update networkRouteUpdate
+	if json.Unmarshal(b, &update) == nil && update.RouteUpdate {
+		m.updateNetworkRoutes(id, streamMux, update)
+		return
+	}
 	var info AgentInfo
 	if err := json.Unmarshal(b, &info); err != nil {
 		return
@@ -373,6 +388,47 @@ func (m *Manager) UpdateInventory(id string, streamMux *mux.Mux, b []byte) {
 		}
 	}
 	m.mu.Unlock()
+}
+
+func (m *Manager) updateNetworkRoutes(id string, streamMux *mux.Mux, update networkRouteUpdate) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	state := m.agents[id]
+	if state == nil || state.mux != streamMux {
+		return
+	}
+	if update.Reset {
+		state.inventory.Routes = nil
+		state.inventory.DefaultRoute = nil
+	}
+	if update.DefaultRoute != nil {
+		if route, ok := validNetworkRoute(*update.DefaultRoute, true); ok {
+			state.inventory.DefaultRoute = &route
+		}
+	}
+	for _, candidate := range update.Routes {
+		if len(state.inventory.Routes) >= 64 {
+			break
+		}
+		route, ok := validNetworkRoute(candidate, false)
+		if !ok {
+			continue
+		}
+		prefix, _ := netip.ParsePrefix(route.Prefix)
+		if prefix.Overlaps(m.virtualNetwork) {
+			continue
+		}
+		duplicate := false
+		for _, existing := range state.inventory.Routes {
+			if existing.Prefix == route.Prefix && existing.Gateway == route.Gateway && existing.Interface == route.Interface {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			state.inventory.Routes = append(state.inventory.Routes, route)
+		}
+	}
 }
 
 func agentPivotAllowed(state *agentState) bool {

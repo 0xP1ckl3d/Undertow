@@ -3,11 +3,14 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/netip"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"undertow/internal/control"
@@ -85,6 +88,15 @@ func TestClientModeRoutes(t *testing.T) {
 	failing := &recordingRouteDevice{fail: "128.0.0.0/1"}
 	if _, err := installClientModeRoutes(failing, true); err == nil || !reflect.DeepEqual(failing.deleted, []string{"0.0.0.0/1"}) {
 		t.Fatalf("failed route did not roll back: %+v err=%v", failing, err)
+	}
+}
+
+func TestClientRejectsAcceptedRouteCollidingWithLocalNetwork(t *testing.T) {
+	client := &liveClientConsole{serverIP: netip.MustParseAddr("203.0.113.10"), tunnelPrefix: netip.MustParsePrefix("172.16.253.0/24"), localNetworks: []netip.Prefix{netip.MustParsePrefix("192.168.50.0/24")}}
+	var output bytes.Buffer
+	err := client.routeCommand(context.Background(), []string{"route", "accept", "192.168.50.0/24", "agent-a"}, &output)
+	if err == nil || !strings.Contains(err.Error(), "conflicts with local network") {
+		t.Fatalf("collision=%v", err)
 	}
 }
 

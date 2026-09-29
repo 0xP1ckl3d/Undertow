@@ -110,6 +110,39 @@ func TestAcceptedRoutesStayLocalToVPNClient(t *testing.T) {
 	}
 }
 
+func TestStructuredDiscoveredRoutesAreCandidateOnly(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	manager := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	agentMux := mux.New(ctx, &idleTransport{done: make(chan struct{})}, true)
+	defer agentMux.Close()
+	var keys security.Keys
+	agentSession, _ := session.New(811, keys, false)
+	manager.Register(&dns.Peer{Session: agentSession, AgentID: "agent-a", Connected: time.Now()}, agentMux)
+	manager.UpdateInventory("agent-a", agentMux, []byte(`{"hostname":"pivot","capabilities":{"allowed":["pivot"]}}`))
+	manager.UpdateInventory("agent-a", agentMux, []byte(`{"route_update":true,"reset":true,"routes":[{"prefix":"10.40.0.0/16","gateway":"192.168.50.1","interface":"eth0","type":"unicast","source":"static","direct":false},{"prefix":"172.16.254.0/24","interface":"eth0","direct":true}],"default_route":{"prefix":"0.0.0.0/0","gateway":"192.168.50.1","interface":"eth0"}}`))
+	agents := manager.AgentList()
+	if len(agents) != 1 || len(agents[0].Routes) != 1 || agents[0].Routes[0].Prefix != "10.40.0.0/16" || agents[0].Routes[0].Gateway != "192.168.50.1" || agents[0].DefaultRoute == nil {
+		t.Fatalf("structured inventory=%+v", agents)
+	}
+	if len(manager.routes.List()) != 0 {
+		t.Fatal("discovered routes were installed globally")
+	}
+	clientMux := mux.New(ctx, &idleTransport{done: make(chan struct{})}, true)
+	defer clientMux.Close()
+	clientSession, _ := session.New(812, keys, false)
+	manager.RegisterClient(&dns.Peer{Session: clientSession, AgentID: "client-a", Connected: time.Now()}, clientMux, false, "")
+	if err := manager.SetClientRoute(812, netip.MustParsePrefix("10.40.0.0/16"), "agent-a", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.SetClientRoute(812, netip.MustParsePrefix("0.0.0.0/0"), "agent-a", false); err == nil {
+		t.Fatal("default route accepted as discovered candidate")
+	}
+	if got, configured := manager.ResolveClientEgress(812, netip.MustParseAddr("10.40.1.3")); !configured || got != agentMux {
+		t.Fatal("accepted candidate did not resolve")
+	}
+}
+
 func TestDeniedPivotDeactivatesConfiguredRoute(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

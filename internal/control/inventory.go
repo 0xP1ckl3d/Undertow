@@ -71,7 +71,10 @@ func SendInventory(ctx context.Context, streamMux *mux.Mux, explicit []string, c
 			return err
 		}
 		if len(data) <= 700 {
-			return streamMux.SendControl(ctx, data)
+			if err := streamMux.SendControl(ctx, data); err != nil {
+				return err
+			}
+			return sendNetworkRouteInventory(ctx, streamMux)
 		}
 		if len(info.Interfaces) == 0 {
 			if len(info.AdvertisedRoutes) <= explicitCount {
@@ -82,4 +85,44 @@ func SendInventory(ctx context.Context, streamMux *mux.Mux, explicit []string, c
 		}
 		info.Interfaces = info.Interfaces[:len(info.Interfaces)-1]
 	}
+}
+
+type networkRouteUpdate struct {
+	RouteUpdate  bool           `json:"route_update"`
+	Reset        bool           `json:"reset,omitempty"`
+	Routes       []NetworkRoute `json:"routes,omitempty"`
+	DefaultRoute *NetworkRoute  `json:"default_route,omitempty"`
+}
+
+func sendNetworkRouteInventory(ctx context.Context, streamMux *mux.Mux) error {
+	routes, defaultRoute := collectNetworkRoutes()
+	update := networkRouteUpdate{RouteUpdate: true, Reset: true, DefaultRoute: defaultRoute}
+	for _, route := range routes {
+		update.Routes = append(update.Routes, route)
+		encoded, err := json.Marshal(update)
+		if err != nil {
+			return err
+		}
+		if len(encoded) <= 700 {
+			continue
+		}
+		update.Routes = update.Routes[:len(update.Routes)-1]
+		encoded, err = json.Marshal(update)
+		if err != nil {
+			return err
+		}
+		if err := streamMux.SendControl(ctx, encoded); err != nil {
+			return err
+		}
+		update = networkRouteUpdate{RouteUpdate: true, Routes: []NetworkRoute{route}}
+		encoded, err = json.Marshal(update)
+		if err != nil || len(encoded) > 700 {
+			return errors.New("network route entry exceeds inventory frame")
+		}
+	}
+	encoded, err := json.Marshal(update)
+	if err != nil {
+		return err
+	}
+	return streamMux.SendControl(ctx, encoded)
 }

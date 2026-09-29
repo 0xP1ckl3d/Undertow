@@ -52,6 +52,8 @@ quit
 
 `route add` on the server affects server managed routing. The server's optional proxy TUN is needed for the server host to send ordinary IP traffic to that route. Agent selection in the interactive menu is local to the console; the separate `undertow agent select AGENT_ID` command changes the server's API selection.
 
+Each agent also reports structured IPv4 routes when available. The client console's `routes` command labels directly attached networks and networks reached through a gateway, including the interface and route source. It shows the agent's default route separately for information. Use `route accept CIDR` in the selected-agent menu for a reported candidate, or `route add CIDR` for another route you know that agent can reach. Both install only on this VPN client. A prefix overlapping this client's existing local networks is rejected.
+
 The server console uses the server's loopback API. If its address or token file was customized, pass `undertow console --control IP:PORT --control-token-file PATH`. This control credential stays on the server host. The enrollment token used by clients and agents is separate.
 
 ## VPN client console

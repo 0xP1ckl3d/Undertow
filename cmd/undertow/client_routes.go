@@ -283,6 +283,30 @@ func (c *liveClientConsole) routeCommand(ctx context.Context, args []string, out
 			for _, prefix := range agent.AdvertisedRoutes {
 				fmt.Fprintf(output, "  %s via %s\n", prefix, agent.ID)
 			}
+			if agent.DefaultRoute != nil {
+				fmt.Fprintf(output, "  default via %s on %s (informational)\n", agent.DefaultRoute.Gateway, agent.DefaultRoute.Interface)
+			}
+			for _, route := range agent.Routes {
+				prefix, err := netip.ParsePrefix(route.Prefix)
+				if err != nil {
+					continue
+				}
+				conflict := false
+				for _, local := range c.localNetworks {
+					if prefix.Overlaps(local) {
+						conflict = true
+						break
+					}
+				}
+				kind := "direct"
+				if !route.Direct {
+					kind = "routed via " + route.Gateway
+				}
+				if conflict {
+					kind += ", conflicts with this client's local routes"
+				}
+				fmt.Fprintf(output, "  candidate %s via %s (%s, interface=%s, source=%s)\n", route.Prefix, agent.ID, kind, route.Interface, route.Source)
+			}
 		}
 		fmt.Fprintln(output, "Accepted local routes:")
 		for _, route := range c.routes {
@@ -303,6 +327,11 @@ func (c *liveClientConsole) routeCommand(ctx context.Context, args []string, out
 			return errors.New("route must be IPv4 CIDR outside the DNS server and client tunnel networks")
 		}
 		prefix = prefix.Masked()
+		for _, local := range c.localNetworks {
+			if prefix.Overlaps(local) {
+				return fmt.Errorf("route %s conflicts with local network %s", prefix, local)
+			}
+		}
 		for _, existing := range c.routes {
 			if existing.Prefix == prefix.String() {
 				return errors.New("route is already accepted")
