@@ -18,6 +18,7 @@ import (
 
 	"undertow/internal/control"
 	"undertow/internal/mux"
+	"undertow/internal/routing"
 	"undertow/internal/tun"
 )
 
@@ -88,8 +89,14 @@ func saveClientRoutes(path string, routes []control.AcceptedRoute) error {
 func (c *liveClientConsole) set(session *mux.Mux, id uint64, device *tun.Device) {
 	c.routeMu.Lock()
 	c.mu.Lock()
-	c.session, c.sessionID, c.device = session, id, device
+	c.session, c.sessionID = session, id
+	if device == nil {
+		c.device = nil
+	} else {
+		c.device = device
+	}
 	c.active = make(map[string]bool)
+	c.global = make(map[string]bool)
 	c.mu.Unlock()
 	c.routeMu.Unlock()
 	if session != nil {
@@ -104,6 +111,7 @@ func (c *liveClientConsole) restoreLoop(session *mux.Mux) {
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 	lastErrors := make(map[string]string)
+	lastGlobalError := ""
 	for {
 		c.routeMu.Lock()
 		c.mu.RLock()
@@ -130,6 +138,17 @@ func (c *liveClientConsole) restoreLoop(session *mux.Mux) {
 				log.Printf("accepted route active: %s via %s", route.Prefix, route.AgentID)
 			}
 		}
+		if !c.vpn {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			err := c.syncGlobalRoutes(ctx)
+			cancel()
+			if err != nil && err.Error() != lastGlobalError {
+				log.Printf("server route sync pending: %v", err)
+				lastGlobalError = err.Error()
+			} else if err == nil {
+				lastGlobalError = ""
+			}
+		}
 		c.routeMu.Unlock()
 		select {
 		case <-session.Done():
@@ -137,6 +156,81 @@ func (c *liveClientConsole) restoreLoop(session *mux.Mux) {
 		case <-ticker.C:
 		}
 	}
+}
+
+// The caller holds routeMu. Internal-only mode mirrors active server routes
+// locally because it has no broad /1 route to send those packets into TUN.
+func (c *liveClientConsole) syncGlobalRoutes(ctx context.Context) error {
+	data, err := c.call(ctx, http.MethodGet, "/v1/status", nil)
+	if err != nil {
+		return err
+	}
+	return c.applyGlobalRouteStatus(data)
+}
+
+// The caller holds routeMu.
+func (c *liveClientConsole) applyGlobalRouteStatus(data []byte) error {
+	var status struct {
+		Routes  []routing.Route      `json:"routes"`
+		Clients []control.ClientInfo `json:"clients"`
+	}
+	if err := json.Unmarshal(data, &status); err != nil {
+		return err
+	}
+	c.mu.RLock()
+	id, device := c.sessionID, c.device
+	c.mu.RUnlock()
+	if id == 0 || device == nil {
+		return errors.New("client is not connected")
+	}
+	modeFound, internal := false, false
+	for _, client := range status.Clients {
+		if client.SessionID == id {
+			modeFound, internal = true, client.Internal
+			break
+		}
+	}
+	if !modeFound {
+		return errors.New("client session is not in server status")
+	}
+	desired := make(map[string]bool)
+	if internal {
+		for _, route := range status.Routes {
+			prefix := route.Prefix.Masked()
+			if !route.Active || !prefix.IsValid() || !prefix.Addr().Is4() || prefix.Bits() == 0 || prefix.Contains(c.serverIP) || prefix.Contains(c.tunnelPrefix.Addr()) || c.tunnelPrefix.Contains(prefix.Addr()) {
+				continue
+			}
+			conflict := false
+			for _, local := range c.localNetworks {
+				if prefix.Contains(local.Addr()) || local.Contains(prefix.Addr()) {
+					conflict = true
+					break
+				}
+			}
+			if !conflict {
+				desired[prefix.String()] = true
+			}
+		}
+	}
+	for prefix := range c.global {
+		if !desired[prefix] {
+			if err := device.DelRoute(prefix); err != nil {
+				return fmt.Errorf("remove server route %s: %w", prefix, err)
+			}
+			delete(c.global, prefix)
+		}
+	}
+	for prefix := range desired {
+		if c.global[prefix] || c.active[prefix] {
+			continue
+		}
+		if err := device.AddRoute(prefix); err != nil {
+			return fmt.Errorf("install server route %s: %w", prefix, err)
+		}
+		c.global[prefix] = true
+		log.Printf("server route active on client: %s", prefix)
+	}
+	return nil
 }
 
 // The caller holds routeMu. The server route is bound to this VPN session only.
@@ -155,9 +249,13 @@ func (c *liveClientConsole) activateRoute(ctx context.Context, route control.Acc
 	if _, err := c.call(ctx, http.MethodPost, path, route); err != nil {
 		return err
 	}
-	if err := device.AddRoute(route.Prefix); err != nil {
-		_, _ = c.call(ctx, http.MethodDelete, path+"?prefix="+url.QueryEscape(route.Prefix), nil)
-		return fmt.Errorf("install local route: %w", err)
+	if !c.global[route.Prefix] {
+		if err := device.AddRoute(route.Prefix); err != nil {
+			_, _ = c.call(ctx, http.MethodDelete, path+"?prefix="+url.QueryEscape(route.Prefix), nil)
+			return fmt.Errorf("install local route: %w", err)
+		}
+	} else {
+		delete(c.global, route.Prefix) // Transfer OS route ownership to this accepted route.
 	}
 	c.active[route.Prefix] = true
 	return nil

@@ -4,10 +4,22 @@
 
 - **Server:** the reachable UDP listener and local operator API. It creates the server identity and accepts agent and VPN client sessions. It can create a proxy TUN/Wintun for routed internal access, but VPN Internet egress itself uses server sockets.
 - **Agent:** a connector on the internal network. It opens TCP, UDP, and ICMP operations for the server. It needs no root/Administrator privilege, virtual adapter, route changes, or inbound port.
-- **VPN client:** a separate, elevated process that creates its own TUN/Wintun and changes its host's IPv4 routes. It can use server Internet egress alone, or include configured agent routes with `--internal`.
+- **Client:** a separate, elevated process that creates its own TUN/Wintun. `--vpn` changes Internet routes; `--internal` alone adds only internal routes through agents; both flags combine them.
 - **Operator commands:** `status`, `agent list/show/select`, `route add/del/list`, and `session kill` run on the server host against a token protected loopback API.
 
-The key distinction is **which machine's traffic changes**. An agent exposes destinations reachable *from the agent host* and leaves that host's normal networking alone. A VPN client redirects applications *on the client host* into the tunnel. Starting a VPN client does not expose its local network as an agent; starting an agent does not give its own host VPN Internet egress. A combined VPN and internal deployment needs both processes plus a server route to the agent.
+The key distinction is **which machine's traffic changes**. An agent exposes destinations reachable *from the agent host* and leaves that host's normal networking alone. A client routes applications *on the client host* into the tunnel for its selected prefixes. Starting a client does not expose its local network as an agent; starting an agent does not give its own host VPN Internet egress. Internal access needs a connected agent and a route to it.
+
+## Client routing modes
+
+Run one of these on the elevated **VPN client** host after starting the server and, for internal access, an agent:
+
+```sh
+sudo undertow client --vpn --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
+sudo undertow client --internal --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
+sudo undertow client --vpn --internal --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
+```
+
+`--vpn` installs two IPv4 `/1` routes and verifies public egress. `--internal` alone pins the direct-DNS server route, creates the TUN, and uses configured server routes and routes accepted in the client console; it does not change the Internet/default route or require a public egress check. Both flags provide VPN Internet egress and agent routes. At least one flag is required. See [deployment scenarios](scenarios.md) for route setup and tests.
 
 Undertow uses **direct UDP DNS**, addressed to a numeric server IP and port. The default synthetic domain is `t.undertow.invalid`; it must match on both ends. Public DNS delegation is not required. Allow the chosen UDP port through the server firewall. UDP/53 and virtual interfaces commonly need elevated privileges.
 

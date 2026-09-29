@@ -71,6 +71,12 @@ func TestDuplicateModeArgumentIsRejected(t *testing.T) {
 	}
 }
 
+func TestClientRequiresRoutingMode(t *testing.T) {
+	if err := clientCommand(nil); err == nil || !strings.Contains(err.Error(), "--vpn or --internal") {
+		t.Fatalf("missing mode error: %v", err)
+	}
+}
+
 func TestVerificationTarget(t *testing.T) {
 	got, err := resolveVerificationTarget(context.Background(), "https://127.0.0.1/check")
 	if err != nil || got != "127.0.0.1:443" {

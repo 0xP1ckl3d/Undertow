@@ -67,12 +67,20 @@ The agent makes no interface or host route changes. Its local key must differ fo
 
 ## `client`
 
-`undertow client --vpn --server IP:PORT [--fingerprint HEX | --trust-on-first-use] [FLAGS]`
+`undertow client (--vpn | --internal | --vpn --internal) --server IP:PORT [FLAGS]`
+
+Run on the elevated **VPN client** host. Choose at least one of `--vpn` and `--internal`:
+
+```sh
+sudo undertow client --vpn --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
+sudo undertow client --internal --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
+sudo undertow client --vpn --internal --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
+```
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `--vpn` | Required | Enable privileged IPv4 VPN mode. |
-| `--internal` | Off | Also use server configured agent routes for internal destinations. |
+| `--vpn` | Off | Install two IPv4 `/1` routes for Internet egress through server sockets. |
+| `--internal` | Off | Use active server configured agent routes. Alone, install only those and accepted/manual routes locally. |
 | `--server IP:PORT` | Required | Numeric IPv4 direct-DNS server address. |
 | `--fingerprint HEX` | None | Explicit server identity pin. |
 | `--fingerprint-file PATH` | `server.fingerprint` | Saved pin path. |
@@ -83,13 +91,13 @@ The agent makes no interface or host route changes. Its local key must differ fo
 | `--tun-name NAME` | `undertow-vpn` | Client TUN/Wintun name. |
 | `--tunnel-address CIDR` | `172.16.253.1/24` | Client interface IPv4 address/network. |
 | `--payload-profile auto\|large\|small` | `auto` | Automatic 128–800 byte path discovery and adjustment, or a forced legacy profile. |
-| `--verify-url URL` | `https://api.ipify.org` | Public IPv4 check after routes are installed. Empty disables it. |
+| `--verify-url URL` | `https://api.ipify.org` | Public IPv4 check after `--vpn` routes are installed. Ignored in internal-only mode; empty disables it for `--vpn`. |
 | `--interactive` | Automatic in a terminal | Force an attached console when input is redirected. |
 | `--routes-file PATH` | `client-routes.json` | Persist this client's accepted and manual agent routes. The file is created locally, not copied from the server. |
 
-The client pins a physical route to the server, installs two IPv4 `/1` routes through its adapter, and withdraws its owned routes on graceful exit or verification failure. It does not provide IPv6 VPN routing. The `.1` client adapter address is local; the public egress address is reported separately.
+Every mode creates the client TUN/Wintun and pins a physical route to the direct-DNS server. `--vpn` installs two IPv4 `/1` routes and verifies public egress by default. `--internal` alone does not change the Internet/default route or check public egress; it mirrors active server routes to agents and installs the client's accepted/manual routes. `--vpn --internal` provides both behaviours. Owned routes are withdrawn on graceful exit or a failed check. IPv6 is not routed. The `.1` client adapter address is local; the public egress address is reported separately in VPN mode.
 
-In a terminal, `client --vpn` opens the interactive console by default. The VPN runs in a separate local worker so `background` detaches the console without dropping its routes or session. Run `undertow client attach` to return; use `--pid-file PATH` if the worker uses a custom state file. `quit` stops the VPN and removes its routes. Ctrl+C asks before stopping. Up/Down recall commands and Tab completes the first command word. `client --background` starts without the console. A nonterminal foreground client can also be attached from another terminal. A connected VPN client can view status, accept agent advertised routes, add its own manual route through an agent, change its own internal mode, and execute programs on agents that allow it. Client accepted routes affect only that client and persist across reconnects. Global server route management and agent selection remain on the server host. No extra credential or server setting is needed for client commands. The server's `control.key` is only for its loopback API and local operator commands; do not copy it to VPN clients. `internal on` and `internal off` change how **new** flows use global server routes; the client's explicitly accepted routes remain active in either setting. Existing connections keep their current path. Routine VPN logs are written to `--log-file` (default `undertow-client.log`); the console shows connection and agent changes.
+In a terminal, any client mode opens the interactive console by default. The tunnel runs in a separate local worker so `background` detaches the console without dropping its routes or session. Run `undertow client attach` to return; use `--pid-file PATH` if the worker uses a custom state file. `quit` stops the client and removes its routes. Ctrl+C asks before stopping. Up/Down recall commands and Tab completes the first command word. `client --background` starts without the console. A nonterminal foreground client can also be attached from another terminal. A connected client can view status, accept agent advertised routes, add its own manual route through an agent, change its own internal mode, and execute programs on agents that allow it. Client accepted routes affect only that client and persist across reconnects. Global server route management and agent selection remain on the server host. No extra credential or server setting is needed for client commands. The server's `control.key` is only for its loopback API and local operator commands; do not copy it to clients. `internal on` and `internal off` change how **new** flows use global server routes; the client's explicitly accepted routes remain active in either setting. Existing connections keep their current path. Routine logs are written to `--log-file` (default `undertow-client.log`); the console shows connection and agent changes.
 
 ## Foreground and background lifecycle
 

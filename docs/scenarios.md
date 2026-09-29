@@ -63,6 +63,22 @@ On Windows, run PowerShell as Administrator and use `.\bin\undertow.exe client -
 
 Use `--verify-url https://YOUR_IP_SERVICE` to choose another public IPv4 check, or `--verify-url ''` to skip it. Skipping verification removes a useful failure signal.
 
+## 4a. Reach internal routes while keeping client Internet egress
+
+Start an agent, then on the **server** configure a route it can reach:
+
+```sh
+undertow route add 10.20.0.0/16 --via AGENT_ID
+```
+
+On the elevated **VPN client** host, start internal-only mode:
+
+```sh
+sudo undertow client --internal --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
+```
+
+The client creates its TUN/Wintun, pins the DNS server route, and installs the active `10.20.0.0/16` route through the tunnel. It does not install either IPv4 `/1` route or change the default Internet route, and it does not need public egress verification. Test an internal service such as `curl http://10.20.0.50/`, then check that normal public Internet access still uses the client's existing connection. The client console also supports `route accept CIDR` for an advertised agent subnet and `route add CIDR` for a manual per-client route; those choices persist across reconnects.
+
 ## 5. Combine VPN egress and internal routes
 
 Start an agent and configure a route on the server as in scenario 2. The server does not need its own `--tun` if only a separate VPN client needs the internal prefix; it still needs the configured route and a connected agent.
@@ -72,7 +88,7 @@ undertow route add 10.20.0.0/16 --via AGENT_ID
 sudo undertow client --vpn --internal --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
 ```
 
-On the VPN client, traffic for `10.20.0.0/16` uses the selected agent and ordinary Internet traffic exits through server sockets. Test both an internal target and `curl -4 https://api.ipify.org`. A more specific route already installed on the client can override its VPN route, so choose a nonlocal test prefix or adjust your test topology.
+On the VPN client, traffic for `10.20.0.0/16` uses the selected agent and ordinary Internet traffic exits through server sockets. Test both an internal target and `curl -4 https://api.ipify.org`. A more specific route already installed on the client can override its VPN route, so choose a nonlocal test prefix or adjust your test topology. `--vpn` alone, `--internal` alone, and this combined mode are the three supported routing choices.
 
 ## 6. Multiple agents and route ownership
 

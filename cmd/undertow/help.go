@@ -25,27 +25,28 @@ func writeHelp(w io.Writer, topic string) error {
 Roles:
   server   Receives DNS/UDP sessions. Optional proxy TUN for internal routes.
   agent    Unprivileged process on an internal host; opens target sockets.
-  client   Privileged process on a separate host; routes its IPv4 traffic
-           through server Internet egress, optionally through agent routes.
+  client   Privileged process on a separate host; routes Internet traffic,
+           internal agent networks, or both through its local TUN/Wintun.
 
 An agent exposes destinations reachable from its host, without changing that
-host's routes. A VPN client changes its own host's IPv4 routes. A VPN client
-does not expose its local network; an agent does not provide VPN Internet
-egress to its own host. For VPN access to agent networks, configure a server
-route to the agent and run the VPN client with --internal.
+host's routes. A client routes selected prefixes on its own host; --internal
+alone leaves its Internet/default route unchanged. A client does not expose
+its local network; an agent does not provide VPN Internet egress to its own
+host. For access to agent networks, configure a route to the agent and run
+the client with --internal.
 
 Setup:
   1. On the server: undertow init
   2. Choose enrollment: token (default), password, or open (--auth none).
      Pin the server fingerprint or opt in to --trust-on-first-use.
   3. Start: undertow server --listen 0.0.0.0:53
-  4. Start an agent or VPN client using --server and matching --auth options.
+  4. Start an agent or client using --server and matching --auth options.
 
 Commands:
   init       Create server identity and enrollment token.
   server     Run the DNS listener and operator control API.
   agent      Connect an internal host without changing its routes.
-  client     Run the privileged IPv4 VPN; 'client attach' opens its console.
+  client     Run a privileged IPv4 tunnel; 'client attach' opens its console.
   console    Open an interactive server operator console.
   status     Show connected agents, VPN clients, and routes.
   route      Add, remove, or list agent pivot routes.
@@ -158,13 +159,13 @@ agent's supported and allowed capabilities.
 Operator subcommands: 'undertow agent list|show ID|select ID'.
 `
 	case "client":
-		body = `undertow client — privileged IPv4 VPN on a separate host
+		body = `undertow client — privileged IPv4 tunnel on a separate host
 
-Usage: undertow client --vpn --server IP:PORT [--fingerprint HEX | --trust-on-first-use] [FLAGS]
+Usage: undertow client (--vpn | --internal | --vpn --internal) --server IP:PORT [FLAGS]
 
-  --vpn                    Required; install IPv4 VPN routes.
-  --internal               Also send configured agent pivot routes through
-                           their agents; requires server route setup.
+  --vpn                    Install two IPv4 /1 routes for Internet egress.
+  --internal               Use server configured agent routes. Alone, this
+                           leaves Internet/default routes unchanged.
   --server IP:PORT         Direct-DNS server IPv4 and UDP port (required).
   --fingerprint HEX        Pinned server public-key fingerprint.
   --fingerprint-file PATH  Saved pin (default server.fingerprint).
@@ -180,8 +181,8 @@ Usage: undertow client --vpn --server IP:PORT [--fingerprint HEX | --trust-on-fi
   --tun-name NAME          Local adapter (default undertow-vpn).
   --tunnel-address CIDR    Local address (default 172.16.253.1/24).
   --payload-profile MODE   auto, large, or small (default auto).
-  --verify-url URL         Public IPv4 check (default https://api.ipify.org);
-                           empty value skips verification.
+  --verify-url URL         Public IPv4 check for --vpn only (default
+                           https://api.ipify.org); empty skips verification.
   --interactive            Open a console even when input is redirected;
                            terminal starts open it by default.
   --routes-file PATH       Persist accepted client routes (default client-routes.json).
@@ -192,13 +193,17 @@ Usage: undertow client --vpn --server IP:PORT [--fingerprint HEX | --trust-on-fi
   --log-file PATH          Default undertow-client.log.
   --pid-file PATH          Default undertow-client.pid.
 
-Example: sudo undertow client --vpn --server 203.0.113.10:53 --fingerprint HEX --token-file token.key --background
+Examples (on the client host):
+  sudo undertow client --vpn --server 203.0.113.10:53 --fingerprint HEX --token-file token.key
+  sudo undertow client --internal --server 203.0.113.10:53 --fingerprint HEX --token-file token.key
+  sudo undertow client --vpn --internal --server 203.0.113.10:53 --fingerprint HEX --token-file token.key
 
-Without --internal, Internet traffic exits through server sockets. With
---internal, only server configured pivot subnets use agents. The local .1
+--internal alone pins the DNS server route and installs active server and accepted
+routes without changing Internet/default routes or checking public egress.
+--vpn adds two /1 routes and checks public egress by default. The local .1
 address belongs to the client adapter; it is not the public egress address.
-In a terminal, client --vpn opens the interactive console by default. The
-VPN worker stays running when you type 'background'; use 'undertow client
+In a terminal, client opens the interactive console by default. The
+client worker stays running when you type 'background'; use 'undertow client
 attach' to return. 'quit' stops the worker and removes its routes. Ctrl+C
 asks for confirmation before stopping. Up/Down recall commands; Tab
 completes top-level commands. A scripted client without a terminal runs in
@@ -222,7 +227,7 @@ Connects to the running server's loopback API. Use status, routes, route add,
 route del, select, exec, help, and quit inside the console. Agent execution
 is enabled on agents by default and runs a named program with arguments,
 without an implicit shell. Use 'undertow console' on the server host;
-'undertow client --vpn --interactive ...' opens a VPN client console.
+'undertow client --internal --interactive ...' opens a client console.
 In either console, type 'agents' to list numbered agents, 'use 1' to enter
 one, 'help' for the current menu, and 'back' to return to the main menu.
 Inside an agent, use built-in pwd, ls, stat, mkdir, rm, whoami, ps,

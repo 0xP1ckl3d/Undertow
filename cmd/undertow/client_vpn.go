@@ -37,7 +37,7 @@ func clientCommand(args []string) error {
 	f := flag.NewFlagSet("client", flag.ContinueOnError)
 	lifecycle := addLifecycleFlags(f, "client")
 	vpn := f.Bool("vpn", false, "route IPv4 traffic through the privileged VPN client")
-	internal := f.Bool("internal", false, "also honor configured agent pivot routes")
+	internal := f.Bool("internal", false, "use configured agent routes without changing the Internet route")
 	server := f.String("server", "", "direct DNS server IPv4:port")
 	domain := f.String("domain", "t.undertow.invalid", "synthetic DNS domain")
 	fingerprint := f.String("fingerprint", "", "pinned server identity fingerprint")
@@ -59,7 +59,10 @@ func clientCommand(args []string) error {
 		return err
 	}
 	if f.NArg() != 0 {
-		return fmt.Errorf("unexpected client argument %q; use 'undertow client --vpn ...'", f.Arg(0))
+		return fmt.Errorf("unexpected client argument %q; use 'undertow client --vpn or --internal ...'", f.Arg(0))
+	}
+	if !*vpn && !*internal {
+		return errors.New("client requires at least one of --vpn or --internal")
 	}
 	if *interactive && (*lifecycle.background || *lifecycle.stop) {
 		return errors.New("--interactive requires a foreground VPN client")
@@ -100,9 +103,6 @@ func clientCommand(args []string) error {
 			return err
 		}
 		defer cleanup()
-	}
-	if !*vpn {
-		return errors.New("client currently requires --vpn")
 	}
 	if *server == "" {
 		return errors.New("--server is required")
@@ -148,7 +148,7 @@ func clientCommand(args []string) error {
 	if err != nil {
 		return err
 	}
-	live := &liveClientConsole{routeFile: *routesFile, routes: savedRoutes, serverIP: serverIP, tunnelPrefix: prefix.Masked(), events: make(chan string, 16)}
+	live := &liveClientConsole{routeFile: *routesFile, routes: savedRoutes, serverIP: serverIP, tunnelPrefix: prefix.Masked(), localNetworks: networks, vpn: *vpn, events: make(chan string, 16)}
 	setBackgroundConsoleHandler(func(ctx context.Context, request consoleRPCRequest) consoleRPCResponse {
 		var response consoleRPCResponse
 		switch request.Action {
@@ -219,7 +219,7 @@ func clientCommand(args []string) error {
 				log.Printf("trusted server fingerprint saved to %s: %s", *fingerprintFile, pinnedFingerprint)
 				savePin = false
 			}
-			err = runVPN(ctx, c, serverIP, *internal, *tunName, *address, prefix, *verifyURL, live.set)
+			err = runVPN(ctx, c, serverIP, *vpn, *internal, *tunName, *address, prefix, *verifyURL, live.set)
 			c.Close()
 			if err != nil && !errors.Is(err, io.EOF) && ctx.Err() == nil {
 				live.notify("VPN error: " + err.Error())
@@ -240,17 +240,20 @@ func clientCommand(args []string) error {
 }
 
 type liveClientConsole struct {
-	mu           sync.RWMutex
-	routeMu      sync.Mutex
-	session      *mux.Mux
-	sessionID    uint64
-	device       clientRouteDevice
-	active       map[string]bool
-	routeFile    string
-	routes       []control.AcceptedRoute
-	events       chan string
-	serverIP     netip.Addr
-	tunnelPrefix netip.Prefix
+	mu            sync.RWMutex
+	routeMu       sync.Mutex
+	session       *mux.Mux
+	sessionID     uint64
+	device        clientRouteDevice
+	active        map[string]bool
+	global        map[string]bool
+	vpn           bool
+	localNetworks []netip.Prefix
+	routeFile     string
+	routes        []control.AcceptedRoute
+	events        chan string
+	serverIP      netip.Addr
+	tunnelPrefix  netip.Prefix
 }
 
 func (c *liveClientConsole) notify(message string) {
@@ -295,7 +298,7 @@ func (c *liveClientConsole) transfer(ctx context.Context, encoded []byte) ([]byt
 	return json.Marshal(result)
 }
 
-func runVPN(parent context.Context, c *dns.Client, serverIP netip.Addr, internal bool, name, address string, prefix netip.Prefix, verifyURL string, onActive func(*mux.Mux, uint64, *tun.Device)) error {
+func runVPN(parent context.Context, c *dns.Client, serverIP netip.Addr, vpn, internal bool, name, address string, prefix netip.Prefix, verifyURL string, onActive func(*mux.Mux, uint64, *tun.Device)) error {
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	m := mux.New(ctx, c, false)
@@ -331,7 +334,7 @@ func runVPN(parent context.Context, c *dns.Client, serverIP netip.Addr, internal
 	}
 	_ = probe.Close()
 	var verificationAddress string
-	if verifyURL != "" {
+	if vpn && verifyURL != "" {
 		resolveCtx, resolveCancel := context.WithTimeout(ctx, 10*time.Second)
 		verificationAddress, err = resolveVerificationTarget(resolveCtx, verifyURL)
 		resolveCancel()
@@ -371,21 +374,13 @@ func runVPN(parent context.Context, c *dns.Client, serverIP netip.Addr, internal
 		return fmt.Errorf("pin DNS carrier route: %w", err)
 	}
 	defer unpin()
-	routes := []string{"0.0.0.0/1", "128.0.0.0/1"}
-	installed := make([]string, 0, len(routes))
-	defer func() {
-		for i := len(installed) - 1; i >= 0; i-- {
-			_ = device.DelRoute(installed[i])
-		}
-	}()
-	for _, route := range routes {
-		if err := device.AddRoute(route); err != nil {
-			return fmt.Errorf("install VPN route %s: %w", route, err)
-		}
-		installed = append(installed, route)
+	removeModeRoutes, err := installClientModeRoutes(device, vpn)
+	if err != nil {
+		return err
 	}
-	log.Printf("VPN routes installed through %s; verifying egress", serverIP)
-	if verifyURL != "" {
+	defer removeModeRoutes()
+	if vpn && verifyURL != "" {
+		log.Printf("VPN routes installed through %s; verifying egress", serverIP)
 		verifyCtx, verifyCancel := context.WithTimeout(ctx, 30*time.Second)
 		type verificationResult struct {
 			ip  string
@@ -414,7 +409,11 @@ func runVPN(parent context.Context, c *dns.Client, serverIP netip.Addr, internal
 		}
 		log.Printf("public egress IP: %s", publicIP)
 	}
-	log.Printf("VPN active through %s; internal pivots=%t", serverIP, internal)
+	if vpn {
+		log.Printf("VPN active through %s; internal pivots=%t", serverIP, internal)
+	} else {
+		log.Printf("internal tunnel active through %s; Internet routes unchanged", serverIP)
+	}
 	if err := markBackgroundReady(); err != nil {
 		return err
 	}
@@ -430,6 +429,27 @@ func runVPN(parent context.Context, c *dns.Client, serverIP netip.Addr, internal
 	case err := <-stackErr:
 		return err
 	}
+}
+
+func installClientModeRoutes(device clientRouteDevice, vpn bool) (func(), error) {
+	if !vpn {
+		return func() {}, nil
+	}
+	routes := []string{"0.0.0.0/1", "128.0.0.0/1"}
+	installed := make([]string, 0, len(routes))
+	cleanup := func() {
+		for i := len(installed) - 1; i >= 0; i-- {
+			_ = device.DelRoute(installed[i])
+		}
+	}
+	for _, route := range routes {
+		if err := device.AddRoute(route); err != nil {
+			cleanup()
+			return nil, fmt.Errorf("install VPN route %s: %w", route, err)
+		}
+		installed = append(installed, route)
+	}
+	return cleanup, nil
 }
 
 func resolveVerificationTarget(ctx context.Context, rawURL string) (string, error) {

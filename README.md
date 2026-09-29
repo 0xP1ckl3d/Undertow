@@ -1,6 +1,6 @@
 # Undertow
 
-Undertow carries encrypted sessions over direct DNS on UDP. Run an unprivileged **agent** on a network you want to reach, a **server** to accept sessions and select routes, or a privileged **VPN client** to send IPv4 traffic through the server. Server Internet egress uses its own sockets; the server proxy TUN is needed only for routed internal pivots.
+Undertow carries encrypted sessions over direct DNS on UDP. Run an unprivileged **agent** on a network you want to reach, a **server** to accept sessions and select routes, or a privileged **client** to route Internet traffic, internal traffic, or both. Server Internet egress uses its own sockets; the server proxy TUN is needed only for routed internal pivots.
 
 ## How the pieces connect
 
@@ -24,7 +24,7 @@ flowchart LR
   subgraph VPNHost["Separate VPN client host"]
     Apps["Client applications"] --> VPNRoute["IPv4 routes"]
     VPNRoute --> ClientTUN["Local TUN / Wintun"]
-    ClientTUN --> VPN["Privileged client --vpn"]
+    ClientTUN --> VPN["Privileged client --vpn and/or --internal"]
     Physical["Physical route pinned to server IP"] --> VPN
   end
 
@@ -42,9 +42,18 @@ flowchart LR
 | `server` | Accept sessions; optional internal route interface | Binding UDP/53 or creating TUN may require elevation |
 | `agent` | Reach internal targets through ordinary sockets | None |
 | `client --vpn` | Route IPv4 Internet traffic through server sockets | Root/Administrator |
+| `client --internal` | Route configured/accepted internal prefixes through agents; keep the Internet route | Root/Administrator |
 | `client --vpn --internal` | VPN egress plus server configured agent routes | Root/Administrator |
 
-**Agent and client are different jobs.** Put an `agent` on a host that can reach an internal network; it lets the server open sockets from that host, but changes none of that host's routes. Put `client --vpn` on a host whose *own* applications should use the tunnel; it changes that host's IPv4 routes and normally exits to the Internet from the server. Run an agent and configure its subnet on the server before `client --vpn --internal` can reach internal targets. `status` lists agents and VPN clients separately.
+**Agent and client are different jobs.** Put an `agent` on a host that can reach an internal network; it lets the server open sockets from that host, but changes none of that host's routes. Put a `client` on a host whose *own* applications should use the tunnel. `--vpn` installs two IPv4 `/1` Internet routes and verifies public egress. `--internal` alone installs only configured or accepted internal routes, leaving the client's Internet route unchanged. Combine the flags for both behaviours. An agent and a route to its subnet are needed for internal access. `status` lists agents and clients separately.
+
+On the **VPN client host**, choose one mode:
+
+```sh
+sudo undertow client --vpn --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
+sudo undertow client --internal --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
+sudo undertow client --vpn --internal --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
+```
 
 For interactive operation, run `undertow console` on the server or start a VPN client in a terminal; the client console opens by default. Type `agents`, then `use 1` to enter an agent and run `exec`, `upload`, `download`, or route commands without copying its ID. `help` changes with the menu; `back` returns to the main menu. The server console manages global routes. The VPN client console manages its own accepted and manual routes, which persist across reconnects. Current agent capabilities are enabled by default; use `agent --deny=exec,upload` or other listed names to restrict them independently. `status` shows supported and allowed operations. See [interactive scenarios](docs/scenarios.md#8-interactive-consoles-and-agent-commands).
 
