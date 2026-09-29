@@ -16,10 +16,22 @@ import (
 // ServeAgent handles stream opens with ordinary TCP sockets. It never listens
 // on the agent or changes its host routes or adapters.
 func ServeAgent(ctx context.Context, m *mux.Mux) {
+	ServeAgentWithExec(ctx, m, true)
+}
+
+func ServeAgentWithExec(ctx context.Context, m *mux.Mux, allowExec bool) {
 	for {
 		s, err := m.Accept(ctx)
 		if err != nil {
 			return
+		}
+		if s.Destination() == ExecDestination {
+			if !allowExec {
+				s.Fail(errors.New("agent command execution is disabled"))
+				continue
+			}
+			go serveExec(ctx, s)
+			continue
 		}
 		go serveSocket(ctx, s)
 	}
@@ -83,19 +95,33 @@ func serveSocket(ctx context.Context, s *mux.Stream) {
 
 // ServeVPN accepts outbound client flows. Explicit pivot routes may be sent
 // through an agent when the client requested internal access.
+const ControlDestination = "control.undertow.invalid:0"
+
 func ServeVPN(ctx context.Context, client *mux.Mux, resolve func(netip.Addr) (*mux.Mux, bool), internal bool) {
+	ServeVPNInteractive(ctx, client, resolve, func() bool { return internal }, nil)
+}
+
+func ServeVPNInteractive(ctx context.Context, client *mux.Mux, resolve func(netip.Addr) (*mux.Mux, bool), internal func() bool, control func(context.Context, *mux.Stream)) {
 	for {
 		s, err := client.Accept(ctx)
 		if err != nil {
 			return
 		}
 		go func(s *mux.Stream) {
+			if s.Destination() == ControlDestination {
+				if control == nil {
+					s.Fail(errors.New("remote operator console is disabled"))
+				} else {
+					control(ctx, s)
+				}
+				return
+			}
 			if s.Destination() == "health.undertow.invalid:0" {
 				_ = s.AcceptOpen(ctx)
 				_ = s.CloseWrite()
 				return
 			}
-			if !internal {
+			if !internal() {
 				serveSocket(ctx, s)
 				return
 			}

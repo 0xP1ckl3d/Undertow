@@ -118,35 +118,45 @@ func statusCommand(args []string) error {
 	if o.json {
 		return printJSON(data)
 	}
+	return renderStatus(os.Stdout, data)
+}
+
+func renderStatus(w io.Writer, data []byte) error {
 	var status struct {
 		Agents   []control.AgentInfo  `json:"agents"`
 		Clients  []control.ClientInfo `json:"clients"`
 		Routes   []routing.Route      `json:"routes"`
 		Selected string               `json:"selected_agent"`
 	}
-	if err = json.Unmarshal(data, &status); err != nil {
+	if err := json.Unmarshal(data, &status); err != nil {
 		return err
 	}
-	fmt.Printf("Agents (%d)\n", len(status.Agents))
-	fmt.Printf("%-18s %-16s %-24s %-18s %8s %8s %7s\n", "ID", "Virtual IP", "Host", "Remote", "RX", "TX", "Streams")
+	fmt.Fprintf(w, "Agents (%d)\n", len(status.Agents))
+	fmt.Fprintf(w, "%-18s %-16s %-24s %-18s %8s %8s %7s\n", "ID", "Virtual IP", "Host", "Remote", "RX", "TX", "Streams")
 	for _, a := range status.Agents {
 		id := a.ID
 		if len(id) > 18 {
 			id = id[:18]
 		}
-		fmt.Printf("%-18s %-16s %-24s %-18s %8d %8d %7d\n", id, a.VirtualIP, a.Hostname, a.Remote, a.RXBytes, a.TXBytes, a.Streams)
+		fmt.Fprintf(w, "%-18s %-16s %-24s %-18s %8d %8d %7d\n", id, a.VirtualIP, a.Hostname, a.Remote, a.RXBytes, a.TXBytes, a.Streams)
+		for _, prefix := range a.AdvertisedRoutes {
+			fmt.Fprintf(w, "  advertised %s via %s\n", prefix, a.ID)
+		}
 	}
-	fmt.Printf("\nVPN clients (%d)\n", len(status.Clients))
-	fmt.Printf("%-20s %-18s %-8s %8s %8s %7s %6s %6s %6s %8s\n", "Session", "Remote", "Internal", "RX", "TX", "Streams", "Queued", "Flight", "CWND", "Retrans")
+	fmt.Fprintf(w, "\nVPN clients (%d)\n", len(status.Clients))
+	fmt.Fprintf(w, "%-20s %-18s %-8s %8s %8s %7s %6s %6s %6s %8s\n", "Session", "Remote", "Internal", "RX", "TX", "Streams", "Queued", "Flight", "CWND", "Retrans")
 	for _, c := range status.Clients {
-		fmt.Printf("%-20d %-18s %-8t %8d %8d %7d %6d %6d %6d %8d\n", c.SessionID, c.Remote, c.Internal, c.RXBytes, c.TXBytes, c.Streams, c.Queued, c.InFlight, c.Window, c.Retransmits)
+		fmt.Fprintf(w, "%-20d %-18s %-8t %8d %8d %7d %6d %6d %6d %8d\n", c.SessionID, c.Remote, c.Internal, c.RXBytes, c.TXBytes, c.Streams, c.Queued, c.InFlight, c.Window, c.Retransmits)
+		for _, route := range c.AcceptedRoutes {
+			fmt.Fprintf(w, "  accepted %s via %s\n", route.Prefix, route.AgentID)
+		}
 	}
-	fmt.Printf("\nRoutes (%d)\n", len(status.Routes))
+	fmt.Fprintf(w, "\nRoutes (%d)\n", len(status.Routes))
 	for _, r := range status.Routes {
-		fmt.Printf("%-20s via %-18s active=%v\n", r.Prefix, r.AgentID, r.Active)
+		fmt.Fprintf(w, "%-20s via %-18s active=%v\n", r.Prefix, r.AgentID, r.Active)
 	}
 	if status.Selected != "" {
-		fmt.Printf("Selected: %s\n", status.Selected)
+		fmt.Fprintf(w, "Selected: %s\n", status.Selected)
 	}
 	return nil
 }

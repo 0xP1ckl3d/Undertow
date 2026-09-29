@@ -14,9 +14,12 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"os"
 	"strings"
+	"sync"
 	"time"
 
+	"undertow/internal/control"
 	"undertow/internal/mux"
 	"undertow/internal/netstack"
 	"undertow/internal/security"
@@ -43,11 +46,16 @@ func clientCommand(args []string) error {
 	address := f.String("tunnel-address", "172.16.253.1/24", "client TUN IPv4 address/prefix")
 	profileFlag := f.String("payload-profile", "auto", "DNS payload profile: auto, large, small")
 	verifyURL := f.String("verify-url", "https://api.ipify.org", "public IPv4 verification endpoint")
+	interactive := f.Bool("interactive", false, "open a command console while the VPN runs")
+	routesFile := f.String("routes-file", "client-routes.json", "persist this client's accepted agent routes")
 	if err := f.Parse(args); err != nil {
 		return err
 	}
 	if f.NArg() != 0 {
 		return fmt.Errorf("unexpected client argument %q; use 'undertow client --vpn ...'", f.Arg(0))
+	}
+	if *interactive && (*lifecycle.background || *lifecycle.stop) {
+		return errors.New("--interactive requires a foreground VPN client")
 	}
 	handled, cleanup, err := lifecycle.handle(args)
 	if err != nil || handled {
@@ -91,6 +99,19 @@ func clientCommand(args []string) error {
 	}
 	ctx, stop := commandContext()
 	defer stop()
+	savedRoutes, err := loadClientRoutes(*routesFile)
+	if err != nil {
+		return err
+	}
+	live := &liveClientConsole{routeFile: *routesFile, routes: savedRoutes, serverIP: serverIP, tunnelPrefix: prefix.Masked()}
+	if *interactive {
+		go func() {
+			if err := runConsole(ctx, os.Stdin, os.Stdout, live.call, live.id, stop, live.routeCommand); err != nil && ctx.Err() == nil {
+				log.Printf("console: %v", err)
+				stop()
+			}
+		}()
+	}
 	pinnedFingerprint, savePin, err := resolveServerFingerprint(ctx, *server, *domain, *fingerprint, *fingerprintFile, *trustFirstUse)
 	if err != nil {
 		return err
@@ -118,7 +139,7 @@ func clientCommand(args []string) error {
 				log.Printf("trusted server fingerprint saved to %s: %s", *fingerprintFile, pinnedFingerprint)
 				savePin = false
 			}
-			err = runVPN(ctx, c, serverIP, *internal, *tunName, *address, prefix, *verifyURL)
+			err = runVPN(ctx, c, serverIP, *internal, *tunName, *address, prefix, *verifyURL, live.set)
 			c.Close()
 			if err != nil && !errors.Is(err, io.EOF) && ctx.Err() == nil {
 				return err
@@ -141,7 +162,33 @@ func clientCommand(args []string) error {
 	return nil
 }
 
-func runVPN(parent context.Context, c *dns.Client, serverIP netip.Addr, internal bool, name, address string, prefix netip.Prefix, verifyURL string) error {
+type liveClientConsole struct {
+	mu           sync.RWMutex
+	routeMu      sync.Mutex
+	session      *mux.Mux
+	sessionID    uint64
+	device       clientRouteDevice
+	active       map[string]bool
+	routeFile    string
+	routes       []control.AcceptedRoute
+	serverIP     netip.Addr
+	tunnelPrefix netip.Prefix
+}
+
+func (c *liveClientConsole) id() uint64 {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.sessionID
+}
+
+func (c *liveClientConsole) call(ctx context.Context, method, path string, body any) ([]byte, error) {
+	c.mu.RLock()
+	session := c.session
+	c.mu.RUnlock()
+	return control.CallRemote(ctx, session, method, path, body)
+}
+
+func runVPN(parent context.Context, c *dns.Client, serverIP netip.Addr, internal bool, name, address string, prefix netip.Prefix, verifyURL string, onActive func(*mux.Mux, uint64, *tun.Device)) error {
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	m := mux.New(ctx, c, false)
@@ -248,6 +295,10 @@ func runVPN(parent context.Context, c *dns.Client, serverIP netip.Addr, internal
 		log.Printf("public egress IP: %s", publicIP)
 	}
 	log.Printf("VPN active through %s; internal pivots=%t", serverIP, internal)
+	if onActive != nil {
+		onActive(m, c.Session.ID(), device)
+		defer onActive(nil, 0, nil)
+	}
 	select {
 	case <-ctx.Done():
 		return nil

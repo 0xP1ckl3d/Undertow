@@ -3,6 +3,8 @@
 /bin/
 /dist/
 /Plan.md
+/client-routes.json
+*.routes.json
 /undertow
 /undertow-*
 *.elf

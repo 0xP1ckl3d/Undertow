@@ -112,3 +112,35 @@ undertow agent --server 127.0.0.1:1053 --fingerprint FINGERPRINT --probe --probe
 ```
 
 Run the second command on the same host for this loopback example. `--probe-echo` is diagnostic mode and does not run normal pivot streams. Use a separate identity and token file if you want an isolated test instance.
+
+## 8. Interactive consoles and agent commands
+
+Run the server and agent normally. Agent command execution is enabled by default; add `--deny-exec` on any agent where operators must not launch programs:
+
+```sh
+undertow agent --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
+```
+
+On the server host, open the operator console. Use `sudo` if the server created `control.key` with root only access:
+
+```sh
+sudo undertow console
+```
+
+Inside the console:
+
+```text
+status
+route add 10.20.0.0/16 AGENT_ID
+routes
+exec AGENT_ID /usr/bin/id
+quit
+```
+
+To manage the same server from a VPN client, start the VPN in the foreground with `--interactive`. The client uses its normal enrollment mode; no extra operator file is needed:
+
+```sh
+sudo undertow client --vpn --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key --interactive
+```
+
+The VPN continues carrying traffic while the prompt is open. In that console, `status`, `routes`, `exec`, and `internal on|off` work through the encrypted client session. `routes` lists advertised and locally accepted routes. Accept a detected subnet with `route accept 192.168.0.0/22 AGENT_ID`. If the agent can also reach `10.10.0.0/16` through a router on that interface, add it manually with `route add 10.10.0.0/16 AGENT_ID`; it need not be advertised. `route del 10.10.0.0/16` removes the local acceptance. These choices affect only this VPN client, are saved to its `client-routes.json`, and return after reconnect, including in background mode. Alternatively, start the agent with `--advertise-route 10.10.0.0/16` so clients can discover and accept it. Global server route changes and agent selection require the server console. Use `internal on` for global server configured pivot routes; accepted local routes work in either internal setting. `quit` stops the interactive VPN and cleans its owned routes. Agent execution runs the executable and arguments directly, with no implicit shell. Start an agent with `--deny-exec` if it should refuse client commands. With `--auth none`, any reachable VPN client can join and execute on agents that allow it; use token or password enrollment for real deployments.

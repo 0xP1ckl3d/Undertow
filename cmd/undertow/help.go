@@ -46,6 +46,7 @@ Commands:
   server     Run the DNS listener and operator control API.
   agent      Connect an internal host without changing its routes.
   client     Run the privileged IPv4 VPN on a client host.
+  console    Open an interactive server operator console.
   status     Show connected agents, VPN clients, and routes.
   route      Add, remove, or list agent pivot routes.
   session    Disconnect an agent session.
@@ -80,6 +81,10 @@ Connection and identity:
   --token-file PATH         Enrollment token for token mode (default token.key).
   --password TEXT           Password mode credential; visible in process list.
   --password-file PATH      Read password from file instead.
+
+Use token or password enrollment for real deployments. With --auth none,
+anyone who reaches the listener can join, access network paths, and run
+commands on agents unless those agents use --deny-exec.
 
 Internal pivot:
   --tun                     Create server proxy TUN/Wintun for routed pivots.
@@ -123,6 +128,9 @@ Usage: undertow agent --server IP:PORT [--fingerprint HEX | --trust-on-first-use
   --password TEXT         Password mode credential; visible in process list.
   --password-file PATH    Read password from file instead.
   --agent-key PATH         Agent Ed25519 identity (default agent.key).
+  --deny-exec              Disable operator executable commands.
+  --advertise-route CIDR    Offer an additional IPv4 route to VPN clients;
+                           repeatable. Up IPv4 interfaces are also offered.
   --domain NAME            Match server --domain (default t.undertow.invalid).
   --payload-profile MODE   auto, large, or small (default auto).
   --probe                  Run encrypted echo probes instead of sockets.
@@ -140,6 +148,8 @@ Example: undertow agent --server 203.0.113.10:53 --fingerprint HEX --token-file 
 
 The agent changes no interface or host route. After it connects, run
 'undertow status' on the server and add an internal route through its ID.
+Operator command execution is enabled by default; use --deny-exec to turn
+it off on this agent. Connected VPN clients can request commands.
 Operator subcommands: 'undertow agent list|show ID|select ID'.
 `
 	case "client":
@@ -166,6 +176,8 @@ Usage: undertow client --vpn --server IP:PORT [--fingerprint HEX | --trust-on-fi
   --payload-profile MODE   auto, large, or small (default auto).
   --verify-url URL         Public IPv4 check (default https://api.ipify.org);
                            empty value skips verification.
+  --interactive            Open a console while the VPN is running.
+  --routes-file PATH       Persist accepted client routes (default client-routes.json).
 
   --foreground             Run attached to the terminal (default).
   --background             Run detached with a log and PID file.
@@ -178,6 +190,22 @@ Example: sudo undertow client --vpn --server 203.0.113.10:53 --fingerprint HEX -
 Without --internal, Internet traffic exits through server sockets. With
 --internal, only server configured pivot subnets use agents. The local .1
 address belongs to the client adapter; it is not the public egress address.
+Interactive mode is foreground only. VPN clients can view status, accept
+advertised routes or add manual local routes through agents, change their
+own internal mode, and execute on agents that allow it. Accepted routes
+are restored on reconnect. Server global route and selection controls
+remain on the server host. No extra token is needed.
+`
+	case "console":
+		body = `undertow console — interactive operator console on the server host
+
+Usage: undertow console [--control IP:PORT] [--control-token-file PATH]
+
+Connects to the running server's loopback API. Use status, routes, route add,
+route del, select, exec, help, and quit inside the console. Agent execution
+is enabled on agents by default and runs a named program with arguments,
+without an implicit shell. Use 'undertow console' on the server host;
+'undertow client --vpn --interactive ...' opens a VPN client console.
 `
 	case "status":
 		body = `undertow status — inspect agents, VPN clients, and routes

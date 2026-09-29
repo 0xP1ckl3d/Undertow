@@ -1,0 +1,150 @@
+package control
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/netip"
+	"os"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"undertow/internal/mux"
+	"undertow/internal/pivot"
+	"undertow/internal/routing"
+	"undertow/internal/security"
+	"undertow/internal/session"
+	"undertow/internal/transport/dns"
+)
+
+type remoteTestTransport struct {
+	in, out chan []byte
+	done    chan struct{}
+	once    sync.Once
+}
+
+func (t *remoteTestTransport) Send(ctx context.Context, b []byte) error {
+	select {
+	case t.out <- append([]byte(nil), b...):
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.done:
+		return io.EOF
+	}
+}
+func (t *remoteTestTransport) Recv(ctx context.Context) ([]byte, error) {
+	select {
+	case b := <-t.in:
+		return b, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-t.done:
+		return nil, io.EOF
+	}
+}
+func (t *remoteTestTransport) Close() error { t.once.Do(func() { close(t.done) }); return nil }
+
+func TestConnectedVPNClientHasLimitedAPI(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	a, b := make(chan []byte, 256), make(chan []byte, 256)
+	server := mux.New(ctx, &remoteTestTransport{in: a, out: b, done: make(chan struct{})}, true)
+	client := mux.New(ctx, &remoteTestTransport{in: b, out: a, done: make(chan struct{})}, false)
+	defer server.Close()
+	defer client.Close()
+	manager := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	go pivot.ServeVPNInteractive(ctx, server, manager.ResolveEgress, func() bool { return false }, func(ctx context.Context, stream *mux.Stream) {
+		manager.ServeRemote(ctx, "operator-secret", 704, stream)
+	})
+	data, err := CallRemote(ctx, client, "GET", "/v1/status", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var status struct {
+		Agents []AgentInfo `json:"agents"`
+	}
+	if err := json.Unmarshal(data, &status); err != nil || status.Agents == nil {
+		t.Fatalf("invalid status: %s: %v", data, err)
+	}
+	for _, request := range []struct {
+		method, path string
+		body         any
+	}{
+		{"POST", "/v1/routes", map[string]string{"prefix": "10.20.0.0/16", "agent_id": "agent-a"}},
+		{"POST", "/v1/selection", map[string]string{"agent_id": "agent-a"}},
+		{"POST", "/v1/clients/999/internal", map[string]bool{"enabled": true}},
+		{"POST", "/v1/clients/999/routes", AcceptedRoute{Prefix: "10.10.0.0/16", AgentID: "agent-a", Manual: true}},
+		{"DELETE", "/v1/routes?prefix=10.20.0.0%2F16", nil},
+	} {
+		if _, err := CallRemote(ctx, client, request.method, request.path, request.body); err == nil || !strings.Contains(err.Error(), "403") {
+			t.Fatalf("VPN client was not denied %s %s: %v", request.method, request.path, err)
+		}
+	}
+	if len(manager.routes.List()) != 0 {
+		t.Fatal("VPN client changed server routes")
+	}
+}
+
+func TestRemoteExecHelperProcess(t *testing.T) {
+	if os.Getenv("UNDERTOW_REMOTE_EXEC_HELPER") != "1" {
+		return
+	}
+	_, _ = io.WriteString(os.Stdout, "remote agent command completed")
+	os.Exit(0)
+}
+
+func TestVPNClientExecutesOnDefaultAgent(t *testing.T) {
+	t.Setenv("UNDERTOW_REMOTE_EXEC_HELPER", "1")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	manager := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	a, b := make(chan []byte, 256), make(chan []byte, 256)
+	serverAgent := mux.New(ctx, &remoteTestTransport{in: a, out: b, done: make(chan struct{})}, true)
+	agent := mux.New(ctx, &remoteTestTransport{in: b, out: a, done: make(chan struct{})}, false)
+	defer serverAgent.Close()
+	defer agent.Close()
+	go pivot.ServeAgent(ctx, agent)
+	var keys security.Keys
+	transport, err := session.New(704, keys, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.Register(&dns.Peer{Session: transport, AgentID: "agent-a", Connected: time.Now()}, serverAgent)
+	manager.UpdateInventory("agent-a", serverAgent, []byte(`{"advertised_routes":["192.168.0.0/22"]}`))
+	c, d := make(chan []byte, 256), make(chan []byte, 256)
+	serverVPN := mux.New(ctx, &remoteTestTransport{in: c, out: d, done: make(chan struct{})}, true)
+	clientVPN := mux.New(ctx, &remoteTestTransport{in: d, out: c, done: make(chan struct{})}, false)
+	defer serverVPN.Close()
+	defer clientVPN.Close()
+	clientSession, err := session.New(705, keys, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.RegisterClient(&dns.Peer{Session: clientSession, AgentID: "client-a", Connected: time.Now()}, serverVPN, false)
+	go pivot.ServeVPNInteractive(ctx, serverVPN, manager.ResolveEgress, func() bool { return false }, func(ctx context.Context, stream *mux.Stream) {
+		manager.ServeRemote(ctx, "operator-secret", 705, stream)
+	})
+	for _, route := range []AcceptedRoute{{Prefix: "192.168.0.0/22", AgentID: "agent-a"}, {Prefix: "10.10.0.0/16", AgentID: "agent-a", Manual: true}} {
+		if _, err := CallRemote(ctx, clientVPN, "POST", "/v1/clients/705/routes", route); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, configured := manager.ResolveClientEgress(705, netip.MustParseAddr("10.10.1.7")); !configured || got != serverAgent {
+		t.Fatal("client manual route did not reach agent")
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := CallRemote(ctx, clientVPN, "POST", "/v1/agents/agent-a/exec", pivot.ExecRequest{Argv: []string{exe, "-test.run=TestRemoteExecHelperProcess"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result pivot.ExecResult
+	if err := json.Unmarshal(data, &result); err != nil || result.Error != "" || result.ExitCode != 0 || result.Stdout != "remote agent command completed" {
+		t.Fatalf("unexpected remote result: %+v: %v", result, err)
+	}
+}

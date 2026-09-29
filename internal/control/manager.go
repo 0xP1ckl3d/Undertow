@@ -14,11 +14,14 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"undertow/internal/mux"
+	"undertow/internal/pivot"
 	"undertow/internal/routing"
 	"undertow/internal/transport/dns"
 )
@@ -29,47 +32,56 @@ type RouteDevice interface {
 }
 
 type AgentInfo struct {
-	ID          string        `json:"id"`
-	SessionID   uint64        `json:"session_id"`
-	VirtualIP   string        `json:"virtual_ip"`
-	Remote      string        `json:"remote"`
-	Hostname    string        `json:"hostname,omitempty"`
-	OS          string        `json:"os,omitempty"`
-	Arch        string        `json:"arch,omitempty"`
-	Interfaces  []string      `json:"interfaces,omitempty"`
-	Connected   time.Time     `json:"connected"`
-	LastSeen    time.Time     `json:"last_seen"`
-	RTT         time.Duration `json:"rtt_ns"`
-	RXBytes     uint64        `json:"rx_bytes"`
-	TXBytes     uint64        `json:"tx_bytes"`
-	Retransmits uint64        `json:"retransmits"`
-	Streams     int           `json:"streams"`
-	InFlight    int           `json:"in_flight"`
-	Queued      int           `json:"queued"`
-	Window      int           `json:"congestion_window"`
+	ID               string        `json:"id"`
+	SessionID        uint64        `json:"session_id"`
+	VirtualIP        string        `json:"virtual_ip"`
+	Remote           string        `json:"remote"`
+	Hostname         string        `json:"hostname,omitempty"`
+	OS               string        `json:"os,omitempty"`
+	Arch             string        `json:"arch,omitempty"`
+	Interfaces       []string      `json:"interfaces,omitempty"`
+	AdvertisedRoutes []string      `json:"advertised_routes,omitempty"`
+	Connected        time.Time     `json:"connected"`
+	LastSeen         time.Time     `json:"last_seen"`
+	RTT              time.Duration `json:"rtt_ns"`
+	RXBytes          uint64        `json:"rx_bytes"`
+	TXBytes          uint64        `json:"tx_bytes"`
+	Retransmits      uint64        `json:"retransmits"`
+	Streams          int           `json:"streams"`
+	InFlight         int           `json:"in_flight"`
+	Queued           int           `json:"queued"`
+	Window           int           `json:"congestion_window"`
 }
 
 type ClientInfo struct {
-	ID          string        `json:"id"`
-	SessionID   uint64        `json:"session_id"`
-	Remote      string        `json:"remote"`
-	Internal    bool          `json:"internal"`
-	Connected   time.Time     `json:"connected"`
-	LastSeen    time.Time     `json:"last_seen"`
-	RTT         time.Duration `json:"rtt_ns"`
-	RXBytes     uint64        `json:"rx_bytes"`
-	TXBytes     uint64        `json:"tx_bytes"`
-	Retransmits uint64        `json:"retransmits"`
-	Streams     int           `json:"streams"`
-	InFlight    int           `json:"in_flight"`
-	Queued      int           `json:"queued"`
-	Window      int           `json:"congestion_window"`
+	ID             string          `json:"id"`
+	SessionID      uint64          `json:"session_id"`
+	Remote         string          `json:"remote"`
+	Internal       bool            `json:"internal"`
+	AcceptedRoutes []AcceptedRoute `json:"accepted_routes,omitempty"`
+	Connected      time.Time       `json:"connected"`
+	LastSeen       time.Time       `json:"last_seen"`
+	RTT            time.Duration   `json:"rtt_ns"`
+	RXBytes        uint64          `json:"rx_bytes"`
+	TXBytes        uint64          `json:"tx_bytes"`
+	Retransmits    uint64          `json:"retransmits"`
+	Streams        int             `json:"streams"`
+	InFlight       int             `json:"in_flight"`
+	Queued         int             `json:"queued"`
+	Window         int             `json:"congestion_window"`
+}
+
+type AcceptedRoute struct {
+	Prefix  string `json:"prefix"`
+	AgentID string `json:"agent_id"`
+	Manual  bool   `json:"manual,omitempty"`
 }
 
 type clientState struct {
 	peer     *dns.Peer
 	mux      *mux.Mux
 	internal bool
+	accepted map[netip.Prefix]AcceptedRoute
 }
 
 type agentState struct {
@@ -96,7 +108,7 @@ func NewManager(routes *routing.Table, device RouteDevice, virtualNetwork netip.
 
 func (m *Manager) RegisterClient(peer *dns.Peer, streamMux *mux.Mux, internal bool) {
 	m.mu.Lock()
-	m.clients[peer.Session.ID()] = &clientState{peer: peer, mux: streamMux, internal: internal}
+	m.clients[peer.Session.ID()] = &clientState{peer: peer, mux: streamMux, internal: internal, accepted: make(map[netip.Prefix]AcceptedRoute)}
 	m.mu.Unlock()
 }
 
@@ -108,15 +120,112 @@ func (m *Manager) UnregisterClient(sessionID uint64, streamMux *mux.Mux) {
 	m.mu.Unlock()
 }
 
+func (m *Manager) ClientInternal(sessionID uint64) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	state := m.clients[sessionID]
+	return state != nil && state.internal
+}
+
+func (m *Manager) SetClientInternal(sessionID uint64, enabled bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	state := m.clients[sessionID]
+	if state == nil {
+		return errors.New("VPN client is not connected")
+	}
+	state.internal = enabled
+	return nil
+}
+
+func (m *Manager) SetClientRoute(sessionID uint64, prefix netip.Prefix, agentID string, manual bool) error {
+	if !prefix.IsValid() || !prefix.Addr().Is4() {
+		return errors.New("accepted route must be IPv4 CIDR")
+	}
+	prefix = prefix.Masked()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	client := m.clients[sessionID]
+	if client == nil {
+		return errors.New("VPN client is not connected")
+	}
+	agent := m.agents[agentID]
+	if agent == nil {
+		return errors.New("agent is not connected")
+	}
+	advertised := false
+	for _, route := range agent.inventory.AdvertisedRoutes {
+		if route == prefix.String() {
+			advertised = true
+			break
+		}
+	}
+	if !manual && !advertised {
+		return errors.New("agent has not advertised this route")
+	}
+	client.accepted[prefix] = AcceptedRoute{Prefix: prefix.String(), AgentID: agentID, Manual: manual}
+	return nil
+}
+
+func (m *Manager) DeleteClientRoute(sessionID uint64, prefix netip.Prefix) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	client := m.clients[sessionID]
+	if client == nil {
+		return errors.New("VPN client is not connected")
+	}
+	prefix = prefix.Masked()
+	if _, exists := client.accepted[prefix]; !exists {
+		return errors.New("route is not accepted by this client")
+	}
+	delete(client.accepted, prefix)
+	return nil
+}
+
+func (m *Manager) ResolveClientEgress(sessionID uint64, destination netip.Addr) (*mux.Mux, bool) {
+	m.mu.RLock()
+	client := m.clients[sessionID]
+	if client == nil {
+		m.mu.RUnlock()
+		return nil, false
+	}
+	bestBits, agentID := -1, ""
+	for prefix, route := range client.accepted {
+		if prefix.Contains(destination) && prefix.Bits() > bestBits {
+			bestBits, agentID = prefix.Bits(), route.AgentID
+		}
+	}
+	if agentID != "" {
+		agent := m.agents[agentID]
+		m.mu.RUnlock()
+		if agent == nil {
+			return nil, true
+		}
+		return agent.mux, true
+	}
+	internal := client.internal
+	m.mu.RUnlock()
+	if !internal {
+		return nil, false
+	}
+	return m.ResolveEgress(destination)
+}
+
 func (m *Manager) ClientList() []ClientInfo {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	out := make([]ClientInfo, 0, len(m.clients))
 	for _, state := range m.clients {
 		p := state.peer.Snapshot()
+		accepted := make([]AcceptedRoute, 0, len(state.accepted))
+		for _, route := range state.accepted {
+			accepted = append(accepted, route)
+		}
+		sort.Slice(accepted, func(i, j int) bool { return accepted[i].Prefix < accepted[j].Prefix })
 		out = append(out, ClientInfo{
 			ID: p.AgentID, SessionID: p.ID, Remote: p.Remote, Internal: state.internal,
-			Connected: p.Connected, LastSeen: p.LastSeen, RTT: p.Transport.RTT,
+			AcceptedRoutes: accepted,
+			Connected:      p.Connected, LastSeen: p.LastSeen, RTT: p.Transport.RTT,
 			RXBytes: p.Transport.RXBytes, TXBytes: p.Transport.TXBytes,
 			Retransmits: p.Transport.Retransmits, Streams: state.mux.StreamCount(),
 			InFlight: p.Transport.InFlight, Queued: p.Transport.Queued, Window: p.Transport.CongestionWindow,
@@ -207,12 +316,19 @@ func (m *Manager) UpdateInventory(id string, streamMux *mux.Mux, b []byte) {
 			return
 		}
 	}
+	validRoutes := make([]string, 0, len(info.AdvertisedRoutes))
+	for _, raw := range info.AdvertisedRoutes {
+		if prefix, err := netip.ParsePrefix(raw); err == nil && prefix.Addr().Is4() && prefix == prefix.Masked() {
+			validRoutes = append(validRoutes, prefix.String())
+		}
+	}
 	m.mu.Lock()
 	if state := m.agents[id]; state != nil && state.mux == streamMux {
 		state.inventory.Hostname = info.Hostname
 		state.inventory.OS = info.OS
 		state.inventory.Arch = info.Arch
 		state.inventory.Interfaces = append([]string(nil), info.Interfaces...)
+		state.inventory.AdvertisedRoutes = validRoutes
 	}
 	m.mu.Unlock()
 }
@@ -458,6 +574,24 @@ func (m *Manager) handler(token string) http.Handler {
 		}
 		http.Error(w, "agent not found", http.StatusNotFound)
 	})
+	muxer.HandleFunc("POST /v1/agents/{id}/exec", func(w http.ResponseWriter, r *http.Request) {
+		agent := m.Get(r.PathValue("id"))
+		if agent == nil {
+			http.Error(w, "agent is not connected", http.StatusNotFound)
+			return
+		}
+		var request pivot.ExecRequest
+		if err := json.NewDecoder(io.LimitReader(r.Body, 8193)).Decode(&request); err != nil {
+			http.Error(w, "invalid command request", http.StatusBadRequest)
+			return
+		}
+		result, err := pivot.Execute(r.Context(), agent, request.Argv)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		jsonReply(w, http.StatusOK, result)
+	})
 	muxer.HandleFunc("POST /v1/selection", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			AgentID string `json:"agent_id"`
@@ -468,6 +602,54 @@ func (m *Manager) handler(token string) http.Handler {
 		}
 		if err := m.Select(body.AgentID); err != nil {
 			http.Error(w, err.Error(), 400)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	muxer.HandleFunc("POST /v1/clients/{id}/internal", func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.ParseUint(r.PathValue("id"), 10, 64)
+		var body struct {
+			Enabled bool `json:"enabled"`
+		}
+		if err != nil || json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&body) != nil {
+			http.Error(w, "invalid client setting", http.StatusBadRequest)
+			return
+		}
+		if err := m.SetClientInternal(id, body.Enabled); err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	muxer.HandleFunc("POST /v1/clients/{id}/routes", func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.ParseUint(r.PathValue("id"), 10, 64)
+		var body AcceptedRoute
+		if err != nil || json.NewDecoder(io.LimitReader(r.Body, 2048)).Decode(&body) != nil {
+			http.Error(w, "invalid client route", http.StatusBadRequest)
+			return
+		}
+		prefix, err := netip.ParsePrefix(body.Prefix)
+		if err == nil {
+			err = m.SetClientRoute(id, prefix, body.AgentID, body.Manual)
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+	})
+	muxer.HandleFunc("DELETE /v1/clients/{id}/routes", func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.ParseUint(r.PathValue("id"), 10, 64)
+		if err != nil {
+			http.Error(w, "invalid client ID", http.StatusBadRequest)
+			return
+		}
+		prefix, err := netip.ParsePrefix(r.URL.Query().Get("prefix"))
+		if err == nil {
+			err = m.DeleteClientRoute(id, prefix)
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)

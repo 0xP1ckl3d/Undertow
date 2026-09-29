@@ -49,11 +49,62 @@ func TestVPNClientAppearsInStatusAndIsRemoved(t *testing.T) {
 	if len(status.Agents) != 0 || len(status.Clients) != 1 || status.Clients[0].SessionID != 702 || !status.Clients[0].Internal {
 		t.Fatalf("unexpected status: %+v", status)
 	}
+	if err := manager.SetClientInternal(702, false); err != nil || manager.ClientInternal(702) {
+		t.Fatalf("interactive internal mode change failed: %v", err)
+	}
 	manager.UnregisterClient(702, streamMux)
 	if got := manager.ClientList(); len(got) != 0 {
 		t.Fatalf("disconnected client remains in status: %+v", got)
 	}
 	streamMux.Close()
+}
+
+func TestAcceptedRoutesStayLocalToVPNClient(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	manager := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	agentMux := mux.New(ctx, &idleTransport{done: make(chan struct{})}, true)
+	defer agentMux.Close()
+	var keys security.Keys
+	agentSession, _ := session.New(801, keys, false)
+	manager.Register(&dns.Peer{Session: agentSession, AgentID: "agent-a", Connected: time.Now()}, agentMux)
+	manager.UpdateInventory("agent-a", agentMux, []byte(`{"advertised_routes":["192.168.0.0/22"]}`))
+	clientMux := mux.New(ctx, &idleTransport{done: make(chan struct{})}, true)
+	defer clientMux.Close()
+	clientSession, _ := session.New(802, keys, false)
+	manager.RegisterClient(&dns.Peer{Session: clientSession, AgentID: "client-a", Connected: time.Now()}, clientMux, false)
+	otherMux := mux.New(ctx, &idleTransport{done: make(chan struct{})}, true)
+	defer otherMux.Close()
+	otherSession, _ := session.New(803, keys, false)
+	manager.RegisterClient(&dns.Peer{Session: otherSession, AgentID: "client-b", Connected: time.Now()}, otherMux, false)
+	advertised := netip.MustParsePrefix("192.168.0.0/22")
+	manual := netip.MustParsePrefix("10.10.0.0/16")
+	if err := manager.SetClientRoute(802, manual, "agent-a", false); err == nil {
+		t.Fatal("accepted a nonadvertised route without manual mode")
+	}
+	if err := manager.SetClientRoute(802, advertised, "agent-a", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.SetClientRoute(802, manual, "agent-a", true); err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{"192.168.1.25", "10.10.4.9"} {
+		if got, ok := manager.ResolveClientEgress(802, netip.MustParseAddr(target)); !ok || got != agentMux {
+			t.Fatalf("client route %s did not use agent", target)
+		}
+		if got, ok := manager.ResolveClientEgress(803, netip.MustParseAddr(target)); ok || got != nil {
+			t.Fatalf("route %s leaked to another client", target)
+		}
+	}
+	if len(manager.routes.List()) != 0 {
+		t.Fatal("client acceptance changed server global routes")
+	}
+	if err := manager.DeleteClientRoute(802, manual); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := manager.ResolveClientEgress(802, netip.MustParseAddr("10.10.4.9")); ok || got != nil {
+		t.Fatal("removed client route still resolves")
+	}
 }
 
 func (d *routeDevice) AddRoute(p string) error {

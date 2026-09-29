@@ -1,0 +1,275 @@
+//go:build linux || windows
+
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"net/netip"
+	"net/url"
+	"os"
+	"path/filepath"
+	"time"
+
+	"undertow/internal/control"
+	"undertow/internal/mux"
+	"undertow/internal/tun"
+)
+
+type clientRouteDevice interface {
+	AddRoute(string) error
+	DelRoute(string) error
+}
+
+func loadClientRoutes(path string) ([]control.AcceptedRoute, error) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var routes []control.AcceptedRoute
+	if err := json.Unmarshal(data, &routes); err != nil {
+		return nil, fmt.Errorf("read client routes: %w", err)
+	}
+	if len(routes) > 64 {
+		return nil, errors.New("client routes file exceeds 64 entries")
+	}
+	seen := make(map[string]bool)
+	for i := range routes {
+		prefix, err := netip.ParsePrefix(routes[i].Prefix)
+		if err != nil || !prefix.Addr().Is4() || routes[i].AgentID == "" {
+			return nil, fmt.Errorf("invalid client route %q", routes[i].Prefix)
+		}
+		routes[i].Prefix = prefix.Masked().String()
+		if seen[routes[i].Prefix] {
+			return nil, fmt.Errorf("duplicate client route %s", routes[i].Prefix)
+		}
+		seen[routes[i].Prefix] = true
+	}
+	return routes, nil
+}
+
+func saveClientRoutes(path string, routes []control.AcceptedRoute) error {
+	data, err := json.MarshalIndent(routes, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	temp, err := os.CreateTemp(filepath.Dir(path), ".undertow-routes-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(temp.Name())
+	if err := temp.Chmod(0600); err != nil {
+		temp.Close()
+		return err
+	}
+	if _, err := temp.Write(data); err != nil {
+		temp.Close()
+		return err
+	}
+	if err := temp.Sync(); err != nil {
+		temp.Close()
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(temp.Name(), path)
+}
+
+func (c *liveClientConsole) set(session *mux.Mux, id uint64, device *tun.Device) {
+	c.routeMu.Lock()
+	c.mu.Lock()
+	c.session, c.sessionID, c.device = session, id, device
+	c.active = make(map[string]bool)
+	c.mu.Unlock()
+	c.routeMu.Unlock()
+	if session != nil {
+		go c.restoreLoop(session)
+	}
+}
+
+func (c *liveClientConsole) restoreLoop(session *mux.Mux) {
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+	lastErrors := make(map[string]string)
+	for {
+		c.routeMu.Lock()
+		c.mu.RLock()
+		current := c.session == session
+		c.mu.RUnlock()
+		if !current {
+			c.routeMu.Unlock()
+			return
+		}
+		for _, route := range c.routes {
+			if c.active[route.Prefix] {
+				continue
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			err := c.activateRoute(ctx, route)
+			cancel()
+			if err != nil {
+				if lastErrors[route.Prefix] != err.Error() {
+					log.Printf("accepted route %s via %s pending: %v", route.Prefix, route.AgentID, err)
+					lastErrors[route.Prefix] = err.Error()
+				}
+			} else {
+				delete(lastErrors, route.Prefix)
+				log.Printf("accepted route active: %s via %s", route.Prefix, route.AgentID)
+			}
+		}
+		c.routeMu.Unlock()
+		select {
+		case <-session.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// The caller holds routeMu. The server route is bound to this VPN session only.
+func (c *liveClientConsole) activateRoute(ctx context.Context, route control.AcceptedRoute) error {
+	c.mu.RLock()
+	id, device := c.sessionID, c.device
+	c.mu.RUnlock()
+	if id == 0 || device == nil {
+		return errors.New("VPN client is not connected")
+	}
+	prefix, err := netip.ParsePrefix(route.Prefix)
+	if err != nil || !prefix.Addr().Is4() || prefix.Contains(c.serverIP) || prefix.Contains(c.tunnelPrefix.Addr()) || c.tunnelPrefix.Contains(prefix.Addr()) {
+		return errors.New("route is invalid or overlaps the DNS server or client tunnel network")
+	}
+	path := fmt.Sprintf("/v1/clients/%d/routes", id)
+	if _, err := c.call(ctx, http.MethodPost, path, route); err != nil {
+		return err
+	}
+	if err := device.AddRoute(route.Prefix); err != nil {
+		_, _ = c.call(ctx, http.MethodDelete, path+"?prefix="+url.QueryEscape(route.Prefix), nil)
+		return fmt.Errorf("install local route: %w", err)
+	}
+	c.active[route.Prefix] = true
+	return nil
+}
+
+func (c *liveClientConsole) routeCommand(ctx context.Context, args []string, output io.Writer) error {
+	c.routeMu.Lock()
+	defer c.routeMu.Unlock()
+	if len(args) == 1 && args[0] == "routes" {
+		data, err := c.call(ctx, http.MethodGet, "/v1/status", nil)
+		if err != nil {
+			return err
+		}
+		var status struct {
+			Agents []control.AgentInfo `json:"agents"`
+		}
+		if err := json.Unmarshal(data, &status); err != nil {
+			return err
+		}
+		fmt.Fprintln(output, "Advertised routes:")
+		for _, agent := range status.Agents {
+			for _, prefix := range agent.AdvertisedRoutes {
+				fmt.Fprintf(output, "  %s via %s\n", prefix, agent.ID)
+			}
+		}
+		fmt.Fprintln(output, "Accepted local routes:")
+		for _, route := range c.routes {
+			kind := "advertised"
+			if route.Manual {
+				kind = "manual"
+			}
+			fmt.Fprintf(output, "  %s via %s (%s, active=%t)\n", route.Prefix, route.AgentID, kind, c.active[route.Prefix])
+		}
+		return nil
+	}
+	if len(args) == 4 && args[0] == "route" && (args[1] == "accept" || args[1] == "add") {
+		prefix, err := netip.ParsePrefix(args[2])
+		if err != nil || !prefix.Addr().Is4() || prefix.Contains(c.serverIP) || prefix.Contains(c.tunnelPrefix.Addr()) || c.tunnelPrefix.Contains(prefix.Addr()) {
+			return errors.New("route must be IPv4 CIDR outside the DNS server and client tunnel networks")
+		}
+		prefix = prefix.Masked()
+		for _, existing := range c.routes {
+			if existing.Prefix == prefix.String() {
+				return errors.New("route is already accepted")
+			}
+		}
+		if len(c.routes) >= 64 {
+			return errors.New("at most 64 client routes can be saved")
+		}
+		route := control.AcceptedRoute{Prefix: prefix.String(), AgentID: args[3], Manual: args[1] == "add"}
+		if err := c.activateRoute(ctx, route); err != nil {
+			return err
+		}
+		updated := append(append([]control.AcceptedRoute(nil), c.routes...), route)
+		if err := saveClientRoutes(c.routeFile, updated); err != nil {
+			_ = c.removeActiveRoute(ctx, route)
+			return fmt.Errorf("save client route: %w", err)
+		}
+		c.routes = updated
+		fmt.Fprintf(output, "Local route %s via %s accepted and saved.\n", route.Prefix, route.AgentID)
+		return nil
+	}
+	if len(args) == 3 && args[0] == "route" && args[1] == "del" {
+		prefix, err := netip.ParsePrefix(args[2])
+		if err != nil || !prefix.Addr().Is4() {
+			return errors.New("route del requires an IPv4 CIDR")
+		}
+		key := prefix.Masked().String()
+		for i, route := range c.routes {
+			if route.Prefix != key {
+				continue
+			}
+			updated := append(append([]control.AcceptedRoute(nil), c.routes[:i]...), c.routes[i+1:]...)
+			wasActive := c.active[route.Prefix]
+			if err := c.removeActiveRoute(ctx, route); err != nil {
+				return err
+			}
+			if err := saveClientRoutes(c.routeFile, updated); err != nil {
+				if wasActive {
+					_ = c.activateRoute(ctx, route)
+				}
+				return err
+			}
+			c.routes = updated
+			fmt.Fprintf(output, "Local route %s removed.\n", key)
+			return nil
+		}
+		return errors.New("route is not accepted by this client")
+	}
+	return errors.New("use routes, route accept CIDR AGENT_ID, route add CIDR AGENT_ID, or route del CIDR")
+}
+
+// The caller holds routeMu.
+func (c *liveClientConsole) removeActiveRoute(ctx context.Context, route control.AcceptedRoute) error {
+	if !c.active[route.Prefix] {
+		return nil
+	}
+	c.mu.RLock()
+	id, device := c.sessionID, c.device
+	c.mu.RUnlock()
+	if id != 0 {
+		path := fmt.Sprintf("/v1/clients/%d/routes?prefix=%s", id, url.QueryEscape(route.Prefix))
+		if _, err := c.call(ctx, http.MethodDelete, path, nil); err != nil {
+			return err
+		}
+	}
+	if device != nil {
+		if err := device.DelRoute(route.Prefix); err != nil {
+			if id != 0 {
+				path := fmt.Sprintf("/v1/clients/%d/routes", id)
+				_, _ = c.call(ctx, http.MethodPost, path, route)
+			}
+			return err
+		}
+	}
+	delete(c.active, route.Prefix)
+	return nil
+}

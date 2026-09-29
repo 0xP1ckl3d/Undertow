@@ -47,7 +47,7 @@ All modes use an encrypted session and a server identity fingerprint. `--auth` c
 | Password | `--auth password --password-file password.key` | same flags | Share the password securely; each host writes its own restricted file |
 | Open | `--auth none` | `--auth none` | No enrollment secret; anyone who reaches UDP listener may enroll |
 
-Password mode requires at least 12 bytes. Use `--password-file` to avoid showing the password in a process command line; `--password TEXT` is available for temporary use. The password file's trailing newline is ignored. Token mode remains the default, and a `--token-file` is irrelevant to password or open mode. Open enrollment still encrypts transport and authenticates the server **when its fingerprint is pinned**; it provides no admission control. Restrict network access if only selected clients should connect.
+Password mode requires at least 12 bytes. Use `--password-file` to avoid showing the password in a process command line; `--password TEXT` is available for temporary use. The password file's trailing newline is ignored. Token mode remains the default, and a `--token-file` is irrelevant to password or open mode. Open enrollment still encrypts transport and authenticates the server **when its fingerprint is pinned**; it provides no admission control. **For real deployments, use token or password enrollment.** With `--auth none`, anyone who can reach the listener can enroll, access network paths, and execute programs on agents that have not set `--deny-exec`.
 
 The server can be initialized once with `undertow init` even when you choose password or open mode. `init` also creates an unused token file; the server identity and fingerprint are what those modes need.
 

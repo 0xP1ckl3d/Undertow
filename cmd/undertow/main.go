@@ -71,6 +71,8 @@ func main() {
 		err = clientCommand(os.Args[2:])
 	case "status":
 		err = statusCommand(os.Args[2:])
+	case "console":
+		err = consoleCommand(os.Args[2:])
 	case "route":
 		err = routeCommand(os.Args[2:])
 	case "session":
@@ -88,6 +90,21 @@ func main() {
 }
 
 type forwards []string
+
+type advertisedRoutes []string
+
+func (r *advertisedRoutes) String() string { return strings.Join(*r, ",") }
+func (r *advertisedRoutes) Set(value string) error {
+	prefix, err := netip.ParsePrefix(value)
+	if err != nil || !prefix.Addr().Is4() {
+		return errors.New("--advertise-route requires an IPv4 CIDR")
+	}
+	if len(*r) >= 16 {
+		return errors.New("at most 16 explicit routes can be advertised")
+	}
+	*r = append(*r, prefix.Masked().String())
+	return nil
+}
 
 func (f *forwards) String() string { return strings.Join(*f, ",") }
 func (f *forwards) Set(value string) error {
@@ -175,6 +192,9 @@ func serve(args []string) error {
 		return err
 	}
 	log.Printf("client enrollment mode: %s", *authMode)
+	if *authMode == "none" {
+		log.Print("WARNING: --auth none allows anyone who can reach this server to enroll, access the network, and run commands on agents unless those agents use --deny-exec; use token or password enrollment for real deployments")
+	}
 	localNetworks, err := tun.ExistingNetworks()
 	if err != nil {
 		return err
@@ -285,7 +305,11 @@ func serve(args []string) error {
 							return
 						}
 						manager.RegisterClient(p, streamMux, internal)
-						pivot.ServeVPN(ctx, streamMux, manager.ResolveEgress, internal)
+						pivot.ServeVPNInteractive(ctx, streamMux, func(destination netip.Addr) (*mux.Mux, bool) {
+							return manager.ResolveClientEgress(p.Session.ID(), destination)
+						}, func() bool { return true }, func(ctx context.Context, stream *mux.Stream) {
+							manager.ServeRemote(ctx, controlToken, p.Session.ID(), stream)
+						})
 						manager.UnregisterClient(p.Session.ID(), streamMux)
 						log.Printf("VPN client disconnected: session=%d", p.Session.ID())
 						streamMux.Close()
@@ -346,6 +370,9 @@ func agent(args []string) error {
 	interval := f.Duration("probe-interval", time.Second, "time between probes; 0 sends as fast as the window allows")
 	profileFlag := f.String("payload-profile", "auto", "DNS payload profile: auto, large, or small")
 	probe := f.Bool("probe", false, "run Phase 1 echo probes instead of TCP socket handling")
+	denyExec := f.Bool("deny-exec", false, "disable operator executable commands on this agent")
+	var advertise advertisedRoutes
+	f.Var(&advertise, "advertise-route", "IPv4 CIDR offered for client acceptance; repeatable")
 	if err := f.Parse(args); err != nil {
 		return err
 	}
@@ -420,10 +447,10 @@ func agent(args []string) error {
 			err = runProbes(ctx, c, *probeSize, *probeCount, *interval)
 		} else {
 			streamMux := mux.New(ctx, c, false)
-			if sendErr := control.SendInventory(ctx, streamMux); sendErr != nil {
+			if sendErr := control.SendInventory(ctx, streamMux, advertise); sendErr != nil {
 				log.Printf("inventory: %v", sendErr)
 			}
-			pivot.ServeAgent(ctx, streamMux)
+			pivot.ServeAgentWithExec(ctx, streamMux, !*denyExec)
 			streamMux.Close()
 			err = io.EOF
 		}

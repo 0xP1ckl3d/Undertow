@@ -39,7 +39,7 @@ Creates or reuses an Ed25519 server key at `identity.key`, creates or reuses a r
 | `--control-token-file PATH` | `control.key` | API credential, distinct from enrollment token. |
 | `--probe-echo` | Off | Echo diagnostic probes; normal streams are disabled. |
 
-The server may require privilege to bind UDP/53 or create a proxy interface. A second positional `server` is an error; write `undertow server --listen ...`.
+The server may require privilege to bind UDP/53 or create a proxy interface. A second positional `server` is an error; write `undertow server --listen ...`. For real deployments, use token or password enrollment. `--auth none` lets any reachable peer enroll, access network paths, and execute programs on agents that allow it; the server prints a warning at startup.
 
 ## `agent`
 
@@ -52,6 +52,8 @@ The server may require privilege to bind UDP/53 or create a proxy interface. A s
 | `--fingerprint-file PATH` | `server.fingerprint` | Read saved pin or save a trust-on-first-use pin. |
 | `--trust-on-first-use` | Off | Discover the server pin for first connection. |
 | `--agent-key PATH` | `agent.key` | Stable agent Ed25519 identity. |
+| `--deny-exec` | Off | Disable operator commands that launch an executable on this agent. Execution is enabled by default. |
+| `--advertise-route CIDR` | None | Offer an additional IPv4 subnet to VPN clients; repeatable. Up IPv4 interface subnets are offered automatically. |
 | `--domain NAME` | `t.undertow.invalid` | Must match the server. |
 | `--auth`, `--token-file`, `--password`, `--password-file` | See above | Enrollment. |
 | `--payload-profile auto\|large\|small` | `auto` | Direct-DNS payload size; auto can fall back to small. |
@@ -81,8 +83,12 @@ The agent makes no interface or host route changes. Its local key must differ fo
 | `--tunnel-address CIDR` | `172.16.253.1/24` | Client interface IPv4 address/network. |
 | `--payload-profile auto\|large\|small` | `auto` | Direct-DNS payload size. |
 | `--verify-url URL` | `https://api.ipify.org` | Public IPv4 check after routes are installed. Empty disables it. |
+| `--interactive` | Off | Open the console inside the foreground VPN client. |
+| `--routes-file PATH` | `client-routes.json` | Persist this client's accepted and manual agent routes. The file is created locally, not copied from the server. |
 
 The client pins a physical route to the server, installs two IPv4 `/1` routes through its adapter, and withdraws its owned routes on graceful exit or verification failure. It does not provide IPv6 VPN routing. The `.1` client adapter address is local; the public egress address is reported separately.
+
+Interactive mode cannot run in the background. A connected VPN client can view status, accept agent advertised routes, add its own manual route through an agent, change its own internal mode, and execute programs on agents that allow it. Client accepted routes affect only that client and persist across reconnects, including when it later runs in the background. Global server route management and agent selection remain in the server operator console. No extra credential or server setting is needed for client commands. The server's `control.key` is only for its loopback API and local operator commands; do not copy it to VPN clients. `internal on` and `internal off` change how **new** flows use global server routes; the client's explicitly accepted routes remain active in either setting. Existing connections keep their current path.
 
 ## Foreground and background lifecycle
 
@@ -105,6 +111,7 @@ These commands run on the server host and use its loopback API. All accept `--co
 | Command | Meaning |
 | --- | --- |
 | `undertow status [--json]` | Connected agents and VPN clients separately, selected agent, route state, counters. |
+| `undertow console` | Interactive console attached to the running server's loopback API. |
 | `undertow agent list [--json]` | Alias of `status`; also shows VPN clients. |
 | `undertow agent show AGENT_ID` | Detailed JSON for one agent. |
 | `undertow agent select AGENT_ID` | Set selected agent for operations that use the selection. |
@@ -117,5 +124,7 @@ These commands run on the server host and use its loopback API. All accept `--co
 Agent IDs in the human table can be shortened for display; use `status --json` for the full ID. `--control` must be a numeric loopback address. A route belongs to one agent and becomes inactive when that agent disconnects.
 
 In `status`, **Agents** are hosts exposing reachable networks; **VPN clients** are hosts sending their own traffic through the server. A VPN client appears after its session is ready. Because UDP has no disconnect signal, the server removes an idle client after roughly 60–75 seconds. `last_seen` in JSON shows the last received packet. `Internal` shows whether the client requested configured agent routes. `RX` and `TX` are encrypted session bytes at the server. `Streams` counts open tunneled flows. `Queued`, `Flight`, and `CWND` show waiting fragments, unacknowledged packets, and the current congestion window. Rising `Retrans` indicates packet loss or delayed acknowledgement; compare repeated status snapshots to see whether traffic is still making progress.
+
+The server console accepts `status [--json]`, `routes`, `route add CIDR AGENT_ID`, `route del CIDR`, `select AGENT_ID`, `exec AGENT_ID PROGRAM [ARGS]`, `help`, and `quit`. The VPN client console accepts `status [--json]`, `routes` (advertised and locally accepted routes), `route accept CIDR AGENT_ID`, `route add CIDR AGENT_ID` (manual, even if not advertised), `route del CIDR`, `exec AGENT_ID PROGRAM [ARGS]`, `internal on|off`, `help`, and `quit`. Client route commands install or remove a route on the client TUN and configure forwarding for this client session; they do not change server global routes. `route add` is useful when an agent can reach a subnet through a router on one of its interfaces, but that subnet is not directly attached and thus not auto advertised. Quote arguments containing spaces. `exec` starts the named program directly on the agent; it does not invoke a shell automatically. Use `agent --deny-exec` to disable it on an agent. Commands have a 30 second execution limit and capture up to 32 KiB each of stdout and stderr. Use the full agent ID from `status --json` when the display truncates it.
 
 See [scenarios](scenarios.md) for complete commands and verification steps.

@@ -46,6 +46,10 @@ flowchart LR
 
 **Agent and client are different jobs.** Put an `agent` on a host that can reach an internal network; it lets the server open sockets from that host, but changes none of that host's routes. Put `client --vpn` on a host whose *own* applications should use the tunnel; it changes that host's IPv4 routes and normally exits to the Internet from the server. Run an agent and configure its subnet on the server before `client --vpn --internal` can reach internal targets. `status` lists agents and VPN clients separately.
 
+For interactive operation, run `undertow console` on the server or start a VPN client with `--interactive`. The server console manages global routes and agents. The VPN client console can view status, accept an advertised agent route, add a manual route through an agent, change its own internal mode, and run executable commands on agents. Accepted client routes persist across reconnects. Agent execution is enabled by default; use `agent --deny-exec` to disable it. See [interactive scenarios](docs/scenarios.md#8-interactive-consoles-and-agent-commands).
+
+For real deployments, use token or password enrollment. With `server --auth none`, anyone who can reach the listener can join, access network paths, and run commands on agents that allow execution.
+
 ## Build
 
 Go 1.25 or newer is required to build. Compiled files belong in the ignored `bin/` directory.
