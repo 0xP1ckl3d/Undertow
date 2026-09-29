@@ -61,7 +61,7 @@ func clientCommand(args []string) error {
 	if f.NArg() != 0 {
 		return fmt.Errorf("unexpected client argument %q; use 'undertow client --vpn or --internal ...'", f.Arg(0))
 	}
-	if !*vpn && !*internal {
+	if !*lifecycle.stop && !*vpn && !*internal {
 		return errors.New("client requires at least one of --vpn or --internal")
 	}
 	if *interactive && (*lifecycle.background || *lifecycle.stop) {

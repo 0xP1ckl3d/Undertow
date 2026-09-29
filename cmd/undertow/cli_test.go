@@ -198,6 +198,14 @@ func TestClientRequiresRoutingMode(t *testing.T) {
 	}
 }
 
+func TestClientStopDoesNotRequireRoutingMode(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing-client.pid")
+	err := clientCommand([]string{"--stop", "--pid-file", missing})
+	if err == nil || strings.Contains(err.Error(), "--vpn or --internal") {
+		t.Fatalf("stop should reach lifecycle handler without a routing mode: %v", err)
+	}
+}
+
 func TestVerificationTarget(t *testing.T) {
 	got, err := resolveVerificationTarget(context.Background(), "https://127.0.0.1/check")
 	if err != nil || got != "127.0.0.1:443" {
