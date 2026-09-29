@@ -82,14 +82,20 @@ func clientRequestAllowed(request *http.Request, clientID uint64) bool {
 		return true
 	}
 	clientPrefix := "/v1/clients/" + strconv.FormatUint(clientID, 10)
+	if request.Method == http.MethodGet && path == clientPrefix+"/forwards" && request.URL.RawQuery == "" {
+		return true
+	}
 	if request.Method == http.MethodDelete && path == clientPrefix+"/routes" {
 		_, err := netip.ParsePrefix(request.URL.Query().Get("prefix"))
 		return err == nil
 	}
+	if request.Method == http.MethodDelete && path == clientPrefix+"/forwards" {
+		return request.URL.Query().Get("agent_id") != "" && request.URL.Query().Get("bind") != ""
+	}
 	if request.Method != http.MethodPost || request.URL.RawQuery != "" {
 		return false
 	}
-	if path == clientPrefix+"/internal" || path == clientPrefix+"/routes" {
+	if path == clientPrefix+"/internal" || path == clientPrefix+"/routes" || path == clientPrefix+"/forwards" {
 		return true
 	}
 	parts := strings.Split(path, "/")

@@ -8,10 +8,11 @@ import (
 // Capabilities control the operations implemented by the current agent.
 // A false field rejects the matching operation before it starts.
 type Capabilities struct {
-	Pivot    bool
-	Exec     bool
-	Upload   bool
-	Download bool
+	Pivot     bool
+	Exec      bool
+	Upload    bool
+	Download  bool
+	Listeners bool
 }
 
 type CapabilityReport struct {
@@ -20,7 +21,7 @@ type CapabilityReport struct {
 }
 
 func DefaultCapabilities() Capabilities {
-	return Capabilities{Pivot: true, Exec: true, Upload: true, Download: true}
+	return Capabilities{Pivot: true, Exec: true, Upload: true, Download: true, Listeners: true}
 }
 
 func ParseDenied(raw string) (Capabilities, error) {
@@ -38,19 +39,21 @@ func ParseDenied(raw string) (Capabilities, error) {
 			caps.Upload = false
 		case "download":
 			caps.Download = false
+		case "listeners":
+			caps.Listeners = false
 		default:
-			return Capabilities{}, fmt.Errorf("unknown agent capability %q; supported: pivot,exec,upload,download", strings.TrimSpace(item))
+			return Capabilities{}, fmt.Errorf("unknown agent capability %q; supported: pivot,exec,upload,download,listeners", strings.TrimSpace(item))
 		}
 	}
 	return caps, nil
 }
 
 func (c Capabilities) Report() CapabilityReport {
-	report := CapabilityReport{Supported: []string{"pivot", "exec", "upload", "download"}, Allowed: make([]string, 0, 4)}
+	report := CapabilityReport{Supported: []string{"pivot", "exec", "upload", "download", "listeners"}, Allowed: make([]string, 0, 5)}
 	for _, item := range []struct {
 		name    string
 		allowed bool
-	}{{"pivot", c.Pivot}, {"exec", c.Exec}, {"upload", c.Upload}, {"download", c.Download}} {
+	}{{"pivot", c.Pivot}, {"exec", c.Exec}, {"upload", c.Upload}, {"download", c.Download}, {"listeners", c.Listeners}} {
 		if item.allowed {
 			report.Allowed = append(report.Allowed, item.name)
 		}

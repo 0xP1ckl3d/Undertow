@@ -15,15 +15,19 @@ func TestParseDeniedCapabilities(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if caps.Exec || caps.Upload || !caps.Pivot || !caps.Download {
+	if caps.Exec || caps.Upload || !caps.Pivot || !caps.Download || !caps.Listeners {
 		t.Fatalf("capabilities not independent: %+v", caps)
 	}
 	report := caps.Report()
-	if !reflect.DeepEqual(report.Supported, []string{"pivot", "exec", "upload", "download"}) || !reflect.DeepEqual(report.Allowed, []string{"pivot", "download"}) {
+	if !reflect.DeepEqual(report.Supported, []string{"pivot", "exec", "upload", "download", "listeners"}) || !reflect.DeepEqual(report.Allowed, []string{"pivot", "download", "listeners"}) {
 		t.Fatalf("report=%+v", report)
 	}
 	if _, err := ParseDenied("shell"); err == nil || !strings.Contains(err.Error(), "unknown agent capability") {
 		t.Fatalf("unsupported capability was accepted: %v", err)
+	}
+	deniedListeners, err := ParseDenied("listeners")
+	if err != nil || deniedListeners.Listeners || !deniedListeners.Exec {
+		t.Fatalf("listeners capability not independent: %+v, %v", deniedListeners, err)
 	}
 }
 
@@ -54,5 +58,19 @@ func TestAgentCapabilitiesAreEnforcedIndependently(t *testing.T) {
 	}
 	if _, err := server.Open(ctx, "127.0.0.1:1"); err == nil || !strings.Contains(err.Error(), "pivot is disabled") {
 		t.Fatalf("denied pivot result: %v", err)
+	}
+}
+
+func TestAgentCanDenyListeners(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	server, agent := execTestMuxPair(ctx)
+	defer server.Close()
+	defer agent.Close()
+	caps := DefaultCapabilities()
+	caps.Listeners = false
+	go ServeAgentWithCapabilities(ctx, agent, caps)
+	if _, err := server.Open(ctx, ListenerDestination); err == nil || !strings.Contains(err.Error(), "listeners are disabled") {
+		t.Fatalf("denied listener result: %v", err)
 	}
 }

@@ -299,6 +299,7 @@ func runVPN(parent context.Context, c *dns.Client, serverIP netip.Addr, internal
 	defer cancel()
 	m := mux.New(ctx, c, false)
 	defer m.Close()
+	go pivot.ServeClientForwards(ctx, m)
 	hostname, _ := os.Hostname()
 	hello, _ := json.Marshal(struct {
 		Mode     string `json:"mode"`

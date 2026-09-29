@@ -131,7 +131,7 @@ Usage: undertow agent --server IP:PORT [--fingerprint HEX | --trust-on-first-use
   --password-file PATH    Read password from file instead.
   --agent-key PATH         Agent Ed25519 identity (default agent.key).
   --deny LIST              Disable agent capabilities independently. Names:
-                           pivot,exec,upload,download (comma-separated).
+                           pivot,exec,upload,download,listeners (comma-separated).
   --advertise-route CIDR    Offer an additional IPv4 route to VPN clients;
                            repeatable. Up IPv4 interfaces are also offered.
   --domain NAME            Match server --domain (default t.undertow.invalid).
@@ -228,6 +228,8 @@ one, 'help' for the current menu, and 'back' to return to the main menu.
 Inside an agent, use built-in pwd, ls, stat, mkdir, rm, whoami, ps,
 privileges, env, interfaces, dns, and route-table commands. --deny=exec
 on the agent disables both direct exec and these built-in operations.
+The VPN client console also supports per-agent TCP 'forward add/list/del'.
+For example, after 'use 1': forward add 0.0.0.0:8080 127.0.0.1:8080.
 `
 	case "status":
 		body = `undertow status — inspect agents, VPN clients, and routes

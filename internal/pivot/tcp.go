@@ -49,6 +49,14 @@ func ServeAgentWithCapabilities(ctx context.Context, m *mux.Mux, caps Capabiliti
 			go serveFile(ctx, s, caps)
 			continue
 		}
+		if s.Destination() == ListenerDestination {
+			if !caps.Listeners {
+				s.Fail(errors.New("agent listeners are disabled"))
+				continue
+			}
+			go ServeAgentListener(ctx, m, s)
+			continue
+		}
 		if !caps.Pivot {
 			s.Fail(errors.New("agent pivot is disabled"))
 			continue

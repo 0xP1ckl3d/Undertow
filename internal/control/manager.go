@@ -97,6 +97,7 @@ type Manager struct {
 	mu             sync.RWMutex
 	agents         map[string]*agentState
 	clients        map[uint64]*clientState
+	forwards       map[string]*forwardState
 	routes         *routing.Table
 	device         RouteDevice
 	selected       string
@@ -107,7 +108,7 @@ type Manager struct {
 }
 
 func NewManager(routes *routing.Table, device RouteDevice, virtualNetwork netip.Prefix, proxyIP netip.Addr) *Manager {
-	return &Manager{agents: make(map[string]*agentState), clients: make(map[uint64]*clientState), routes: routes, device: device, virtualNetwork: virtualNetwork.Masked(), proxyIP: proxyIP, virtualByAgent: make(map[string]netip.Addr), virtualUsed: make(map[netip.Addr]bool)}
+	return &Manager{agents: make(map[string]*agentState), clients: make(map[uint64]*clientState), forwards: make(map[string]*forwardState), routes: routes, device: device, virtualNetwork: virtualNetwork.Masked(), proxyIP: proxyIP, virtualByAgent: make(map[string]netip.Addr), virtualUsed: make(map[netip.Addr]bool)}
 }
 
 func (m *Manager) RegisterClient(peer *dns.Peer, streamMux *mux.Mux, internal bool, hostname string) {
@@ -118,10 +119,20 @@ func (m *Manager) RegisterClient(peer *dns.Peer, streamMux *mux.Mux, internal bo
 
 func (m *Manager) UnregisterClient(sessionID uint64, streamMux *mux.Mux) {
 	m.mu.Lock()
+	var closed []*mux.Stream
 	if state := m.clients[sessionID]; state != nil && state.mux == streamMux {
 		delete(m.clients, sessionID)
+		for id, forward := range m.forwards {
+			if forward.ClientID == sessionID {
+				closed = append(closed, forward.control)
+				delete(m.forwards, id)
+			}
+		}
 	}
 	m.mu.Unlock()
+	for _, stream := range closed {
+		_ = stream.Close()
+	}
 }
 
 func (m *Manager) ClientInternal(sessionID uint64) bool {
@@ -286,6 +297,7 @@ func (m *Manager) Register(peer *dns.Peer, streamMux *mux.Mux) {
 		old.mux.Close()
 	}
 	go m.receiveInventory(id, streamMux)
+	go m.serveAgentForwards(streamMux)
 	go func() { <-streamMux.Done(); m.Unregister(id, streamMux) }()
 }
 
@@ -420,6 +432,13 @@ func (m *Manager) Unregister(id string, streamMux *mux.Mux) {
 		return
 	}
 	delete(m.agents, id)
+	var closed []*mux.Stream
+	for forwardID, forward := range m.forwards {
+		if forward.AgentID == id {
+			closed = append(closed, forward.control)
+			delete(m.forwards, forwardID)
+		}
+	}
 	for _, r := range m.routes.List() {
 		if r.AgentID == id && r.Active {
 			if m.device != nil {
@@ -431,6 +450,9 @@ func (m *Manager) Unregister(id string, streamMux *mux.Mux) {
 		}
 	}
 	m.mu.Unlock()
+	for _, stream := range closed {
+		_ = stream.Close()
+	}
 }
 
 func (m *Manager) Choose(destination netip.Addr) *mux.Mux {
@@ -716,6 +738,43 @@ func (m *Manager) handler(token string) http.Handler {
 		prefix, err := netip.ParsePrefix(r.URL.Query().Get("prefix"))
 		if err == nil {
 			err = m.DeleteClientRoute(id, prefix)
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	muxer.HandleFunc("GET /v1/clients/{id}/forwards", func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.ParseUint(r.PathValue("id"), 10, 64)
+		if err != nil {
+			http.Error(w, "invalid client ID", http.StatusBadRequest)
+			return
+		}
+		jsonReply(w, http.StatusOK, m.ClientForwards(id))
+	})
+	muxer.HandleFunc("POST /v1/clients/{id}/forwards", func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.ParseUint(r.PathValue("id"), 10, 64)
+		var body struct {
+			AgentID string `json:"agent_id"`
+			Bind    string `json:"bind"`
+			Target  string `json:"target"`
+		}
+		if err != nil || json.NewDecoder(io.LimitReader(r.Body, 2048)).Decode(&body) != nil {
+			http.Error(w, "invalid forward request", http.StatusBadRequest)
+			return
+		}
+		info, err := m.AddClientForward(r.Context(), id, body.AgentID, body.Bind, body.Target)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		jsonReply(w, http.StatusCreated, info)
+	})
+	muxer.HandleFunc("DELETE /v1/clients/{id}/forwards", func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.ParseUint(r.PathValue("id"), 10, 64)
+		if err == nil {
+			err = m.DeleteClientForward(id, r.URL.Query().Get("agent_id"), r.URL.Query().Get("bind"))
 		}
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)

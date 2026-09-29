@@ -170,7 +170,7 @@ func (e *consoleEditor) complete() {
 		}
 	}
 	if e.vpn {
-		commands = append(commands, "background", "internal")
+		commands = append(commands, "background", "internal", "forward")
 	}
 	var matches []string
 	for _, command := range commands {

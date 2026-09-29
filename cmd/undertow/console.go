@@ -245,6 +245,10 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 				args = append([]string{args[0], selectedID}, args[1:]...)
 			case "upload", "download":
 				args = append([]string{args[0], selectedID}, args[1:]...)
+			case "forward":
+				if vpnClient && len(args) >= 2 && (args[1] == "add" || args[1] == "del" || args[1] == "list") {
+					args = append([]string{"forward", args[1], selectedID}, args[2:]...)
+				}
 			case "route":
 				if len(args) == 3 && (args[1] == "add" || args[1] == "accept") {
 					args = append(args, selectedID)
@@ -360,6 +364,9 @@ Quote paths or arguments containing spaces. Programs run without a shell.
 			fmt.Fprintln(output, "  route accept CIDR      Accept an advertised route from this agent")
 			fmt.Fprintln(output, "  upload LOCAL REMOTE    Copy a local file to this agent")
 			fmt.Fprintln(output, "  download REMOTE LOCAL  Copy a file from this agent")
+			fmt.Fprintln(output, "  forward add BIND TARGET Expose a client TCP service on this agent")
+			fmt.Fprintln(output, "  forward list           List this agent's TCP forwards")
+			fmt.Fprintln(output, "  forward del BIND       Stop this agent's TCP forward")
 			fmt.Fprintln(output, "  background             Detach console; keep VPN running")
 		}
 		return
@@ -371,6 +378,7 @@ Quote paths or arguments containing spaces. Programs run without a shell.
   status                 Show agents, VPN clients, and routes
   routes                 Show advertised and locally accepted routes
   internal on|off        Change this client's global pivot mode
+  forward list           List this client's agent TCP forwards
   help                   Show this menu
   background             Detach console; keep VPN running
   quit                   Stop the VPN and exit
@@ -436,6 +444,9 @@ func runConsoleCommand(ctx context.Context, output io.Writer, call consoleCaller
   route accept CIDR AGENT_ID     Accept an advertised route locally
   route add CIDR AGENT_ID        Add a manual local route via an agent
   route del CIDR                 Remove a locally accepted route
+  forward add AGENT_ID BIND TARGET Expose client TCP service on agent
+  forward list [AGENT_ID]        List TCP forwards
+  forward del AGENT_ID BIND      Stop one TCP forward
   exec AGENT_ID PROGRAM [ARGS]   Run one program on an agent
   HOST_OP AGENT_ID [ARGS]        Host operations; type use NUMBER then help
   upload AGENT_ID LOCAL REMOTE   Copy a file to an agent
@@ -612,6 +623,49 @@ Quote arguments containing spaces. Commands run only when submitted.
 			fmt.Fprintf(output, "Internal pivots %s for new flows.\n", args[1])
 		}
 		return err
+	case "forward":
+		if !vpnClient || ownClientID == 0 {
+			return errors.New("agent TCP forwards are configured in the VPN client console")
+		}
+		base := fmt.Sprintf("/v1/clients/%d/forwards", ownClientID)
+		if len(args) == 2 && args[1] == "list" || len(args) == 3 && args[1] == "list" {
+			data, err := call(ctx, http.MethodGet, base, nil)
+			if err != nil {
+				return err
+			}
+			var forwards []control.ForwardInfo
+			if err := json.Unmarshal(data, &forwards); err != nil {
+				return err
+			}
+			for _, forward := range forwards {
+				if len(args) == 3 && forward.AgentID != args[2] {
+					continue
+				}
+				fmt.Fprintf(output, "%s on %s -> client %s\n", forward.Bind, forward.AgentID, forward.Target)
+			}
+			return nil
+		}
+		if len(args) == 5 && args[1] == "add" {
+			data, err := call(ctx, http.MethodPost, base, map[string]string{"agent_id": args[2], "bind": args[3], "target": args[4]})
+			if err != nil {
+				return err
+			}
+			var forward control.ForwardInfo
+			if err := json.Unmarshal(data, &forward); err != nil {
+				return err
+			}
+			fmt.Fprintf(output, "Agent %s listening on %s -> client %s\n", forward.AgentID, forward.Bind, forward.Target)
+			return nil
+		}
+		if len(args) == 4 && args[1] == "del" {
+			path := base + "?agent_id=" + url.QueryEscape(args[2]) + "&bind=" + url.QueryEscape(args[3])
+			if _, err := call(ctx, http.MethodDelete, path, nil); err != nil {
+				return err
+			}
+			fmt.Fprintln(output, "Agent TCP forward stopped.")
+			return nil
+		}
+		return errors.New("use forward add AGENT_ID BIND TARGET, forward list [AGENT_ID], or forward del AGENT_ID BIND")
 	default:
 		return fmt.Errorf("unknown command %q; type help", args[0])
 	}

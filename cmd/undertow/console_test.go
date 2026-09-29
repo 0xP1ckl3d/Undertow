@@ -181,6 +181,31 @@ func TestConsoleSelectedAgentBuiltin(t *testing.T) {
 	}
 }
 
+func TestConsoleSelectedAgentForward(t *testing.T) {
+	var request map[string]string
+	caller := func(_ context.Context, method, path string, body any) ([]byte, error) {
+		if path == "/v1/status" {
+			return json.Marshal(map[string]any{"agents": []control.AgentInfo{{ID: "agent-long-id", Hostname: "pivot-host"}}})
+		}
+		if method != http.MethodPost || path != "/v1/clients/704/forwards" {
+			t.Fatalf("unexpected forward call %s %s", method, path)
+		}
+		encoded, _ := json.Marshal(body)
+		if err := json.Unmarshal(encoded, &request); err != nil {
+			t.Fatal(err)
+		}
+		return json.Marshal(control.ForwardInfo{AgentID: request["agent_id"], Bind: request["bind"], Target: request["target"]})
+	}
+	var output bytes.Buffer
+	input := strings.NewReader("use 1\nforward add 0.0.0.0:8080 127.0.0.1:8080\nquit\n")
+	if err := runConsole(context.Background(), input, &output, caller, func() uint64 { return 704 }, nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if request["agent_id"] != "agent-long-id" || request["bind"] != "0.0.0.0:8080" || request["target"] != "127.0.0.1:8080" {
+		t.Fatalf("wrong agent forward: %+v", request)
+	}
+}
+
 func TestVPNConsoleCannotChangeServerRoutes(t *testing.T) {
 	called := false
 	caller := func(context.Context, string, string, any) ([]byte, error) { called = true; return nil, nil }

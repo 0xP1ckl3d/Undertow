@@ -77,6 +77,8 @@ func TestConnectedVPNClientHasLimitedAPI(t *testing.T) {
 		{"POST", "/v1/selection", map[string]string{"agent_id": "agent-a"}},
 		{"POST", "/v1/clients/999/internal", map[string]bool{"enabled": true}},
 		{"POST", "/v1/clients/999/routes", AcceptedRoute{Prefix: "10.10.0.0/16", AgentID: "agent-a", Manual: true}},
+		{"POST", "/v1/clients/999/forwards", map[string]string{"agent_id": "agent-a", "bind": "0.0.0.0:8080", "target": "127.0.0.1:8080"}},
+		{"DELETE", "/v1/clients/999/forwards?agent_id=agent-a&bind=0.0.0.0:8080", nil},
 		{"DELETE", "/v1/routes?prefix=10.20.0.0%2F16", nil},
 	} {
 		if _, err := CallRemote(ctx, client, request.method, request.path, request.body); err == nil || !strings.Contains(err.Error(), "403") {

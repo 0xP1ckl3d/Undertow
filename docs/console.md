@@ -85,6 +85,22 @@ Accepted and manual routes are saved locally in `client-routes.json` by default 
 
 After `background`, run `undertow client attach` to return. A VPN started with `client --background` can be attached the same way. Use the same `--pid-file PATH` on `attach` or `--stop` if startup used a custom PID file. `undertow client --stop` gracefully stops a detached client and removes its owned routes. `quit` in an attached VPN console does the same. A nonterminal invocation runs without a prompt unless `--interactive` is supplied.
 
+### Expose a client TCP service on an agent
+
+In the VPN client console, select the agent that should listen and add a forward. For a web server listening on the **client** at `0.0.0.0:8080`:
+
+```text
+agents
+use 1
+forward add 0.0.0.0:8080 127.0.0.1:8080
+forward list
+forward del 0.0.0.0:8080
+```
+
+`0.0.0.0:8080` is the **agent-side bind**; hosts able to reach that agent address can connect. `127.0.0.1:8080` is the target on the VPN client, so the client web server can listen on either `127.0.0.1:8080` or `0.0.0.0:8080`. Test from a host able to reach the agent: `curl http://AGENT_IP:8080/`. The agent must allow TCP listener binds (`--deny=listeners` disables them), and its firewall must allow the chosen port. A busy port produces a bind error.
+
+From the main VPN menu, use `forward add AGENT_ID AGENT_BIND CLIENT_TARGET`, `forward list [AGENT_ID]`, or `forward del AGENT_ID AGENT_BIND`. Forwards are scoped to the VPN client's current session and the named agent. Detaching the console with `background` keeps them active. A client or agent disconnect closes its listeners; add them again after reconnect. Only numeric IPv4 addresses are accepted, and the client target must be loopback. The forward carries TCP; it does not forward UDP.
+
 ## Running an agent program and transferring files
 
 In an agent menu, `exec whoami` starts that executable directly. To run PowerShell explicitly on a Windows agent, use `exec powershell.exe -NoProfile -Command whoami`. `exec` has no implicit operating system shell, so shell operators are not interpreted unless you explicitly start a shell program. One-shot execution has a 30 second limit and captures up to 32 KiB each of standard output and standard error. The agent's `--deny=exec` setting rejects it.

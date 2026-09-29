@@ -161,3 +161,16 @@ download ./incoming.txt ./retrieved.txt
 The local paths above refer to the VPN client host; the remote paths refer to the agent host. Use absolute remote paths when you are unsure of the agent's working directory. Parent directories must already exist. Undertow refuses to replace an existing destination file and reports a SHA-256 digest after each successful transfer. Paths with spaces need quotes, for example `upload "./local report.txt" "C:\Users\operator\incoming report.txt"` on a Windows agent. `--deny=upload,download` denies file transfers without disabling one-shot exec.
 
 When an agent and VPN client run on the **same host**, do not accept a route that the agent itself needs for its outbound connection. That can loop the agent's socket traffic back into the VPN. Run the agent on a separate host for that route, or keep its outbound path outside the accepted prefix.
+
+## 9. Expose a VPN client web server on one agent
+
+Start a TCP web server on the VPN client at port 8080, then start its VPN console. Select the agent that should receive incoming connections:
+
+```text
+agents
+use 1
+forward add 0.0.0.0:8080 127.0.0.1:8080
+forward list
+```
+
+From another host that can reach the selected agent, run `curl http://AGENT_IP:8080/`. The agent's `0.0.0.0:8080` listener accepts connections on all its IPv4 interfaces and forwards them to the VPN client's loopback service. The agent's firewall must allow TCP/8080. Stop the listener with `forward del 0.0.0.0:8080`. The listener remains active when the console is detached with `background`, and closes when either endpoint disconnects. It is session scoped; add it again after reconnect. Use `agent --deny=listeners` to disallow agent-side forwarding while retaining other capabilities. See [console commands](console.md#expose-a-client-tcp-service-on-an-agent) for main-menu syntax and limits.
