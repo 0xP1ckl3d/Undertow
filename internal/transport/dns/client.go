@@ -304,7 +304,9 @@ func pollTarget(stats session.Stats, health int) int {
 	if stats.RTT > 0 && stats.RTT < 20*time.Millisecond {
 		limit = min(limit, 16)
 	}
-	return max(1, min(limit, stats.Queued+stats.InFlight))
+	// Keep one slot beyond queued/in-flight data so a long idle poll cannot
+	// delay the first new packet until its server-side hold expires.
+	return max(1, min(limit, stats.Queued+stats.InFlight+1))
 }
 
 func (c *Client) run(ctx context.Context) {
