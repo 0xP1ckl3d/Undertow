@@ -56,6 +56,9 @@ func TestVPNClientRelaysFileToAgent(t *testing.T) {
 	if _, err := pivot.TransferFile(ctx, clientVPN, "agent-a", "upload", source, remote); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := pivot.TransferFile(ctx, clientVPN, "agent-a", "upload", source, remote); err == nil || !strings.Contains(err.Error(), "upload destination already exists") {
+		t.Fatalf("duplicate upload response: %v", err)
+	}
 	if _, err := pivot.TransferFile(ctx, clientVPN, "agent-a", "download", download, remote); err != nil {
 		t.Fatal(err)
 	}

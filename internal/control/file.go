@@ -49,7 +49,6 @@ func (m *Manager) ServeFileRelay(ctx context.Context, client *mux.Stream) {
 	}()
 	_, _ = io.Copy(client, upstream)
 	_ = client.CloseWrite()
-	_ = client.Close()
 	<-upDone
 }
 
