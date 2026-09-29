@@ -104,8 +104,8 @@ These commands run on the server host and use its loopback API. All accept `--co
 
 | Command | Meaning |
 | --- | --- |
-| `undertow status [--json]` | Connected agents, selected agent, route state, counters. |
-| `undertow agent list [--json]` | Same agent and route status view. |
+| `undertow status [--json]` | Connected agents and VPN clients separately, selected agent, route state, counters. |
+| `undertow agent list [--json]` | Alias of `status`; also shows VPN clients. |
 | `undertow agent show AGENT_ID` | Detailed JSON for one agent. |
 | `undertow agent select AGENT_ID` | Set selected agent for operations that use the selection. |
 | `undertow route add CIDR [--via AGENT_ID]` | Configure an internal prefix; explicit owner recommended. |
@@ -115,5 +115,7 @@ These commands run on the server host and use its loopback API. All accept `--co
 | `undertow version` | Print build version. |
 
 Agent IDs in the human table can be shortened for display; use `status --json` for the full ID. `--control` must be a numeric loopback address. A route belongs to one agent and becomes inactive when that agent disconnects.
+
+In `status`, **Agents** are hosts exposing reachable networks; **VPN clients** are hosts sending their own traffic through the server. A VPN client appears after its session is ready. Because UDP has no disconnect signal, the server removes an idle client after roughly 60–75 seconds. `last_seen` in JSON shows the last received packet. `Internal` shows whether the client requested configured agent routes. `RX` and `TX` are encrypted session bytes at the server. `Streams` counts open tunneled flows. `Queued`, `Flight`, and `CWND` show waiting fragments, unacknowledged packets, and the current congestion window. Rising `Retrans` indicates packet loss or delayed acknowledgement; compare repeated status snapshots to see whether traffic is still making progress.
 
 See [scenarios](scenarios.md) for complete commands and verification steps.

@@ -163,3 +163,68 @@ func TestLossReorderFragmentAndDuplicate(t *testing.T) {
 		t.Fatal("missing exact-byte retransmission")
 	}
 }
+
+func TestRetransmissionDeliversAfterReceiveQueueDrains(t *testing.T) {
+	sender, receiver := pair(t)
+	defer sender.Close()
+	defer receiver.Close()
+	for i := 0; i < cap(receiver.deliver); i++ {
+		receiver.deliver <- []byte("previous")
+	}
+	message := []byte("deliver after queue drains")
+	if err := sender.Send(context.Background(), message); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	first, err := sender.NextPacket(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := receiver.Process(first, now); err == nil || err.Error() != "receive queue full" {
+		t.Fatalf("full receive queue: %v", err)
+	}
+	<-receiver.deliver
+	retry, err := sender.NextPacket(now.Add(time.Second))
+	if err != nil || !bytes.Equal(first, retry) {
+		t.Fatalf("retransmission: equal=%t err=%v", bytes.Equal(first, retry), err)
+	}
+	if err := receiver.Process(retry, now.Add(time.Second)); err != nil {
+		t.Fatalf("retransmitted data was not delivered: %v", err)
+	}
+	for i := 1; i < cap(receiver.deliver); i++ {
+		<-receiver.deliver
+	}
+	got, ok := receiver.TryRecv()
+	if !ok || !bytes.Equal(got, message) {
+		t.Fatalf("message lost after queue drained: %q", got)
+	}
+}
+
+func TestPriorityMessageBypassesFullDataQueue(t *testing.T) {
+	sender, receiver := pair(t)
+	defer sender.Close()
+	defer receiver.Close()
+	for i := 0; i < maxQueued; i++ {
+		if err := sender.Send(context.Background(), []byte("bulk")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := sender.Send(context.Background(), []byte("more bulk")); err != ErrQueueFull {
+		t.Fatalf("expected a full bulk queue, got %v", err)
+	}
+	if err := sender.SendPriority(context.Background(), []byte("open-control")); err != nil {
+		t.Fatalf("control blocked by bulk queue: %v", err)
+	}
+	now := time.Now()
+	wire, err := sender.NextPacket(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := receiver.Process(wire, now); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := receiver.TryRecv()
+	if !ok || string(got) != "open-control" {
+		t.Fatalf("first delivered message = %q, want control", got)
+	}
+}

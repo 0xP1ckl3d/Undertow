@@ -277,12 +277,15 @@ func serve(args []string) error {
 						return
 					}
 					if control.IsVPNHello(hello) {
-						log.Printf("VPN client ready: session=%d remote=%s internal=%t", p.Session.ID(), p.Snapshot().Remote, control.VPNInternal(hello))
+						internal := control.VPNInternal(hello)
+						log.Printf("VPN client ready: session=%d remote=%s internal=%t", p.Session.ID(), p.Snapshot().Remote, internal)
 						if err := streamMux.SendControl(ctx, []byte(`{"mode":"vpn","ready":true}`)); err != nil {
 							streamMux.Close()
 							return
 						}
-						pivot.ServeVPN(ctx, streamMux, manager.ResolveEgress, control.VPNInternal(hello))
+						manager.RegisterClient(p, streamMux, internal)
+						pivot.ServeVPN(ctx, streamMux, manager.ResolveEgress, internal)
+						manager.UnregisterClient(p.Session.ID(), streamMux)
 						log.Printf("VPN client disconnected: session=%d", p.Session.ID())
 						streamMux.Close()
 						return

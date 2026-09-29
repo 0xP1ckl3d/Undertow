@@ -309,21 +309,48 @@ func (m *Mux) sendLoop() {
 		if !have {
 			continue
 		}
-		b := f.encode()
-		for {
-			err := m.transport.Send(m.ctx, b)
-			if err == nil {
-				break
+		if !m.sendFrame(f) {
+			return
+		}
+	}
+}
+
+func (m *Mux) sendFrame(f frame) bool {
+	b := f.encode()
+	for {
+		var err error
+		if f.kind != frameData {
+			if priority, ok := m.transport.(interface {
+				SendPriority(context.Context, []byte) error
+			}); ok {
+				err = priority.SendPriority(m.ctx, b)
+			} else {
+				err = m.transport.Send(m.ctx, b)
 			}
-			if !errors.Is(err, session.ErrQueueFull) {
-				m.Close()
-				return
-			}
+		} else {
+			err = m.transport.Send(m.ctx, b)
+		}
+		if err == nil {
+			return true
+		}
+		if !errors.Is(err, session.ErrQueueFull) {
+			m.Close()
+			return false
+		}
+		if f.kind == frameData {
 			select {
-			case <-time.After(5 * time.Millisecond):
-			case <-m.done:
-				return
+			case control := <-m.control:
+				if !m.sendFrame(control) {
+					return false
+				}
+				continue
+			default:
 			}
+		}
+		select {
+		case <-time.After(5 * time.Millisecond):
+		case <-m.done:
+			return false
 		}
 	}
 }

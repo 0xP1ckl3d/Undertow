@@ -44,6 +44,32 @@ type AgentInfo struct {
 	TXBytes     uint64        `json:"tx_bytes"`
 	Retransmits uint64        `json:"retransmits"`
 	Streams     int           `json:"streams"`
+	InFlight    int           `json:"in_flight"`
+	Queued      int           `json:"queued"`
+	Window      int           `json:"congestion_window"`
+}
+
+type ClientInfo struct {
+	ID          string        `json:"id"`
+	SessionID   uint64        `json:"session_id"`
+	Remote      string        `json:"remote"`
+	Internal    bool          `json:"internal"`
+	Connected   time.Time     `json:"connected"`
+	LastSeen    time.Time     `json:"last_seen"`
+	RTT         time.Duration `json:"rtt_ns"`
+	RXBytes     uint64        `json:"rx_bytes"`
+	TXBytes     uint64        `json:"tx_bytes"`
+	Retransmits uint64        `json:"retransmits"`
+	Streams     int           `json:"streams"`
+	InFlight    int           `json:"in_flight"`
+	Queued      int           `json:"queued"`
+	Window      int           `json:"congestion_window"`
+}
+
+type clientState struct {
+	peer     *dns.Peer
+	mux      *mux.Mux
+	internal bool
 }
 
 type agentState struct {
@@ -54,6 +80,7 @@ type agentState struct {
 type Manager struct {
 	mu             sync.RWMutex
 	agents         map[string]*agentState
+	clients        map[uint64]*clientState
 	routes         *routing.Table
 	device         RouteDevice
 	selected       string
@@ -64,7 +91,38 @@ type Manager struct {
 }
 
 func NewManager(routes *routing.Table, device RouteDevice, virtualNetwork netip.Prefix, proxyIP netip.Addr) *Manager {
-	return &Manager{agents: make(map[string]*agentState), routes: routes, device: device, virtualNetwork: virtualNetwork.Masked(), proxyIP: proxyIP, virtualByAgent: make(map[string]netip.Addr), virtualUsed: make(map[netip.Addr]bool)}
+	return &Manager{agents: make(map[string]*agentState), clients: make(map[uint64]*clientState), routes: routes, device: device, virtualNetwork: virtualNetwork.Masked(), proxyIP: proxyIP, virtualByAgent: make(map[string]netip.Addr), virtualUsed: make(map[netip.Addr]bool)}
+}
+
+func (m *Manager) RegisterClient(peer *dns.Peer, streamMux *mux.Mux, internal bool) {
+	m.mu.Lock()
+	m.clients[peer.Session.ID()] = &clientState{peer: peer, mux: streamMux, internal: internal}
+	m.mu.Unlock()
+}
+
+func (m *Manager) UnregisterClient(sessionID uint64, streamMux *mux.Mux) {
+	m.mu.Lock()
+	if state := m.clients[sessionID]; state != nil && state.mux == streamMux {
+		delete(m.clients, sessionID)
+	}
+	m.mu.Unlock()
+}
+
+func (m *Manager) ClientList() []ClientInfo {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]ClientInfo, 0, len(m.clients))
+	for _, state := range m.clients {
+		p := state.peer.Snapshot()
+		out = append(out, ClientInfo{
+			ID: p.AgentID, SessionID: p.ID, Remote: p.Remote, Internal: state.internal,
+			Connected: p.Connected, LastSeen: p.LastSeen, RTT: p.Transport.RTT,
+			RXBytes: p.Transport.RXBytes, TXBytes: p.Transport.TXBytes,
+			Retransmits: p.Transport.Retransmits, Streams: state.mux.StreamCount(),
+			InFlight: p.Transport.InFlight, Queued: p.Transport.Queued, Window: p.Transport.CongestionWindow,
+		})
+	}
+	return out
 }
 
 func (m *Manager) Register(peer *dns.Peer, streamMux *mux.Mux) {
@@ -252,6 +310,9 @@ func (m *Manager) AgentList() []AgentInfo {
 		info.TXBytes = p.Transport.TXBytes
 		info.Retransmits = p.Transport.Retransmits
 		info.Streams = state.mux.StreamCount()
+		info.InFlight = p.Transport.InFlight
+		info.Queued = p.Transport.Queued
+		info.Window = p.Transport.CongestionWindow
 		out = append(out, info)
 	}
 	return out
@@ -386,7 +447,7 @@ func (m *Manager) handler(token string) http.Handler {
 		m.mu.RLock()
 		selected := m.selected
 		m.mu.RUnlock()
-		jsonReply(w, http.StatusOK, map[string]any{"agents": m.AgentList(), "routes": m.routes.List(), "selected_agent": selected})
+		jsonReply(w, http.StatusOK, map[string]any{"agents": m.AgentList(), "clients": m.ClientList(), "routes": m.routes.List(), "selected_agent": selected})
 	})
 	muxer.HandleFunc("GET /v1/agents/{id}", func(w http.ResponseWriter, r *http.Request) {
 		for _, a := range m.AgentList() {

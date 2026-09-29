@@ -186,6 +186,9 @@ func DialProfile(ctx context.Context, serverAddr, domain, fingerprint string, to
 }
 
 func (c *Client) Send(ctx context.Context, b []byte) error { return c.Session.Send(ctx, b) }
+func (c *Client) SendPriority(ctx context.Context, b []byte) error {
+	return c.Session.SendPriority(ctx, b)
+}
 func (c *Client) Recv(ctx context.Context) ([]byte, error) { return c.Session.Recv(ctx) }
 func (c *Client) Stats() (session.Stats, uint64, uint64) {
 	return c.Session.Stats(), c.queries.Load(), c.responses.Load()

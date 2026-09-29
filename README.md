@@ -44,6 +44,8 @@ flowchart LR
 | `client --vpn` | Route IPv4 Internet traffic through server sockets | Root/Administrator |
 | `client --vpn --internal` | VPN egress plus server configured agent routes | Root/Administrator |
 
+**Agent and client are different jobs.** Put an `agent` on a host that can reach an internal network; it lets the server open sockets from that host, but changes none of that host's routes. Put `client --vpn` on a host whose *own* applications should use the tunnel; it changes that host's IPv4 routes and normally exits to the Internet from the server. Run an agent and configure its subnet on the server before `client --vpn --internal` can reach internal targets. `status` lists agents and VPN clients separately.
+
 ## Build
 
 Go 1.25 or newer is required to build. Compiled files belong in the ignored `bin/` directory.

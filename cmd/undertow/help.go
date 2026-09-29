@@ -28,6 +28,12 @@ Roles:
   client   Privileged process on a separate host; routes its IPv4 traffic
            through server Internet egress, optionally through agent routes.
 
+An agent exposes destinations reachable from its host, without changing that
+host's routes. A VPN client changes its own host's IPv4 routes. A VPN client
+does not expose its local network; an agent does not provide VPN Internet
+egress to its own host. For VPN access to agent networks, configure a server
+route to the agent and run the VPN client with --internal.
+
 Setup:
   1. On the server: undertow init
   2. Choose enrollment: token (default), password, or open (--auth none).
@@ -40,7 +46,7 @@ Commands:
   server     Run the DNS listener and operator control API.
   agent      Connect an internal host without changing its routes.
   client     Run the privileged IPv4 VPN on a client host.
-  status     Show connected agents and routes.
+  status     Show connected agents, VPN clients, and routes.
   route      Add, remove, or list agent pivot routes.
   session    Disconnect an agent session.
   version    Print build version.
@@ -174,7 +180,7 @@ Without --internal, Internet traffic exits through server sockets. With
 address belongs to the client adapter; it is not the public egress address.
 `
 	case "status":
-		body = `undertow status — inspect the server operator API
+		body = `undertow status — inspect agents, VPN clients, and routes
 
 Usage: undertow status [--json] [--control IP:PORT] [--control-token-file PATH]
 

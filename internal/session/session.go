@@ -20,6 +20,7 @@ const (
 	fragmentSize = 800
 	maxMessage   = 64 << 10
 	maxQueued    = 4096
+	maxPriority  = 256
 	maxPending   = 64
 )
 
@@ -76,6 +77,7 @@ type Session struct {
 	ackDirty     bool
 	pending      map[uint64]*pending
 	queue        []fragment
+	priority     []fragment
 	reassembly   map[uint64]*assembly
 	deliver      chan []byte
 	wake         chan struct{}
@@ -135,6 +137,17 @@ func (s *Session) Wake() <-chan struct{} { return s.wake }
 func (s *Session) Done() <-chan struct{} { return s.done }
 
 func (s *Session) Send(ctx context.Context, b []byte) error {
+	return s.enqueue(ctx, b, false)
+}
+
+// SendPriority puts control traffic ahead of queued bulk messages. It has a
+// separate bounded queue so a full data backlog cannot block stream opens,
+// resets, or receive-window updates.
+func (s *Session) SendPriority(ctx context.Context, b []byte) error {
+	return s.enqueue(ctx, b, true)
+}
+
+func (s *Session) enqueue(ctx context.Context, b []byte, priority bool) error {
 	if len(b) == 0 || len(b) > maxMessage {
 		return fmt.Errorf("message size must be 1..%d", maxMessage)
 	}
@@ -149,7 +162,13 @@ func (s *Session) Send(ctx context.Context, b []byte) error {
 		return ErrClosed
 	}
 	parts := (len(b) + s.fragmentSize - 1) / s.fragmentSize
-	if len(s.queue)+parts > maxQueued {
+	limit := maxQueued
+	queued := len(s.queue)
+	if priority {
+		limit = maxPriority
+		queued = len(s.priority)
+	}
+	if queued+parts > limit {
 		return ErrQueueFull
 	}
 	s.msgSeq++
@@ -158,7 +177,12 @@ func (s *Session) Send(ctx context.Context, b []byte) error {
 		if end > len(b) {
 			end = len(b)
 		}
-		s.queue = append(s.queue, fragment{id: s.msgSeq, total: uint32(len(b)), offset: uint32(o), data: append([]byte(nil), b[o:end]...)})
+		f := fragment{id: s.msgSeq, total: uint32(len(b)), offset: uint32(o), data: append([]byte(nil), b[o:end]...)}
+		if priority {
+			s.priority = append(s.priority, f)
+		} else {
+			s.queue = append(s.queue, f)
+		}
 	}
 	s.signal()
 	return nil
@@ -199,7 +223,7 @@ func (s *Session) Stats() Stats {
 	defer s.mu.Unlock()
 	v := s.stats
 	v.InFlight = len(s.pending)
-	v.Queued = len(s.queue)
+	v.Queued = len(s.queue) + len(s.priority)
 	v.CongestionWindow = s.cwnd
 	return v
 }
@@ -210,7 +234,7 @@ func (s *Session) HasWork(now time.Time) bool {
 	if s.ackDirty {
 		return true
 	}
-	if len(s.queue) > 0 && len(s.pending) < s.cwnd {
+	if len(s.queue)+len(s.priority) > 0 && len(s.pending) < s.cwnd {
 		return true
 	}
 	for _, p := range s.pending {
@@ -249,9 +273,15 @@ func (s *Session) NextPacket(now time.Time) ([]byte, error) {
 	}
 	var data []byte
 	var dataSeq uint64
-	if len(s.queue) > 0 && len(s.pending) < s.cwnd {
-		f := s.queue[0]
-		s.queue = s.queue[1:]
+	if len(s.queue)+len(s.priority) > 0 && len(s.pending) < s.cwnd {
+		var f fragment
+		if len(s.priority) > 0 {
+			f = s.priority[0]
+			s.priority = s.priority[1:]
+		} else {
+			f = s.queue[0]
+			s.queue = s.queue[1:]
+		}
 		s.dataSeq++
 		dataSeq = s.dataSeq
 		data = make([]byte, 18+len(f.data))
@@ -294,7 +324,7 @@ func (s *Session) NextPacket(now time.Time) ([]byte, error) {
 	}
 	// A single wake token only releases one pending DNS poll. Hand another
 	// token to the next poll while sendable fragments remain.
-	if len(s.queue) > 0 && len(s.pending) < s.cwnd {
+	if len(s.queue)+len(s.priority) > 0 && len(s.pending) < s.cwnd {
 		s.signal()
 	}
 	s.stats.TXPackets++
@@ -337,7 +367,6 @@ func (s *Session) Process(wire []byte, now time.Time) error {
 		s.stats.Duplicates++
 		return nil
 	}
-	s.seen[nonceSeq] = true
 	if nonceSeq > s.maxSeen {
 		s.maxSeen = nonceSeq
 	}
@@ -393,7 +422,7 @@ func (s *Session) Process(wire []byte, now time.Time) error {
 			}
 		}
 	}
-	if newAcks > 0 && len(s.queue) > 0 && len(s.pending) < s.cwnd {
+	if newAcks > 0 && len(s.queue)+len(s.priority) > 0 && len(s.pending) < s.cwnd {
 		s.signal()
 	}
 	s.stats.RXPackets++
@@ -403,12 +432,14 @@ func (s *Session) Process(wire []byte, now time.Time) error {
 		if len(plain) != 0 || h[1] != 0 {
 			return errors.New("invalid poll payload")
 		}
+		s.seen[nonceSeq] = true
 		return nil
 	}
 	if h[1] != 1 || len(plain) < 18 {
 		return errors.New("invalid data payload")
 	}
 	if seq <= s.ackBase || s.received[seq] {
+		s.seen[nonceSeq] = true
 		s.stats.Duplicates++
 		s.ackDirty = true
 		s.signal()
@@ -427,6 +458,7 @@ func (s *Session) Process(wire []byte, now time.Time) error {
 	if err = s.addFragment(id, total, off, plain[18:], now); err != nil {
 		return err
 	}
+	s.seen[nonceSeq] = true
 	s.received[seq] = true
 	for s.received[s.ackBase+1] {
 		s.ackBase++
@@ -458,6 +490,9 @@ func (s *Session) addFragment(id uint64, total, off uint32, data []byte, now tim
 		if string(old) != string(data) {
 			return errors.New("conflicting duplicate fragment")
 		}
+		if a.count == a.total {
+			return s.deliverAssembly(id, a)
+		}
 		return nil
 	}
 	for p, v := range a.chunks {
@@ -468,18 +503,23 @@ func (s *Session) addFragment(id uint64, total, off uint32, data []byte, now tim
 	a.chunks[off] = append([]byte(nil), data...)
 	a.count += uint32(len(data))
 	if a.count == a.total {
-		b := make([]byte, total)
-		for p, v := range a.chunks {
-			copy(b[p:], v)
-		}
-		select {
-		case s.deliver <- b:
-			delete(s.reassembly, id)
-		default:
-			return errors.New("receive queue full")
-		}
+		return s.deliverAssembly(id, a)
 	}
 	return nil
+}
+
+func (s *Session) deliverAssembly(id uint64, a *assembly) error {
+	b := make([]byte, a.total)
+	for p, v := range a.chunks {
+		copy(b[p:], v)
+	}
+	select {
+	case s.deliver <- b:
+		delete(s.reassembly, id)
+		return nil
+	default:
+		return errors.New("receive queue full")
+	}
 }
 
 func (s *Session) rto() time.Duration {

@@ -7,6 +7,8 @@
 - **VPN client:** a separate, elevated process that creates its own TUN/Wintun and changes its host's IPv4 routes. It can use server Internet egress alone, or include configured agent routes with `--internal`.
 - **Operator commands:** `status`, `agent list/show/select`, `route add/del/list`, and `session kill` run on the server host against a token protected loopback API.
 
+The key distinction is **which machine's traffic changes**. An agent exposes destinations reachable *from the agent host* and leaves that host's normal networking alone. A VPN client redirects applications *on the client host* into the tunnel. Starting a VPN client does not expose its local network as an agent; starting an agent does not give its own host VPN Internet egress. A combined VPN and internal deployment needs both processes plus a server route to the agent.
+
 Undertow uses **direct UDP DNS**, addressed to a numeric server IP and port. The default synthetic domain is `t.undertow.invalid`; it must match on both ends. Public DNS delegation is not required. Allow the chosen UDP port through the server firewall. UDP/53 and virtual interfaces commonly need elevated privileges.
 
 ## Build and first session
@@ -33,7 +35,7 @@ The server prints a fingerprint. Copy `token.key` securely to the agent host, th
 undertow agent --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
 ```
 
-On the server, `sudo undertow status` should show the agent when the elevated server created `control.key`. Stop either foreground process with Ctrl+C. The server identity stays on the server. Each agent and VPN client creates its **own** Ed25519 key file (`agent.key` or `client.key`) on first run. Never copy `identity.key` to a client.
+On the server, `sudo undertow status` should show the agent under **Agents** when the elevated server created `control.key`. A connected VPN client appears under **VPN clients**; it needs no agent route for Internet egress. Stop either foreground process with Ctrl+C. The server identity stays on the server. Each agent and VPN client creates its **own** Ed25519 key file (`agent.key` or `client.key`) on first run. Never copy `identity.key` to a client.
 
 ## Enrollment choices
 

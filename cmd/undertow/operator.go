@@ -119,9 +119,10 @@ func statusCommand(args []string) error {
 		return printJSON(data)
 	}
 	var status struct {
-		Agents   []control.AgentInfo `json:"agents"`
-		Routes   []routing.Route     `json:"routes"`
-		Selected string              `json:"selected_agent"`
+		Agents   []control.AgentInfo  `json:"agents"`
+		Clients  []control.ClientInfo `json:"clients"`
+		Routes   []routing.Route      `json:"routes"`
+		Selected string               `json:"selected_agent"`
 	}
 	if err = json.Unmarshal(data, &status); err != nil {
 		return err
@@ -134,6 +135,11 @@ func statusCommand(args []string) error {
 			id = id[:18]
 		}
 		fmt.Printf("%-18s %-16s %-24s %-18s %8d %8d %7d\n", id, a.VirtualIP, a.Hostname, a.Remote, a.RXBytes, a.TXBytes, a.Streams)
+	}
+	fmt.Printf("\nVPN clients (%d)\n", len(status.Clients))
+	fmt.Printf("%-20s %-18s %-8s %8s %8s %7s %6s %6s %6s %8s\n", "Session", "Remote", "Internal", "RX", "TX", "Streams", "Queued", "Flight", "CWND", "Retrans")
+	for _, c := range status.Clients {
+		fmt.Printf("%-20d %-18s %-8t %8d %8d %7d %6d %6d %6d %8d\n", c.SessionID, c.Remote, c.Internal, c.RXBytes, c.TXBytes, c.Streams, c.Queued, c.InFlight, c.Window, c.Retransmits)
 	}
 	fmt.Printf("\nRoutes (%d)\n", len(status.Routes))
 	for _, r := range status.Routes {

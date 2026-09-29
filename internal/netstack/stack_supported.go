@@ -93,7 +93,11 @@ func serve(parent context.Context, device io.ReadWriteCloser, proxyAddress netip
 			remote, err = dialer.DialContext(openCtx, "tcp", destination)
 		}
 		if err != nil {
-			log.Printf("TCP egress dial %s failed: %v", destination, err)
+			if selected != nil {
+				log.Printf("TCP tunnel open %s failed: %v", destination, err)
+			} else {
+				log.Printf("TCP socket dial %s failed: %v", destination, err)
+			}
 			req.Complete(true)
 			return
 		}

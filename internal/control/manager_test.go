@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -19,6 +20,40 @@ import (
 type routeDevice struct {
 	mu     sync.Mutex
 	routes map[string]bool
+}
+
+func TestVPNClientAppearsInStatusAndIsRemoved(t *testing.T) {
+	table := routing.New(nil)
+	manager := NewManager(table, nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	var keys security.Keys
+	s, err := session.New(702, keys, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	streamMux := mux.New(ctx, &idleTransport{done: make(chan struct{})}, true)
+	peer := &dns.Peer{Session: s, AgentID: "client-id", Remote: "203.0.113.7:50000", Connected: time.Now(), LastSeen: time.Now()}
+	manager.RegisterClient(peer, streamMux, true)
+	request := httptest.NewRequest(http.MethodGet, "/v1/status", nil)
+	request.Header.Set("Authorization", "Bearer test-token")
+	response := httptest.NewRecorder()
+	manager.handler("test-token").ServeHTTP(response, request)
+	var status struct {
+		Agents  []AgentInfo  `json:"agents"`
+		Clients []ClientInfo `json:"clients"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &status); err != nil {
+		t.Fatal(err)
+	}
+	if len(status.Agents) != 0 || len(status.Clients) != 1 || status.Clients[0].SessionID != 702 || !status.Clients[0].Internal {
+		t.Fatalf("unexpected status: %+v", status)
+	}
+	manager.UnregisterClient(702, streamMux)
+	if got := manager.ClientList(); len(got) != 0 {
+		t.Fatalf("disconnected client remains in status: %+v", got)
+	}
+	streamMux.Close()
 }
 
 func (d *routeDevice) AddRoute(p string) error {

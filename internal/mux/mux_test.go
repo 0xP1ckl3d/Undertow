@@ -21,6 +21,40 @@ type memoryTransport struct {
 	once sync.Once
 }
 
+type fullDataQueueTransport struct{ sent []byte }
+
+func (t *fullDataQueueTransport) Send(_ context.Context, b []byte) error {
+	if len(t.sent) == 0 {
+		return session.ErrQueueFull
+	}
+	t.sent = append(t.sent, b[1])
+	return nil
+}
+
+func (t *fullDataQueueTransport) SendPriority(_ context.Context, b []byte) error {
+	t.sent = append(t.sent, b[1])
+	return nil
+}
+
+func (t *fullDataQueueTransport) Recv(ctx context.Context) ([]byte, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (t *fullDataQueueTransport) Close() error { return nil }
+
+func TestControlBypassesBlockedDataSend(t *testing.T) {
+	transport := &fullDataQueueTransport{}
+	m := &Mux{transport: transport, ctx: context.Background(), control: make(chan frame, 1), done: make(chan struct{})}
+	m.control <- frame{kind: frameOpen, id: 2, data: []byte("example.test:443")}
+	if !m.sendFrame(frame{kind: frameData, id: 2, data: []byte("bulk")}) {
+		t.Fatal("send loop stopped")
+	}
+	if !bytes.Equal(transport.sent, []byte{frameOpen, frameData}) {
+		t.Fatalf("send order = %v, want control before blocked data", transport.sent)
+	}
+}
+
 func memoryPair() (*memoryTransport, *memoryTransport) {
 	a := make(chan []byte, 4096)
 	b := make(chan []byte, 4096)
