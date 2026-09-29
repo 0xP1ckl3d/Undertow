@@ -65,9 +65,28 @@ func Open(name, address string) (*Device, error) {
 
 func (d *Device) Name() string { return d.name }
 
-// A TUN descriptor is not always accepted by Go's runtime poller. Read and
-// write it directly so an otherwise valid interface remains usable.
-func (d *Device) Read(p []byte) (int, error)  { return unix.Read(int(d.file.Fd()), p) }
+// Poll before each read so closing the TUN can release a blocked reader before
+// a VPN reconnect tries to create an interface with the same name.
+func (d *Device) Read(p []byte) (int, error) {
+	fd := int(d.file.Fd())
+	fds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
+	for {
+		n, err := unix.Poll(fds, 100)
+		if err == unix.EINTR {
+			continue
+		}
+		if err != nil {
+			return 0, err
+		}
+		if n == 0 {
+			continue
+		}
+		if fds[0].Revents&(unix.POLLERR|unix.POLLHUP|unix.POLLNVAL) != 0 {
+			return 0, unix.EBADF
+		}
+		return unix.Read(fd, p)
+	}
+}
 func (d *Device) Write(p []byte) (int, error) { return unix.Write(int(d.file.Fd()), p) }
 
 func (d *Device) AddRoute(prefix string) error {

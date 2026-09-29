@@ -259,10 +259,20 @@ func runVPN(parent context.Context, c *dns.Client, serverIP netip.Addr, internal
 	if err != nil {
 		return err
 	}
-	defer device.Close()
 	stackErr := make(chan error, 1)
+	stackDone := make(chan struct{})
 	go func() {
+		defer close(stackDone)
 		stackErr <- netstack.ServeEgress(ctx, device, prefix, func(netip.Addr) (*mux.Mux, bool) { return m, true })
+	}()
+	defer func() {
+		cancel()
+		_ = device.Close()
+		select {
+		case <-stackDone:
+		case <-time.After(2 * time.Second):
+			log.Print("VPN packet stack did not stop before reconnect")
+		}
 	}()
 	unpin, err := tun.PinServer(serverIP)
 	if err != nil {

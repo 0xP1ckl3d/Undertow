@@ -51,7 +51,7 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 			known[agent.ID] = agent
 		}
 	}
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 	scanner := bufio.NewScanner(input)
 	scanner.Buffer(make([]byte, 4096), 8192)
