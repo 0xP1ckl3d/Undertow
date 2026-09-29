@@ -49,6 +49,14 @@ func ServeAgentWithCapabilities(ctx context.Context, m *mux.Mux, caps Capabiliti
 			go serveExec(ctx, s, true)
 			continue
 		}
+		if s.Destination() == InteractiveDestination {
+			if !caps.Interactive {
+				s.Fail(errors.New("agent interactive sessions are disabled"))
+				continue
+			}
+			go serveInteractive(ctx, s)
+			continue
+		}
 		if s.Destination() == FileDestination {
 			if !caps.Upload && !caps.Download {
 				s.Fail(errors.New("agent file transfer is disabled"))
@@ -144,7 +152,7 @@ func ServeVPNInteractive(ctx context.Context, client *mux.Mux, resolve func(neti
 			return
 		}
 		go func(s *mux.Stream) {
-			if s.Destination() == ControlDestination || s.Destination() == FileDestination {
+			if s.Destination() == ControlDestination || s.Destination() == FileDestination || s.Destination() == InteractiveRelayDestination {
 				if control == nil {
 					s.Fail(errors.New("remote operator console is disabled"))
 				} else {

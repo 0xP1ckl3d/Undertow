@@ -27,6 +27,7 @@ const backgroundPIDEnv = "UNDERTOW_BACKGROUND_PID_FILE"
 
 var backgroundStop <-chan struct{}
 var backgroundConsoleHandler func(context.Context, consoleRPCRequest) consoleRPCResponse
+var backgroundInteractiveHandler func(context.Context, string, net.Conn) error
 var backgroundConsoleMu sync.RWMutex
 
 func setBackgroundConsoleHandler(handler func(context.Context, consoleRPCRequest) consoleRPCResponse) {
@@ -35,12 +36,19 @@ func setBackgroundConsoleHandler(handler func(context.Context, consoleRPCRequest
 	backgroundConsoleMu.Unlock()
 }
 
+func setBackgroundInteractiveHandler(handler func(context.Context, string, net.Conn) error) {
+	backgroundConsoleMu.Lock()
+	backgroundInteractiveHandler = handler
+	backgroundConsoleMu.Unlock()
+}
+
 type consoleRPCRequest struct {
-	Action string          `json:"action"`
-	Method string          `json:"method,omitempty"`
-	Path   string          `json:"path,omitempty"`
-	Body   json.RawMessage `json:"body,omitempty"`
-	Args   []string        `json:"args,omitempty"`
+	Action  string          `json:"action"`
+	AgentID string          `json:"agent_id,omitempty"`
+	Method  string          `json:"method,omitempty"`
+	Path    string          `json:"path,omitempty"`
+	Body    json.RawMessage `json:"body,omitempty"`
+	Args    []string        `json:"args,omitempty"`
 }
 
 type consoleRPCResponse struct {
@@ -292,6 +300,18 @@ func startBackgroundControl(pidPath string) (func(), error) {
 					if err := json.Unmarshal([]byte(request), &input); err != nil {
 						response.Error = "invalid console request"
 					} else {
+						if input.Action == "interactive" {
+							_ = conn.SetDeadline(time.Time{})
+							backgroundConsoleMu.RLock()
+							interactive := backgroundInteractiveHandler
+							backgroundConsoleMu.RUnlock()
+							if interactive == nil {
+								_, _ = io.WriteString(conn, "ERROR client console is unavailable\n")
+							} else if err := interactive(context.Background(), input.AgentID, conn); err != nil {
+								_, _ = io.WriteString(conn, "ERROR "+err.Error()+"\n")
+							}
+							return
+						}
 						if input.Action == "transfer" {
 							_ = conn.SetDeadline(time.Now().Add(30 * time.Minute))
 						}

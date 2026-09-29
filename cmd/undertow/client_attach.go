@@ -13,7 +13,10 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
+
+	"undertow/internal/pivot"
 )
 
 func attachClient(args []string) error {
@@ -69,7 +72,45 @@ func attachClientAt(path string) error {
 			fmt.Fprintln(os.Stderr, "stop VPN:", err)
 		}
 	}
-	return runConsole(ctx, os.Stdin, os.Stdout, caller, clientID, quit, routes, nil)
+	opener := func(ctx context.Context, agentID string, request pivot.InteractiveRequest) (*pivot.InteractiveSession, error) {
+		return openAttachedInteractive(ctx, path, agentID, request)
+	}
+	return runConsole(ctx, os.Stdin, os.Stdout, caller, clientID, quit, routes, nil, opener)
+}
+
+func openAttachedInteractive(ctx context.Context, path, agentID string, request pivot.InteractiveRequest) (*pivot.InteractiveSession, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var state backgroundState
+	if err := json.Unmarshal(raw, &state); err != nil {
+		return nil, err
+	}
+	host, _, err := net.SplitHostPort(state.Address)
+	if err != nil || host != "127.0.0.1" {
+		return nil, errors.New("invalid local client control address")
+	}
+	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp4", state.Address)
+	if err != nil {
+		return nil, err
+	}
+	encoded, _ := json.Marshal(consoleRPCRequest{Action: "interactive", AgentID: agentID})
+	if _, err := fmt.Fprintf(conn, "%s %s\n", state.Token, encoded); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	reader := bufio.NewReader(conn)
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		conn.Close()
+		return nil, err
+	}
+	if line != "OK\n" {
+		conn.Close()
+		return nil, errors.New(strings.TrimSpace(line))
+	}
+	return pivot.StartInteractive(ctx, conn.(*net.TCPConn), reader, request)
 }
 
 func callClientConsole(path string, request consoleRPCRequest) (consoleRPCResponse, error) {

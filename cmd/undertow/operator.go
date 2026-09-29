@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +16,7 @@ import (
 	"time"
 
 	"undertow/internal/control"
+	"undertow/internal/pivot"
 	"undertow/internal/routing"
 )
 
@@ -21,6 +24,34 @@ type operatorOptions struct {
 	address, tokenFile, via string
 	json                    bool
 	positional              []string
+}
+
+func openControlInteractive(ctx context.Context, options operatorOptions, agentID string, request pivot.InteractiveRequest) (*pivot.InteractiveSession, error) {
+	token, err := os.ReadFile(options.tokenFile)
+	if err != nil {
+		return nil, err
+	}
+	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", options.address)
+	if err != nil {
+		return nil, err
+	}
+	path := "/v1/agents/" + url.PathEscape(agentID) + "/interactive"
+	if _, err := fmt.Fprintf(conn, "CONNECT %s HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer %s\r\n\r\n", path, strings.TrimSpace(string(token))); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	reader := bufio.NewReader(conn)
+	response, err := http.ReadResponse(reader, &http.Request{Method: http.MethodConnect})
+	if err != nil {
+		conn.Close()
+		return nil, err
+	}
+	if response.StatusCode != http.StatusOK {
+		message, _ := io.ReadAll(io.LimitReader(response.Body, 1024))
+		conn.Close()
+		return nil, fmt.Errorf("interactive connection: %s: %s", response.Status, strings.TrimSpace(string(message)))
+	}
+	return pivot.StartInteractive(ctx, conn.(*net.TCPConn), reader, request)
 }
 
 func parseOperator(args []string) (operatorOptions, error) {

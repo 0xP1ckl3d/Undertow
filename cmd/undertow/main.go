@@ -316,6 +316,8 @@ func serve(args []string) error {
 						}, func() bool { return true }, func(ctx context.Context, stream *mux.Stream) {
 							if stream.Destination() == pivot.FileDestination {
 								manager.ServeFileRelay(ctx, stream)
+							} else if stream.Destination() == pivot.InteractiveRelayDestination {
+								manager.ServeInteractiveRelay(ctx, stream)
 							} else {
 								manager.ServeRemote(ctx, controlToken, p.Session.ID(), stream)
 							}
@@ -381,7 +383,7 @@ func agent(args []string) error {
 	interval := f.Duration("probe-interval", time.Second, "time between probes; 0 sends as fast as the window allows")
 	profileFlag := f.String("payload-profile", "auto", "DNS payload profile: auto, large, or small")
 	probe := f.Bool("probe", false, "run Phase 1 echo probes instead of TCP socket handling")
-	deny := f.String("deny", "", "comma-separated agent capabilities to disable: pivot,exec,hostops,upload,download,listeners")
+	deny := f.String("deny", "", "comma-separated agent capabilities to disable: pivot,exec,hostops,interactive,upload,download,listeners")
 	var advertise advertisedRoutes
 	f.Var(&advertise, "advertise-route", "IPv4 CIDR offered for client acceptance; repeatable")
 	if err := f.Parse(args); err != nil {

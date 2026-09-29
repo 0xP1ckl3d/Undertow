@@ -8,12 +8,13 @@ import (
 // Capabilities control the operations implemented by the current agent.
 // A false field rejects the matching operation before it starts.
 type Capabilities struct {
-	Pivot     bool
-	Exec      bool
-	HostOps   bool
-	Upload    bool
-	Download  bool
-	Listeners bool
+	Pivot       bool
+	Exec        bool
+	HostOps     bool
+	Interactive bool
+	Upload      bool
+	Download    bool
+	Listeners   bool
 }
 
 type CapabilityReport struct {
@@ -22,7 +23,7 @@ type CapabilityReport struct {
 }
 
 func DefaultCapabilities() Capabilities {
-	return Capabilities{Pivot: true, Exec: true, HostOps: true, Upload: true, Download: true, Listeners: true}
+	return Capabilities{Pivot: true, Exec: true, HostOps: true, Interactive: true, Upload: true, Download: true, Listeners: true}
 }
 
 func ParseDenied(raw string) (Capabilities, error) {
@@ -38,6 +39,8 @@ func ParseDenied(raw string) (Capabilities, error) {
 			caps.Exec = false
 		case "hostops":
 			caps.HostOps = false
+		case "interactive":
+			caps.Interactive = false
 		case "upload":
 			caps.Upload = false
 		case "download":
@@ -45,18 +48,18 @@ func ParseDenied(raw string) (Capabilities, error) {
 		case "listeners":
 			caps.Listeners = false
 		default:
-			return Capabilities{}, fmt.Errorf("unknown agent capability %q; supported: pivot,exec,hostops,upload,download,listeners", strings.TrimSpace(item))
+			return Capabilities{}, fmt.Errorf("unknown agent capability %q; supported: pivot,exec,hostops,interactive,upload,download,listeners", strings.TrimSpace(item))
 		}
 	}
 	return caps, nil
 }
 
 func (c Capabilities) Report() CapabilityReport {
-	report := CapabilityReport{Supported: []string{"pivot", "exec", "hostops", "upload", "download", "listeners"}, Allowed: make([]string, 0, 6)}
+	report := CapabilityReport{Supported: []string{"pivot", "exec", "hostops", "interactive", "upload", "download", "listeners"}, Allowed: make([]string, 0, 7)}
 	for _, item := range []struct {
 		name    string
 		allowed bool
-	}{{"pivot", c.Pivot}, {"exec", c.Exec}, {"hostops", c.HostOps}, {"upload", c.Upload}, {"download", c.Download}, {"listeners", c.Listeners}} {
+	}{{"pivot", c.Pivot}, {"exec", c.Exec}, {"hostops", c.HostOps}, {"interactive", c.Interactive}, {"upload", c.Upload}, {"download", c.Download}, {"listeners", c.Listeners}} {
 		if item.allowed {
 			report.Allowed = append(report.Allowed, item.name)
 		}

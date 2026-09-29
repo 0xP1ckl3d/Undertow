@@ -20,7 +20,7 @@ func TestParseDeniedCapabilities(t *testing.T) {
 		t.Fatalf("capabilities not independent: %+v", caps)
 	}
 	report := caps.Report()
-	if !reflect.DeepEqual(report.Supported, []string{"pivot", "exec", "hostops", "upload", "download", "listeners"}) || !reflect.DeepEqual(report.Allowed, []string{"pivot", "hostops", "download", "listeners"}) {
+	if !reflect.DeepEqual(report.Supported, []string{"pivot", "exec", "hostops", "interactive", "upload", "download", "listeners"}) || !reflect.DeepEqual(report.Allowed, []string{"pivot", "hostops", "interactive", "download", "listeners"}) {
 		t.Fatalf("report=%+v", report)
 	}
 	if _, err := ParseDenied("shell"); err == nil || !strings.Contains(err.Error(), "unknown agent capability") {

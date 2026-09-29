@@ -21,6 +21,29 @@ type consoleEditor struct {
 	cursor    int
 	history   []string
 	historyAt int
+	rawInput  chan byte
+	rawDetach chan struct{}
+}
+
+func (e *consoleEditor) beginInteractive() (<-chan byte, <-chan struct{}) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.rawInput = make(chan byte, 4096)
+	e.rawDetach = make(chan struct{})
+	return e.rawInput, e.rawDetach
+}
+
+func (e *consoleEditor) endInteractive() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.rawDetach != nil {
+		select {
+		case <-e.rawDetach:
+		default:
+			close(e.rawDetach)
+		}
+	}
+	e.rawInput, e.rawDetach = nil, nil
 }
 
 func newConsoleEditor(output io.Writer, vpn bool) *consoleEditor {
@@ -56,6 +79,30 @@ func (e *consoleEditor) read(ctx context.Context, input io.Reader, lines chan<- 
 			return err
 		}
 		e.mu.Lock()
+		if e.rawInput != nil {
+			inputChannel, detach := e.rawInput, e.rawDetach
+			e.mu.Unlock()
+			if char == 0x1d {
+				select {
+				case <-detach:
+				default:
+					close(detach)
+				}
+				continue
+			}
+			if char == '\r' {
+				char = '\n'
+			}
+			for _, b := range []byte(string(char)) {
+				select {
+				case inputChannel <- b:
+				case <-detach:
+				case <-ctx.Done():
+					return nil
+				}
+			}
+			continue
+		}
 		switch char {
 		case '\r', '\n':
 			line := string(e.line)
@@ -162,9 +209,9 @@ func (e *consoleEditor) complete() {
 	if strings.ContainsAny(input, " \t") || e.cursor != len(e.line) {
 		return
 	}
-	commands := []string{"agents", "use", "status", "routes", "help", "quit", "exec", "pwd", "ls", "stat", "mkdir", "rm", "whoami", "ps", "privileges", "env", "interfaces", "dns", "route-table"}
+	commands := []string{"agents", "use", "status", "routes", "help", "quit", "exec", "shell", "pwd", "ls", "stat", "mkdir", "rm", "whoami", "ps", "privileges", "env", "interfaces", "dns", "route-table"}
 	if e.selected {
-		commands = []string{"exec", "routes", "route", "status", "back", "help", "quit", "pwd", "ls", "stat", "mkdir", "rm", "whoami", "ps", "privileges", "env", "interfaces", "dns", "route-table"}
+		commands = []string{"exec", "shell", "routes", "route", "status", "back", "help", "quit", "pwd", "ls", "stat", "mkdir", "rm", "whoami", "ps", "privileges", "env", "interfaces", "dns", "route-table"}
 		if e.vpn {
 			commands = append(commands, "upload", "download")
 		}

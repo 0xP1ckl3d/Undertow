@@ -3,12 +3,17 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
+	"net"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"undertow/internal/control"
 	"undertow/internal/pivot"
@@ -34,6 +39,62 @@ func TestLocalClientConsoleRPC(t *testing.T) {
 	}
 }
 
+func TestLocalClientInteractiveAttach(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "client.pid")
+	cleanup, err := startBackgroundControl(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	setBackgroundInteractiveHandler(func(_ context.Context, id string, conn net.Conn) error {
+		if id != "agent-a" {
+			return fmt.Errorf("unexpected agent %q", id)
+		}
+		if _, err := io.WriteString(conn, "OK\n"); err != nil {
+			return err
+		}
+		reader := bufio.NewReader(conn)
+		if _, err := reader.ReadBytes('\n'); err != nil {
+			return err
+		}
+		if _, err := conn.Write([]byte{'R', 0, 0, 0, 0}); err != nil {
+			return err
+		}
+		var frame [6]byte
+		if _, err := io.ReadFull(reader, frame[:]); err != nil {
+			return err
+		}
+		if frame[0] != 'I' || frame[5] != 'x' {
+			return fmt.Errorf("input frame=%v", frame)
+		}
+		if _, err := conn.Write([]byte{'O', 0, 0, 0, 1, 'y', 'X', 0, 0, 0, 4, 0, 0, 0, 0}); err != nil {
+			return err
+		}
+		_ = conn.(*net.TCPConn).CloseWrite()
+		_, _ = io.Copy(io.Discard, reader)
+		return nil
+	})
+	defer setBackgroundInteractiveHandler(nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	live, err := openAttachedInteractive(ctx, path, "agent-a", pivot.InteractiveRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer live.Close()
+	if err := live.Send([]byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	kind, payload, err := live.Read()
+	if err != nil || kind != pivot.InteractiveOutput || string(payload) != "y" {
+		t.Fatalf("output=%q %q %v", kind, payload, err)
+	}
+	kind, _, err = live.Read()
+	if err != nil || kind != pivot.InteractiveExit {
+		t.Fatalf("exit=%q %v", kind, err)
+	}
+}
+
 func TestStatusShowsAgentAndVPNHostnames(t *testing.T) {
 	report := pivot.Capabilities{Pivot: true, Exec: false, Upload: false, Download: true}.Report()
 	data, err := json.Marshal(map[string]any{
@@ -50,7 +111,7 @@ func TestStatusShowsAgentAndVPNHostnames(t *testing.T) {
 	if !strings.Contains(output.String(), "agent-host") || !strings.Contains(output.String(), "vpn-host") {
 		t.Fatalf("hostnames missing from status: %s", output.String())
 	}
-	if !strings.Contains(output.String(), "supported=pivot,exec,hostops,upload,download,listeners allowed=pivot,download") {
+	if !strings.Contains(output.String(), "supported=pivot,exec,hostops,interactive,upload,download,listeners allowed=pivot,download") {
 		t.Fatalf("agent capabilities missing from status: %s", output.String())
 	}
 }

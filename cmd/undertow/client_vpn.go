@@ -178,9 +178,21 @@ func clientCommand(args []string) error {
 		}
 		return response
 	})
+	setBackgroundInteractiveHandler(func(ctx context.Context, agentID string, conn net.Conn) error {
+		live.mu.RLock()
+		session := live.session
+		live.mu.RUnlock()
+		return control.BridgeClientInteractive(ctx, session, agentID, conn)
+	})
 	if *interactive {
+		opener := func(ctx context.Context, agentID string, request pivot.InteractiveRequest) (*pivot.InteractiveSession, error) {
+			live.mu.RLock()
+			session := live.session
+			live.mu.RUnlock()
+			return control.OpenClientInteractive(ctx, session, agentID, request)
+		}
 		go func() {
-			if err := runConsole(ctx, os.Stdin, os.Stdout, live.call, live.id, stop, live.routeCommand, live.events); err != nil && ctx.Err() == nil {
+			if err := runConsole(ctx, os.Stdin, os.Stdout, live.call, live.id, stop, live.routeCommand, live.events, opener); err != nil && ctx.Err() == nil {
 				log.Printf("console: %v", err)
 				live.notify("Console failed: " + err.Error())
 				stop()

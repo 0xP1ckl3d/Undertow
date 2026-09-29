@@ -41,6 +41,7 @@ quit
 | `route add CIDR AGENT_ID` | Main menu | Create a global internal route via the named agent. |
 | `route del CIDR` | Either menu | Remove a global internal route. |
 | `exec PROGRAM [ARGS]` | Selected agent | Start one program directly on this agent. |
+| `shell [PROGRAM ARGS]` | Selected agent | Open a live command session; Ctrl-] closes the shell and returns to the Undertow menu. |
 | `exec AGENT_ID PROGRAM [ARGS]` | Main menu | Start one program directly on the named agent. |
 | `HOST_OP AGENT_ID [ARGS]` | Main menu | Run a built-in host operation on the named agent. See the table below. |
 
@@ -103,6 +104,8 @@ From the main VPN menu, use `forward add AGENT_ID AGENT_BIND CLIENT_TARGET`, `fo
 ## Running an agent program and transferring files
 
 In an agent menu, `exec whoami` starts that executable directly. To run PowerShell explicitly on a Windows agent, use `exec powershell.exe -NoProfile -Command whoami`. `exec` has no implicit operating system shell, so shell operators are not interpreted unless you explicitly start a shell program. One-shot execution has a 30 second limit and captures up to 32 KiB each of standard output and standard error. The agent's `--deny=exec` setting rejects it.
+
+Use `shell` in the selected-agent menu for a long-lived session. On a Linux agent this opens `/bin/sh` with a PTY; on Windows it opens `cmd.exe` through interactive pipes. Use `shell /bin/bash` or `shell powershell.exe -NoProfile` to choose another program. Input and output stream in both directions until the program exits or you press Ctrl-]. The console remains connected to Undertow and other agent sessions continue. An attached client console can open a new shell after detaching and reattaching. The separate `--deny=interactive` agent setting blocks live sessions without changing one-shot `exec` or host operations.
 
 Uploads and downloads pass through the server and verify SHA-256. The destination parent directory must exist and the destination file must not already exist. Relative local paths resolve from the console's working directory; relative remote paths resolve from the agent process's working directory. Transfers have a 30 minute limit. Agents can reject these independently with `--deny=upload` or `--deny=download`.
 

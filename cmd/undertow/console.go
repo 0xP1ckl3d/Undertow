@@ -46,10 +46,13 @@ func consoleCommand(args []string) error {
 	caller := func(_ context.Context, method, path string, body any) ([]byte, error) {
 		return callControl(options, method, path, body)
 	}
-	return runConsole(ctx, os.Stdin, os.Stdout, caller, nil, nil, nil, nil)
+	opener := func(ctx context.Context, agentID string, request pivot.InteractiveRequest) (*pivot.InteractiveSession, error) {
+		return openControlInteractive(ctx, options, agentID, request)
+	}
+	return runConsole(ctx, os.Stdin, os.Stdout, caller, nil, nil, nil, nil, opener)
 }
 
-func runConsole(ctx context.Context, input io.Reader, output io.Writer, call consoleCaller, clientID func() uint64, quit func(), clientRoutes clientRouteAction, events <-chan string) error {
+func runConsole(ctx context.Context, input io.Reader, output io.Writer, call consoleCaller, clientID func() uint64, quit func(), clientRoutes clientRouteAction, events <-chan string, openers ...interactiveOpener) error {
 	fmt.Fprintln(output, "Interactive console. Type agents to list agents, help for commands.")
 	vpnClient := clientID != nil
 	selectedID, selectedLabel := "", ""
@@ -237,6 +240,20 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 			fmt.Fprintf(output, "Selected %s (%s). Type help for agent commands.\n", selectedLabel, agent.ID)
 			continue
 		}
+		if args[0] == "shell" || args[0] == "interactive" {
+			if selectedID == "" {
+				fmt.Fprintln(output, "error: select an agent first with use AGENT_NUMBER")
+				continue
+			}
+			if len(openers) == 0 || openers[0] == nil {
+				fmt.Fprintln(output, "error: interactive agent sessions unavailable")
+				continue
+			}
+			if err := runInteractiveConsole(ctx, output, editor, openers[0], selectedID, args[1:]); err != nil {
+				fmt.Fprintln(output, "error:", err)
+			}
+			continue
+		}
 		if selectedID != "" {
 			switch args[0] {
 			case "exec":
@@ -339,6 +356,7 @@ func printConsoleHelp(output io.Writer, vpnClient, selected bool) {
 	if selected {
 		fmt.Fprint(output, `Agent commands:
   exec PROGRAM [ARGS]    Run a program on the selected agent
+  shell [PROGRAM ARGS]   Open a live shell; Ctrl-] closes only this shell
   pwd                    Agent working directory
   ls [PATH]              List a directory
   stat PATH              Show file metadata
@@ -382,7 +400,7 @@ Quote paths or arguments containing spaces. Programs run without a shell.
   help                   Show this menu
   background             Detach console; keep VPN running
   quit                   Stop the VPN and exit
-Inside an agent, use exec PROGRAM, upload LOCAL REMOTE, download REMOTE LOCAL, or route accept CIDR.
+Inside an agent, use shell, exec PROGRAM, upload LOCAL REMOTE, download REMOTE LOCAL, or route accept CIDR.
 Host commands: pwd, ls, stat, mkdir, rm, whoami, ps, privileges, env, interfaces, dns, route-table.
 `)
 		return
@@ -395,7 +413,7 @@ Host commands: pwd, ls, stat, mkdir, rm, whoami, ps, privileges, env, interfaces
   route del CIDR         Remove a global route
   help                   Show this menu
   quit                   Exit the console
-Inside an agent, use exec PROGRAM or route add CIDR.
+Inside an agent, use shell, exec PROGRAM or route add CIDR.
 Host commands: pwd, ls, stat, mkdir, rm, whoami, ps, privileges, env, interfaces, dns, route-table.
 `)
 }
