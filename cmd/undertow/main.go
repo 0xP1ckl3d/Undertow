@@ -81,6 +81,12 @@ func main() {
 		err = sessionCommand(os.Args[2:])
 	case "version":
 		fmt.Printf("undertow %s (%s)\n", version, commit)
+	case "examples":
+		if len(os.Args) != 2 {
+			err = errors.New("usage: undertow examples")
+		} else {
+			err = writeExamples(os.Stdout)
+		}
 	default:
 		_ = writeHelp(os.Stderr, "")
 		os.Exit(2)

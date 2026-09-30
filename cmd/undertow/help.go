@@ -20,13 +20,15 @@ func writeHelp(w io.Writer, topic string) error {
 	var body string
 	switch topic {
 	case "":
-		body = `Undertow — authenticated direct-DNS pivot and IPv4 VPN
+		body = `Undertow — encrypted access to internal networks and IPv4 Internet egress
+
+What do you want to do? Run 'undertow examples' for commands by machine.
+Use 'undertow help server|agent|client' for all flags.
 
 Roles:
-  server   Receives DNS/UDP sessions. Optional proxy TUN for internal routes.
-  agent    Unprivileged process on an internal host; opens target sockets.
-  client   Privileged process on a separate host; routes Internet traffic,
-           internal agent networks, or both through its local TUN/Wintun.
+  server   Accepts connections; add --tun when this host needs internal routes.
+  agent    Runs without elevation where internal targets are reachable.
+  client   Routes traffic from this host through a local TUN/Wintun; elevated.
 
 An agent exposes destinations reachable from its host, without changing that
 host's routes. A client routes selected prefixes on its own host; --internal
@@ -51,6 +53,7 @@ Commands:
   status     Show connected agents, VPN clients, and routes.
   route      Add, remove, or list agent pivot routes.
   session    Disconnect an agent session.
+  examples   Show common setups with commands by machine.
   version    Print build version.
 
 Run 'undertow help COMMAND' for flags and examples, or see README.md.
@@ -292,11 +295,61 @@ Usage: undertow session kill AGENT_ID [--control IP:PORT] [--control-token-file 
 AGENT_ID is shown by 'undertow status'. This disconnects the current
 session; a running agent may reconnect automatically.
 `
+	case "examples":
+		return writeExamples(w)
 	case "version":
 		body = "undertow version — print the build version and commit.\n"
 	default:
 		return fmt.Errorf("unknown help topic %q", topic)
 	}
 	_, err := io.WriteString(w, body)
+	return err
+}
+
+func writeExamples(w io.Writer) error {
+	_, err := io.WriteString(w, `Undertow examples (direct DNS on UDP/53)
+
+First, on SERVER: undertow init
+Copy token.key securely to AGENT/CLIENT; keep identity.key on SERVER.
+Replace SERVER_IP, FINGERPRINT, AGENT_ID, and example addresses.
+SERVER usually needs sudo for UDP/53; --tun and CLIENT need root/Admin.
+
+pivot — reach an internal subnet from SERVER through AGENT:
+  SERVER  sudo undertow server --tun --listen 0.0.0.0:53
+  AGENT  undertow agent --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
+  SERVER  sudo undertow status --json
+  SERVER  sudo undertow route add 10.20.0.0/16 --via AGENT_ID
+
+internal — reach an agent network from CLIENT, keeping normal Internet:
+  SERVER  sudo undertow server --listen 0.0.0.0:53
+  AGENT  undertow agent --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
+  CLIENT  sudo undertow client --internal --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
+  CLIENT console  agents
+  CLIENT console  use 1
+  CLIENT console  routes
+  CLIENT console  route accept 10.20.0.0/16
+
+vpn — route CLIENT IPv4 Internet traffic through SERVER:
+  SERVER  sudo undertow server --listen 0.0.0.0:53
+  CLIENT  sudo undertow client --vpn --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
+
+vpn-internal — Internet through SERVER, internal subnet through AGENT:
+  SERVER  sudo undertow server --listen 0.0.0.0:53
+  AGENT  undertow agent --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
+  CLIENT  sudo undertow client --vpn --internal --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
+  CLIENT console  agents
+  CLIENT console  use 1
+  CLIENT console  routes
+  CLIENT console  route accept 10.20.0.0/16
+
+forward — reach one internal TCP service without a TUN:
+  SERVER  sudo undertow server --listen 0.0.0.0:53 --forward 127.0.0.1:18080=10.20.0.50:80
+  AGENT  undertow agent --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
+  SERVER  curl http://127.0.0.1:18080/
+
+Use 'route add CIDR' in the client console if a reachable route is not
+advertised. Type 'quit' in the client console to stop it and remove routes;
+Ctrl+C stops foreground server/agent. See docs/quickstart.md for full steps.
+`)
 	return err
 }
