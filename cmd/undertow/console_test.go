@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"undertow/internal/control"
 	"undertow/internal/pivot"
@@ -77,6 +78,72 @@ func TestBackgroundCommandDetachesWithoutStoppingVPN(t *testing.T) {
 	}
 	if stopped || !strings.Contains(output.String(), "VPN continues") {
 		t.Fatalf("background stopped VPN or failed to report detach: %q", output.String())
+	}
+}
+
+func TestServerConsoleDetachAndStopAreDistinct(t *testing.T) {
+	for _, command := range []string{"background", "quit", "exit"} {
+		t.Run(command, func(t *testing.T) {
+			stopped := false
+			var output bytes.Buffer
+			err := runConsole(context.Background(), strings.NewReader(command+"\n"), &output, nil, nil, nil, nil, nil, consoleFeatures{
+				serverAttached: true,
+				stopServer:     func() error { stopped = true; return nil },
+			})
+			if err != nil || stopped || !strings.Contains(output.String(), "Server continues") {
+				t.Fatalf("command=%q err=%v stopped=%v output=%s", command, err, stopped, output.String())
+			}
+		})
+	}
+	stopped := false
+	var output bytes.Buffer
+	err := runConsole(context.Background(), strings.NewReader("stop\n"), &output, nil, nil, nil, nil, nil, consoleFeatures{
+		serverAttached: true,
+		stopServer:     func() error { stopped = true; return nil },
+	})
+	if err != nil || !stopped || !strings.Contains(output.String(), "Server stopped") {
+		t.Fatalf("stop err=%v stopped=%v output=%s", err, stopped, output.String())
+	}
+}
+
+func TestServerConsoleLogs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "server.log")
+	if err := os.WriteFile(path, []byte("first\nsecond\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	if err := showServerLogs(context.Background(), &output, path, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "first\nsecond") {
+		t.Fatalf("logs output=%q", output.String())
+	}
+}
+
+func TestServerConsoleLogsFollowUntilInput(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "server.log")
+	if err := os.WriteFile(path, []byte("first\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	lines := make(chan string, 1)
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
+		if err == nil {
+			_, _ = file.WriteString("new event\n")
+			_ = file.Close()
+		}
+		time.Sleep(500 * time.Millisecond)
+		lines <- ""
+	}()
+	var output bytes.Buffer
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := showServerLogs(ctx, &output, path, true, lines); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "new event") {
+		t.Fatalf("follow missed appended line: %q", output.String())
 	}
 }
 

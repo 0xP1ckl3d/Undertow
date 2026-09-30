@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -163,6 +164,9 @@ func initKeys(args []string) error {
 }
 
 func serve(args []string) error {
+	if len(args) > 0 && args[0] == "attach" {
+		return attachServer(args[1:])
+	}
 	f := flag.NewFlagSet("server", flag.ContinueOnError)
 	lifecycle := addLifecycleFlags(f, "server")
 	listen := f.String("listen", "0.0.0.0:53", "direct DNS UDP listen address")
@@ -187,6 +191,20 @@ func serve(args []string) error {
 	}
 	if f.NArg() != 0 {
 		return fmt.Errorf("unexpected server argument %q; use 'undertow server --listen ...'", f.Arg(0))
+	}
+	if !*lifecycle.background && !*lifecycle.foreground && !*lifecycle.stop && os.Getenv(backgroundModeEnv) != "server" && isConsoleTerminal(os.Stdin) {
+		logPath, err := filepath.Abs(*lifecycle.logFile)
+		if err != nil {
+			return err
+		}
+		pidPath, err := filepath.Abs(*lifecycle.pidFile)
+		if err != nil {
+			return err
+		}
+		if err := launchBackground("server", args, logPath, pidPath); err != nil {
+			return err
+		}
+		return attachServerAt(pidPath, *controlListen, *controlTokenPath, logPath)
 	}
 	handled, cleanup, err := lifecycle.handle(args)
 	if err != nil || handled {

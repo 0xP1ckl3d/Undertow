@@ -27,10 +27,13 @@ type consoleCaller func(context.Context, string, string, any) ([]byte, error)
 type clientRouteAction func(context.Context, []string, io.Writer) error
 type clientTransferAction func(context.Context, clientFileRequest, func(pivot.TransferProgress)) (pivot.FileMessage, error)
 type consoleFeatures struct {
-	open     interactiveOpener
-	script   scriptOpener
-	wasm     wasmOpener
-	transfer clientTransferAction
+	open           interactiveOpener
+	script         scriptOpener
+	wasm           wasmOpener
+	transfer       clientTransferAction
+	serverLogPath  string
+	serverAttached bool
+	stopServer     func() error
 }
 
 type clientFileRequest struct {
@@ -48,6 +51,10 @@ func consoleCommand(args []string) error {
 	if len(options.positional) != 0 {
 		return errors.New("usage: undertow console [--control IP:PORT] [--control-token-file PATH]")
 	}
+	return consoleCommandWithOptions(options, consoleFeatures{})
+}
+
+func consoleCommandWithOptions(options operatorOptions, lifecycle consoleFeatures) error {
 	ctx, stop := commandContext()
 	defer stop()
 	caller := func(_ context.Context, method, path string, body any) ([]byte, error) {
@@ -62,12 +69,17 @@ func consoleCommand(args []string) error {
 	wasm := func(ctx context.Context, agentID string, module []byte, args []string, stdin []byte) (*pivot.InteractiveSession, error) {
 		return openControlWASM(ctx, options, agentID, module, args, stdin)
 	}
-	return runConsole(ctx, os.Stdin, os.Stdout, caller, nil, nil, nil, nil, consoleFeatures{open: opener, script: script, wasm: wasm})
+	lifecycle.open, lifecycle.script, lifecycle.wasm = opener, script, wasm
+	return runConsole(ctx, os.Stdin, os.Stdout, caller, nil, nil, nil, nil, lifecycle)
 }
 
 func runConsole(ctx context.Context, input io.Reader, output io.Writer, call consoleCaller, clientID func() uint64, quit func(), clientRoutes clientRouteAction, events <-chan string, features ...consoleFeatures) error {
 	fmt.Fprintln(output, "Interactive console. Type agents to list agents, help for commands.")
 	vpnClient := clientID != nil
+	var serverConsole consoleFeatures
+	if len(features) > 0 {
+		serverConsole = features[0]
+	}
 	selectedID, selectedLabel := "", ""
 	known := make(map[string]control.AgentInfo)
 	type agentRefresh struct {
@@ -101,6 +113,7 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 		}
 		defer restore()
 		editor = newConsoleEditor(output, vpnClient)
+		editor.serverAttached = serverConsole.serverAttached
 		go func() { scanDone <- editor.read(ctx, input, lines) }()
 	} else {
 		scanner := bufio.NewScanner(input)
@@ -141,6 +154,8 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 			if editor != nil && errors.Is(err, io.EOF) {
 				if vpnClient {
 					fmt.Fprintln(output, "\nConsole detached. VPN continues; reconnect with 'undertow client attach'.")
+				} else if serverConsole.serverAttached {
+					fmt.Fprintln(output, "\nConsole detached. Server continues; reconnect with 'undertow server attach'.")
 				}
 				return nil
 			}
@@ -211,15 +226,50 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 		if args[0] == "quit" || args[0] == "exit" {
 			if quit != nil {
 				quit()
+			} else if serverConsole.serverAttached {
+				fmt.Fprintln(output, "Console detached. Server continues; reconnect with 'undertow server attach'.")
 			}
 			return nil
 		}
-		if args[0] == "background" && vpnClient {
-			fmt.Fprintln(output, "Console detached. VPN continues in the background; reconnect with 'undertow client attach'.")
+		if args[0] == "background" && (vpnClient || serverConsole.serverAttached) {
+			if vpnClient {
+				fmt.Fprintln(output, "Console detached. VPN continues in the background; reconnect with 'undertow client attach'.")
+			} else {
+				fmt.Fprintln(output, "Console detached. Server continues in the background; reconnect with 'undertow server attach'.")
+			}
 			return nil
+		}
+		if args[0] == "stop" && serverConsole.stopServer != nil {
+			if len(args) != 1 {
+				fmt.Fprintln(output, "error: use stop without arguments")
+				continue
+			}
+			if err := serverConsole.stopServer(); err != nil {
+				fmt.Fprintln(output, "error: stop server:", err)
+				continue
+			}
+			fmt.Fprintln(output, "Server stopped.")
+			return nil
+		}
+		if args[0] == "logs" && serverConsole.serverLogPath != "" {
+			if len(args) > 2 || (len(args) == 2 && args[1] != "follow") {
+				fmt.Fprintln(output, "error: use logs or logs follow")
+				continue
+			}
+			if err := showServerLogs(ctx, output, serverConsole.serverLogPath, len(args) == 2, lines); err != nil {
+				fmt.Fprintln(output, "error: logs:", err)
+			}
+			continue
 		}
 		if args[0] == "help" {
 			printConsoleHelp(output, vpnClient, selectedID != "")
+			if serverConsole.serverAttached {
+				fmt.Fprintln(output, "  logs                   Show recent server log lines")
+				fmt.Fprintln(output, "  logs follow            Stream new log lines; Enter returns")
+				fmt.Fprintln(output, "  background             Detach console; keep server running")
+				fmt.Fprintln(output, "  stop                   Gracefully stop the server")
+				fmt.Fprintln(output, "  quit / exit            Detach console; keep server running")
+			}
 			continue
 		}
 		if args[0] == "back" {
@@ -432,7 +482,7 @@ func printConsoleHelp(output io.Writer, vpnClient, selected bool) {
   show                   Show detailed telemetry for this agent
   back                   Return to the main menu
   help                   Show this menu
-  quit                   Exit the console
+  quit                   Leave the console (server detaches; client stops)
 Quote paths or arguments containing spaces. Programs run without a shell.
 `)
 		if vpnClient {
@@ -473,7 +523,7 @@ Host commands: pwd, ls, stat, mkdir, rm, whoami, ps, privileges, env, interfaces
   jobs                   List background tasks
   route del CIDR         Remove a global route
   help                   Show this menu
-  quit                   Exit the console
+  quit                   Detach the server console
 Inside an agent, use shell, exec PROGRAM, run-script, run-wasm or route add CIDR.
 Host commands: pwd, ls, stat, mkdir, rm, whoami, ps, privileges, env, interfaces, dns, route-table.
 `)

@@ -100,7 +100,7 @@ func addLifecycleFlags(f *flag.FlagSet, mode string) *lifecycleFlags {
 	return &lifecycleFlags{
 		mode:       mode,
 		background: f.Bool("background", false, "run in the background"),
-		foreground: f.Bool("foreground", false, "run in the foreground (default)"),
+		foreground: f.Bool("foreground", false, "run as a foreground worker without an attached console"),
 		stop:       f.Bool("stop", false, "gracefully stop the background process"),
 		logFile:    f.String("log-file", "undertow-"+mode+".log", "background log path"),
 		pidFile:    f.String("pid-file", "undertow-"+mode+".pid", "background process state path"),

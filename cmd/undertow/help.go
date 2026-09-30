@@ -26,7 +26,8 @@ What do you want to do? Run 'undertow examples' for commands by machine.
 Use 'undertow help server|agent|client' for all flags.
 
 Roles:
-  server   Accepts connections; add --tun when this host needs internal routes.
+  server   Accepts connections and opens its operator console in a terminal.
+           Add --tun when the server host needs internal routes.
   agent    Runs without elevation where internal targets are reachable.
   client   Routes traffic from this host through a local TUN/Wintun; elevated.
 
@@ -46,7 +47,7 @@ Setup:
 
 Commands:
   init       Create server identity and enrollment token.
-  server     Run the DNS listener and operator control API.
+  server     Run the DNS listener and operator console; 'server attach' returns.
   agent      Connect an internal host without changing its routes.
   client     Run a privileged IPv4 tunnel; 'client attach' opens its console.
   console    Open an interactive server operator console.
@@ -74,9 +75,10 @@ securely to agents and VPN clients; never copy identity.key to them.
 The identity file is reused on subsequent starts. An existing token is kept.
 `
 	case "server":
-		body = `undertow server — direct-DNS listener and optional proxy interface
+		body = `undertow server — direct-DNS listener and operator console
 
 Usage: undertow server [FLAGS]
+       undertow server attach [--pid-file PATH] [--control IP:PORT]
 
 Connection and identity:
   --listen IP:PORT          UDP listener (default 0.0.0.0:53).
@@ -105,16 +107,25 @@ Operator API and diagnostics:
   --probe-echo              Echo transport probes; disables normal streams.
 
 Lifecycle:
-  --foreground              Run attached to the terminal (default).
-  --background              Start a detached process, log and PID file.
+  --foreground              Run a foreground worker without the console.
+  --background              Start a detached worker, log and PID file.
   --stop                    Gracefully stop a background server.
   --log-file PATH           Background log (default undertow-server.log).
   --pid-file PATH           Background state (default undertow-server.pid).
 
 Examples:
-  undertow server --listen 0.0.0.0:53 --foreground
+  sudo undertow server --listen 0.0.0.0:53
+  sudo undertow server attach
   sudo undertow server --listen 0.0.0.0:53 --tun --background
   sudo undertow server --stop
+
+In a terminal, server starts a worker and opens the operator console.
+Type 'agents', 'use 1', and 'routes'. 'background', 'quit', and 'exit'
+detach while the server continues. 'logs' shows recent worker output;
+'logs follow' streams it until Enter. Type 'stop' to shut down gracefully.
+Use 'server attach' to return after detaching. Custom --pid-file,
+--control, --control-token-file, and --log-file values must be passed again
+to attach. Use --foreground for a service manager or direct debugging.
 
 The server proxy TUN is for internal pivot routes; VPN Internet egress uses
 server sockets and does not require --tun. Use one 'server' subcommand only.
@@ -146,7 +157,7 @@ Usage: undertow agent --server IP:PORT [--fingerprint HEX | --trust-on-first-use
   --probe-size BYTES       Probe payload (16–65536; default 64).
   --probe-interval D       Delay between probes (default 1s; 0=max speed).
 
-  --foreground             Run attached to the terminal (default).
+  --foreground             Run attached to the terminal (agent default).
   --background             Run detached with a log and PID file.
   --stop                   Gracefully stop a background agent.
   --log-file PATH          Default undertow-agent.log.
@@ -193,7 +204,7 @@ Usage: undertow client (--vpn | --internal | --vpn --internal) --server IP:PORT 
                            terminal starts open it by default.
   --routes-file PATH       Persist accepted client routes (default client-routes.json).
 
-  --foreground             Open an attached console when in a terminal.
+  --foreground             Run a foreground worker without a console.
   --background             Run detached with a log and PID file.
   --stop                   Gracefully stop and remove owned VPN routes.
   --log-file PATH          Default undertow-client.log.
@@ -227,7 +238,7 @@ CIDR' there; 'back' returns to the main menu. Important connection and agent
 events appear in the console; routine logs go to --log-file.
 `
 	case "console":
-		body = `undertow console — interactive operator console on the server host
+		body = `undertow console — attach to a running server's operator API
 
 Usage: undertow console [--control IP:PORT] [--control-token-file PATH]
 
@@ -248,6 +259,8 @@ Use 'run-wasm MODULE_FILE [ARGS]' to execute a WASI module from memory. Add
 '--background' to make a job; '--stdin LOCAL_FILE' supplies up to 64 KiB of
 stdin. --deny=wasm blocks it independently. Modules are limited to 4 MiB,
 16 MiB guest memory, 4 MiB output, 2 minutes and two concurrent agent runs.
+For normal terminal use, 'undertow server' opens this console automatically;
+'undertow server attach' reconnects to its worker after detaching.
 Use 'job start PROGRAM [ARGS]' inside the agent menu for a task that should
 continue while the console is detached. 'jobs', 'job show ID', 'job output ID',
 and 'job cancel ID' manage it.
@@ -344,14 +357,16 @@ func writeExamples(w io.Writer) error {
 
 First, on SERVER: undertow init
 Copy token.key securely to AGENT/CLIENT; keep identity.key on SERVER.
-Replace SERVER_IP, FINGERPRINT, AGENT_ID, and example addresses.
+Replace SERVER_IP, FINGERPRINT, and example addresses.
 SERVER usually needs sudo for UDP/53; --tun and CLIENT need root/Admin.
 
 pivot — reach an internal subnet from SERVER through AGENT:
   SERVER  sudo undertow server --tun --listen 0.0.0.0:53
   AGENT  undertow agent --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
-  SERVER  sudo undertow status --json
-  SERVER  sudo undertow route add 10.20.0.0/16 --via AGENT_ID
+  SERVER console  agents
+  SERVER console  use 1
+  SERVER console  show
+  SERVER console  route add 10.20.0.0/16
 
 internal — reach an agent network from CLIENT, keeping normal Internet:
   SERVER  sudo undertow server --listen 0.0.0.0:53
@@ -381,8 +396,9 @@ forward — reach one internal TCP service without a TUN:
   SERVER  curl http://127.0.0.1:18080/
 
 Use 'route add CIDR' in the client console if a reachable route is not
-advertised. Type 'quit' in the client console to stop it and remove routes;
-Ctrl+C stops foreground server/agent. See docs/quickstart.md for full steps.
+advertised. Type 'quit' in the client console to stop it and remove routes.
+On the server, 'quit' detaches and 'stop' shuts down. Ctrl+C stops a
+foreground agent. See docs/quickstart.md for full steps.
 `)
 	return err
 }

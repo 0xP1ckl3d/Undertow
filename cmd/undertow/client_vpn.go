@@ -65,10 +65,10 @@ func clientCommand(args []string) error {
 	if !*lifecycle.stop && !*vpn && !*internal {
 		return errors.New("client requires at least one of --vpn or --internal")
 	}
-	if *interactive && (*lifecycle.background || *lifecycle.stop) {
-		return errors.New("--interactive requires a foreground VPN client")
+	if *interactive && (*lifecycle.background || *lifecycle.foreground || *lifecycle.stop) {
+		return errors.New("--interactive cannot be combined with --foreground, --background, or --stop")
 	}
-	if !*lifecycle.background && !*lifecycle.stop && os.Getenv(backgroundModeEnv) != "client" && (*interactive || isConsoleTerminal(os.Stdin)) {
+	if !*lifecycle.background && !*lifecycle.foreground && !*lifecycle.stop && os.Getenv(backgroundModeEnv) != "client" && (*interactive || isConsoleTerminal(os.Stdin)) {
 		logPath, err := filepath.Abs(*lifecycle.logFile)
 		if err != nil {
 			return err
