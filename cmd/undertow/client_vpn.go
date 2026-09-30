@@ -285,7 +285,7 @@ func clientCommand(args []string) error {
 				log.Printf("trusted server fingerprint saved to %s: %s", *fingerprintFile, pinnedFingerprint)
 				savePin = false
 			}
-			err = runVPN(ctx, c, carrierIP, *vpn, *internal, *tunName, *address, prefix, *verifyURL, live.set)
+			err = runVPN(ctx, c, carrierIP, serverIP, *vpn, *internal, *tunName, *address, prefix, *verifyURL, live.set)
 			c.Close()
 			if err != nil && !errors.Is(err, io.EOF) && ctx.Err() == nil {
 				live.notify("VPN error: " + err.Error())
@@ -369,7 +369,7 @@ func (c *liveClientConsole) transferProgress(ctx context.Context, encoded []byte
 	return pivot.TransferFileProgress(ctx, session, input.AgentID, input.Operation, input.LocalPath, input.RemotePath, progress)
 }
 
-func runVPN(parent context.Context, c transport.Connection, carrierIP netip.Addr, vpn, internal bool, name, address string, prefix netip.Prefix, verifyURL string, onActive func(*mux.Mux, uint64, *tun.Device)) error {
+func runVPN(parent context.Context, c transport.Connection, carrierIP, serverIP netip.Addr, vpn, internal bool, name, address string, prefix netip.Prefix, verifyURL string, onActive func(*mux.Mux, uint64, *tun.Device)) error {
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	m := mux.New(ctx, c, false)
@@ -445,6 +445,18 @@ func runVPN(parent context.Context, c transport.Connection, carrierIP netip.Addr
 		return fmt.Errorf("pin carrier route: %w", err)
 	}
 	defer unpin()
+	if vpn && carrierIP.IsLoopback() {
+		// A proxy on this machine also opens its own socket to the server.
+		// Keep that upstream connection outside the VPN's /1 defaults.
+		if !serverIP.Is4() {
+			return errors.New("VPN through a local proxy requires a numeric IPv4 --server address")
+		}
+		unpinServer, err := tun.PinServer(serverIP)
+		if err != nil {
+			return fmt.Errorf("pin local proxy upstream route: %w", err)
+		}
+		defer unpinServer()
+	}
 	removeModeRoutes, err := installClientModeRoutes(device, vpn)
 	if err != nil {
 		return err
