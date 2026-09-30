@@ -324,12 +324,12 @@ func (c *Client) run(ctx context.Context) {
 	results := make(chan error, 64)
 	active := 0
 	health := 16
-	lastRetries := uint64(0)
+	lastCongestion := uint64(0)
 	for {
 		stats := c.Session.Stats()
-		if stats.Retransmits > lastRetries {
+		if stats.CongestionEvents > lastCongestion {
 			health = max(2, health/2)
-			lastRetries = stats.Retransmits
+			lastCongestion = stats.CongestionEvents
 		}
 		c.healthWindow.Store(int64(health))
 		target := pollTarget(stats, health)
@@ -358,7 +358,6 @@ func (c *Client) run(ctx context.Context) {
 				health++
 			}
 			if err != nil {
-				health = max(2, health/2)
 				if time.Since(time.Unix(0, c.lastSeen.Load())) > 15*time.Second {
 					c.Session.Close()
 					return

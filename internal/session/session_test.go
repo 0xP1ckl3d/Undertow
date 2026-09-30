@@ -251,6 +251,57 @@ func TestRepeatedSACKDoesNotRetransmitSameGapRepeatedly(t *testing.T) {
 	}
 }
 
+func TestBurstRetransmitsBackOffOnce(t *testing.T) {
+	sender, receiver := pair(t)
+	defer sender.Close()
+	defer receiver.Close()
+	sender.cwnd = 32
+	now := time.Now()
+	var originals [][]byte
+	for i := 0; i < 8; i++ {
+		if err := sender.Send(context.Background(), []byte{byte(i)}); err != nil {
+			t.Fatal(err)
+		}
+		wire, err := sender.NextPacket(now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		originals = append(originals, wire)
+	}
+	for range originals {
+		if _, err := sender.NextPacket(now.Add(500 * time.Millisecond)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if stats := sender.Stats(); stats.Retransmits != 8 || stats.CongestionEvents != 1 || stats.CongestionWindow != 16 {
+		t.Fatalf("burst backoff: %+v", stats)
+	}
+	for _, wire := range originals {
+		if err := receiver.Process(wire, now.Add(501*time.Millisecond)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ack, err := receiver.NextPacket(now.Add(502 * time.Millisecond))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sender.Process(ack, now.Add(503*time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	if err := sender.Send(context.Background(), []byte("next")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sender.NextPacket(now.Add(504 * time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sender.NextPacket(now.Add(3 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if stats := sender.Stats(); stats.CongestionEvents != 2 || stats.CongestionWindow != 8 {
+		t.Fatalf("next loss episode: %+v", stats)
+	}
+}
+
 func TestReorderedDNSRepliesDoNotTriggerFastRetransmit(t *testing.T) {
 	sender, receiver := pair(t)
 	defer sender.Close()

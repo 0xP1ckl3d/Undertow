@@ -59,6 +59,7 @@ type Stats struct {
 	TXPackets          uint64
 	RXPackets          uint64
 	Retransmits        uint64
+	CongestionEvents   uint64
 	Duplicates         uint64
 	RTT                time.Duration
 	InFlight           int
@@ -97,6 +98,7 @@ type Session struct {
 	stats           Stats
 	cwnd            int
 	ackCount        int
+	recoveryEnd     uint64
 	fragmentSize    int
 	peerWindow      int
 	fragmentCeiling int
@@ -286,9 +288,11 @@ func (s *Session) NextPacket(now time.Time) ([]byte, error) {
 		return nil, ErrClosed
 	}
 	var oldest *pending
-	for _, p := range s.pending {
+	var oldestSeq uint64
+	for seq, p := range s.pending {
 		if s.retransmitReady(p, now) && (oldest == nil || p.sent.Before(oldest.sent)) {
 			oldest = p
+			oldestSeq = seq
 		}
 	}
 	if oldest != nil {
@@ -303,9 +307,11 @@ func (s *Session) NextPacket(now time.Time) ([]byte, error) {
 			s.successAcks = 0
 			s.stats.PayloadAdjustments++
 		}
-		s.cwnd /= 2
-		if s.cwnd < 2 {
-			s.cwnd = 2
+		if s.recoveryEnd == 0 || oldestSeq > s.recoveryEnd {
+			s.recoveryEnd = s.dataSeq
+			s.cwnd = max(2, s.cwnd/2)
+			s.ackCount = 0
+			s.stats.CongestionEvents++
 		}
 		s.stats.Retransmits++
 		s.stats.TXPackets++
@@ -436,6 +442,9 @@ func (s *Session) Process(wire []byte, now time.Time) error {
 	ackAdvanced := ack > s.peerAckBase
 	if ackAdvanced {
 		s.peerAckBase = ack
+		if s.recoveryEnd != 0 && ack >= s.recoveryEnd {
+			s.recoveryEnd = 0
+		}
 	}
 	s.peerWindow = int(window)
 	newAcks := 0
