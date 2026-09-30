@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"math/rand"
 	"testing"
 	"time"
@@ -441,7 +442,7 @@ func TestRetransmissionDeliversAfterReceiveQueueDrains(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := receiver.Process(first, now); err == nil || err.Error() != "receive queue full" {
+	if err := receiver.Process(first, now); !errors.Is(err, ErrReceiveQueueFull) {
 		t.Fatalf("full receive queue: %v", err)
 	}
 	<-receiver.deliver

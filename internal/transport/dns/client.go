@@ -378,7 +378,7 @@ func (c *Client) query(ctx context.Context, wire []byte, results chan<- error) {
 	if err == nil {
 		c.responses.Add(1)
 		err = c.Session.Process(resp, time.Now())
-		if err == nil {
+		if err == nil || errors.Is(err, session.ErrReceiveQueueFull) {
 			c.lastSeen.Store(time.Now().UnixNano())
 		} else {
 			c.Session.Close()

@@ -31,6 +31,7 @@ const (
 var ErrClosed = errors.New("session closed")
 var ErrWindow = errors.New("session receive window exceeded")
 var ErrQueueFull = errors.New("session send queue full")
+var ErrReceiveQueueFull = errors.New("receive queue full")
 
 type fragment struct {
 	id     uint64
@@ -580,7 +581,7 @@ func (s *Session) deliverAssembly(id uint64, a *assembly) error {
 		delete(s.reassembly, id)
 		return nil
 	default:
-		return errors.New("receive queue full")
+		return ErrReceiveQueueFull
 	}
 }
 
