@@ -295,7 +295,10 @@ func (s *Session) NextPacket(now time.Time) ([]byte, error) {
 		oldest.fast = false
 		oldest.sent = now
 		oldest.retries++
-		if s.adaptivePayload && s.fragmentSize > 128 {
+		// A single missing packet usually reflects random loss, not a path
+		// payload limit. Repeated failure of the same wire packet is stronger
+		// evidence for reducing the size of future fragments.
+		if s.adaptivePayload && oldest.retries == 3 && s.fragmentSize > 128 {
 			s.fragmentSize = max(128, s.fragmentSize-64)
 			s.successAcks = 0
 			s.stats.PayloadAdjustments++

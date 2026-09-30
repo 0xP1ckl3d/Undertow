@@ -47,7 +47,17 @@ func TestAdaptiveFragmentBackoff(t *testing.T) {
 		t.Fatal(err)
 	}
 	stats := a.Stats()
-	if stats.FragmentSize != 736 || stats.PayloadAdjustments != 1 || stats.Retransmits != 1 {
+	if stats.FragmentSize != 800 || stats.PayloadAdjustments != 0 || stats.Retransmits != 1 {
+		t.Fatalf("isolated loss changed payload size: %+v", stats)
+	}
+	if _, err := a.NextPacket(now.Add(3 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.NextPacket(now.Add(8 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	stats = a.Stats()
+	if stats.FragmentSize != 736 || stats.PayloadAdjustments != 1 || stats.Retransmits != 3 {
 		t.Fatalf("unexpected adaptive stats: %+v", stats)
 	}
 }
