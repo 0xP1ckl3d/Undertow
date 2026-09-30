@@ -14,6 +14,9 @@ func PinServer(server netip.Addr) (func(), error) {
 	if !server.Is4() {
 		return nil, errors.New("VPN server must be IPv4")
 	}
+	if server.IsLoopback() {
+		return func() {}, nil
+	}
 	rows, err := winipcfg.GetIPForwardTable2(winipcfg.AddressFamily(windows.AF_INET))
 	if err != nil {
 		return nil, err

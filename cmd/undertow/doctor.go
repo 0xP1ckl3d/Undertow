@@ -75,6 +75,9 @@ func doctorCommand(args []string, output io.Writer) error {
 	if err := carrier.validate(); err != nil {
 		return err
 	}
+	if role != "server" && *carrier.selfSigned {
+		return errors.New("--tls-self-signed is a server-only flag")
+	}
 	r := &doctorReport{w: output}
 	fmt.Fprintf(output, "Undertow doctor: %s (read-only)\n", role)
 	r.pass("transport", *carrier.kind)

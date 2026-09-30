@@ -25,7 +25,7 @@ func addCarrierFlags(f *flag.FlagSet) carrierFlags {
 		cert:          f.String("tls-cert", "", "server TLS certificate PEM for WebSocket or QUIC"),
 		key:           f.String("tls-key", "", "server TLS private key PEM for WebSocket or QUIC"),
 		selfSigned:    f.Bool("tls-self-signed", false, "generate an ephemeral self-signed server TLS certificate"),
-		serverName:    f.String("tls-server-name", "", "TLS certificate server name for WebSocket"),
+		serverName:    f.String("tls-server-name", "", "TLS certificate server name for WebSocket or QUIC"),
 		skipTLSVerify: f.Bool("tls-insecure-skip-verify", false, "skip TLS certificate verification (Undertow fingerprint is still required)"),
 	}
 }

@@ -79,3 +79,13 @@ func TestDoctorWebSocketHostname(t *testing.T) {
 		t.Fatalf("err=%v output=%s", err, output.String())
 	}
 }
+
+func TestDoctorRejectsServerOnlyTLSFlagOnPeers(t *testing.T) {
+	for _, role := range []string{"agent", "client"} {
+		var output bytes.Buffer
+		err := doctorCommand([]string{role, "--transport", "websocket", "--tls-self-signed"}, &output)
+		if err == nil || !strings.Contains(err.Error(), "server-only") {
+			t.Fatalf("%s: err=%v output=%s", role, err, output.String())
+		}
+	}
+}

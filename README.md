@@ -40,7 +40,7 @@ These commands use the default DNS carrier on separate hosts. For HTTPS/WebSocke
 
 ## How the pieces connect
 
-This diagram uses the default DNS carrier; WebSocket and QUIC replace its wire connection while keeping the session, console, and pivot behavior.
+Each server process listens on one selected carrier: DNS, HTTPS/WebSocket, or QUIC. The session, console, and pivot behavior is shared.
 
 ```mermaid
 flowchart LR
@@ -49,9 +49,9 @@ flowchart LR
     Route --> ProxyTUN["Optional TUN / Wintun"]
     ProxyTUN --> Stack["Userland network stack"]
     Stack --> Selector["Agent route selector"]
-    DNS["Encrypted direct-DNS server"]
+    Carrier["Undertow carrier<br/>DNS · WebSocket · QUIC"]
     Control["Loopback status / route API"]
-    Selector --> DNS
+    Selector --> Carrier
   end
 
   subgraph AgentHost["Internal-network host"]
@@ -63,14 +63,14 @@ flowchart LR
     Apps["Client applications"] --> VPNRoute["IPv4 routes"]
     VPNRoute --> ClientTUN["Local TUN / Wintun"]
     ClientTUN --> VPN["Privileged client --vpn and/or --internal"]
-    Physical["Physical route pinned to server IP"] --> VPN
+    Physical["Carrier path kept outside VPN routes"] --> VPN
   end
 
-  DNS <-->|"Authenticated DNS / UDP"| Agent
-  VPN <-->|"Authenticated DNS / UDP"| DNS
-  DNS -->|"VPN Internet egress"| ServerSockets["Server-side Internet sockets"]
+  Carrier <-->|"Authenticated session"| Agent
+  VPN <-->|"Authenticated session"| Carrier
+  Carrier -->|"VPN Internet egress"| ServerSockets["Server-side Internet sockets"]
   ServerSockets --> Internet["Public Internet"]
-  DNS -->|"With --internal: configured pivot route"| Selector
+  Carrier -->|"With --internal: configured pivot route"| Selector
 
   Control -.-> Selector
 ```
@@ -142,4 +142,4 @@ if ($LASTEXITCODE -ne 0) { throw 'Build failed; bin\undertow.exe may be an older
 - [Protocol version 1](docs/protocol.md)
 - [Performance and reliability measurements](docs/benchmarks.md)
 
-Undertow is experimental. Linux VPN egress and Windows-agent pivot TCP, UDP, and ICMP have been exercised on separate hosts. A matched live iodine comparison and a controlled DNS loss/RTT grid are recorded in [the benchmark guide](docs/benchmarks.md). Windows client Wintun installation still needs an elevated live acceptance run. This code is [GPL-3.0-only](LICENSE); bundled third-party components keep their own licences.
+Undertow is experimental. A Linux server, Linux VPN client, and Windows agent have been exercised over DNS, HTTPS/WebSocket, and QUIC with TCP, UDP, and ICMP traffic. A matched live iodine comparison and a controlled DNS loss/RTT grid are recorded in [the benchmark guide](docs/benchmarks.md). Windows client Wintun installation still needs an elevated live acceptance run. This code is [GPL-3.0-only](LICENSE); bundled third-party components keep their own licences.
