@@ -95,6 +95,25 @@ func TestPollTarget(t *testing.T) {
 	}
 }
 
+func TestQueryErrorBackoffCoalescesBurst(t *testing.T) {
+	now := time.Now()
+	if !shouldBackOffQueryError(now, time.Time{}, 20*time.Millisecond) {
+		t.Fatal("first query error did not back off")
+	}
+	if shouldBackOffQueryError(now.Add(499*time.Millisecond), now, 20*time.Millisecond) {
+		t.Fatal("query errors in the same burst backed off twice")
+	}
+	if !shouldBackOffQueryError(now.Add(500*time.Millisecond), now, 20*time.Millisecond) {
+		t.Fatal("query error after low-RTT interval did not back off")
+	}
+	if shouldBackOffQueryError(now.Add(799*time.Millisecond), now, 400*time.Millisecond) {
+		t.Fatal("high-RTT path backed off too soon")
+	}
+	if !shouldBackOffQueryError(now.Add(800*time.Millisecond), now, 400*time.Millisecond) {
+		t.Fatal("query error after high-RTT interval did not back off")
+	}
+}
+
 func TestQueuedDataBypassesIdlePoll(t *testing.T) {
 	_, identity, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {

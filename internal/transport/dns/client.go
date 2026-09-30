@@ -317,6 +317,10 @@ func pollTarget(stats session.Stats, health int) int {
 	return max(1, min(limit, stats.Queued+stats.InFlight+1))
 }
 
+func shouldBackOffQueryError(now, last time.Time, rtt time.Duration) bool {
+	return last.IsZero() || now.Sub(last) >= max(500*time.Millisecond, 2*rtt)
+}
+
 func (c *Client) run(ctx context.Context) {
 	defer c.workers.Done()
 	ticker := time.NewTicker(25 * time.Millisecond)
@@ -325,6 +329,7 @@ func (c *Client) run(ctx context.Context) {
 	active := 0
 	health := 16
 	lastCongestion := uint64(0)
+	lastErrorBackoff := time.Time{}
 	for {
 		stats := c.Session.Stats()
 		if stats.CongestionEvents > lastCongestion {
@@ -358,6 +363,11 @@ func (c *Client) run(ctx context.Context) {
 				health++
 			}
 			if err != nil {
+				now := time.Now()
+				if shouldBackOffQueryError(now, lastErrorBackoff, stats.RTT) {
+					health = max(2, health/2)
+					lastErrorBackoff = now
+				}
 				if time.Since(time.Unix(0, c.lastSeen.Load())) > 15*time.Second {
 					c.Session.Close()
 					return
