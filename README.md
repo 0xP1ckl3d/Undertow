@@ -120,7 +120,7 @@ Back on the server, `sudo ./bin/undertow status` shows the connected agent when 
 - [Interactive console commands and examples](docs/console.md)
 - [All commands and flags](docs/cli-reference.md)
 - [Protocol version 1](docs/protocol.md)
-- [Performance tests and comparison method](docs/benchmarks.md)
+- [Performance and reliability measurements](docs/benchmarks.md)
 
-Undertow is experimental. Linux VPN egress and Linux pivot TCP, UDP, and ICMP have been exercised on separate hosts. Windows Wintun and the controlled iodine performance comparison still need acceptance testing. This code is [GPL-3.0-only](LICENSE); bundled third-party components keep their own licences.
+Undertow is experimental. Linux VPN egress and Windows-agent pivot TCP, UDP, and ICMP have been exercised on separate hosts. A matched live iodine comparison and a controlled DNS loss/RTT grid are recorded in [the benchmark guide](docs/benchmarks.md). Windows client Wintun installation still needs an elevated live acceptance run. This code is [GPL-3.0-only](LICENSE); bundled third-party components keep their own licences.
 
