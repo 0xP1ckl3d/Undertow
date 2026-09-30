@@ -47,7 +47,7 @@ Setup:
 
 Commands:
   init       Create server identity and enrollment token.
-  server     Run the DNS listener and operator console; 'server attach' returns.
+  server     Run a carrier listener and operator console; 'server attach' returns.
   agent      Connect an internal host without changing its routes.
   client     Run a privileged IPv4 tunnel; 'client attach' opens its console.
   console    Open an interactive server operator console.
@@ -58,6 +58,9 @@ Commands:
   doctor     Check local prerequisites before starting a role.
   version    Print build version.
 
+Transport: DNS (default, UDP/53) for restrictive paths; WebSocket (TCP/443)
+for HTTPS egress; QUIC (UDP/443) when that path is available. Select the same
+--transport on server, agent, and client. See docs/quickstart.md.
 Run 'undertow help COMMAND' for flags and examples, or see README.md.
 All sessions are encrypted and signed by the server. Open enrollment allows
 any reachable client; trust-on-first-use cannot verify the first contact.
@@ -75,14 +78,18 @@ securely to agents and VPN clients; never copy identity.key to them.
 The identity file is reused on subsequent starts. An existing token is kept.
 `
 	case "server":
-		body = `undertow server — direct-DNS listener and operator console
+		body = `undertow server — carrier listener and operator console
 
 Usage: undertow server [FLAGS]
        undertow server attach [--pid-file PATH] [--control IP:PORT]
 
 Connection and identity:
-  --listen IP:PORT          UDP listener (default 0.0.0.0:53).
-  --domain NAME             Synthetic DNS name (default t.undertow.invalid).
+  --transport MODE          dns (default), websocket, or quic.
+  --listen IP:PORT          Listener (DNS UDP/53; WebSocket TCP/443; QUIC UDP/443).
+  --domain NAME             Synthetic DNS name (DNS only; default t.undertow.invalid).
+  --websocket-path PATH     WebSocket URL path (default /undertow).
+  --tls-cert PATH           TLS certificate PEM (WebSocket and QUIC).
+  --tls-key PATH            TLS private key PEM (WebSocket and QUIC).
   --identity PATH           Server Ed25519 key (default identity.key).
   --auth MODE               token (default), password, or none/open enrollment.
   --token-file PATH         Enrollment token for token mode (default token.key).
@@ -117,6 +124,8 @@ Examples:
   sudo undertow server --listen 0.0.0.0:53
   sudo undertow server attach
   sudo undertow server --listen 0.0.0.0:53 --tun --background
+  sudo undertow server --transport websocket --tls-cert server.crt --tls-key server.key
+  sudo undertow server --transport quic --tls-cert server.crt --tls-key server.key
   sudo undertow server --stop
 
 In a terminal, server starts a worker and opens the operator console.
@@ -133,9 +142,14 @@ server sockets and does not require --tun. Use one 'server' subcommand only.
 	case "agent":
 		body = `undertow agent — unprivileged connector on an internal host
 
-Usage: undertow agent --server IP:PORT [--fingerprint HEX | --trust-on-first-use] [FLAGS]
+Usage: undertow agent --server HOST:PORT [--fingerprint HEX | --trust-on-first-use] [FLAGS]
 
-  --server IP:PORT         Direct-DNS server IPv4 and UDP port (required).
+  --server HOST:PORT       Server host and carrier port; DNS needs numeric IPv4.
+  --transport MODE         dns (default), websocket, or quic; match server.
+  --websocket-path PATH    Match server path for WebSocket (default /undertow).
+  --tls-server-name NAME   Verify a DNS name in the TLS certificate.
+  --tls-insecure-skip-verify  Allow a private/self-signed TLS certificate;
+                           pin the Undertow fingerprint separately.
   --fingerprint HEX        Pinned server public-key fingerprint.
   --fingerprint-file PATH  Saved pin (default server.fingerprint).
   --trust-on-first-use     Discover and save pin after first authenticated
@@ -150,8 +164,8 @@ Usage: undertow agent --server IP:PORT [--fingerprint HEX | --trust-on-first-use
                            pivot,exec,hostops,interactive,scripts,wasm,upload,download,listeners.
   --advertise-route CIDR    Offer an additional IPv4 route to VPN clients;
                            repeatable. Up IPv4 interfaces are also offered.
-  --domain NAME            Match server --domain (default t.undertow.invalid).
-  --payload-profile MODE   auto, large, or small (default auto).
+  --domain NAME            Match server --domain (DNS only).
+  --payload-profile MODE   DNS only: auto, large, or small (default auto).
   --probe                  Run encrypted echo probes instead of sockets.
   --probe-count N          Stop after N probes; 0 keeps running.
   --probe-size BYTES       Probe payload (16–65536; default 64).
@@ -177,13 +191,18 @@ Operator subcommands: 'undertow agent list|show ID|select ID'.
 	case "client":
 		body = `undertow client — privileged IPv4 tunnel on a separate host
 
-Usage: undertow client (--vpn | --internal | --vpn --internal) --server IP:PORT [FLAGS]
+Usage: undertow client (--vpn | --internal | --vpn --internal) --server HOST:PORT [FLAGS]
 
   --vpn                    Install two IPv4 /1 routes for Internet egress.
   --internal               Use agent routes accepted or added in the client
                            console; server global routes are optional. Alone,
                            this leaves Internet/default routes unchanged.
-  --server IP:PORT         Direct-DNS server IPv4 and UDP port (required).
+  --server HOST:PORT       Server host and carrier port; DNS needs numeric IPv4.
+  --transport MODE         dns (default), websocket, or quic; match server.
+  --websocket-path PATH    Match server path for WebSocket (default /undertow).
+  --tls-server-name NAME   Verify a DNS name in the TLS certificate.
+  --tls-insecure-skip-verify  Allow a private/self-signed TLS certificate;
+                           pin the Undertow fingerprint separately.
   --fingerprint HEX        Pinned server public-key fingerprint.
   --fingerprint-file PATH  Saved pin (default server.fingerprint).
   --trust-on-first-use     Discover and save pin after first authenticated
@@ -194,10 +213,10 @@ Usage: undertow client (--vpn | --internal | --vpn --internal) --server IP:PORT 
   --password TEXT         Password mode credential; visible in process list.
   --password-file PATH    Read password from file instead.
   --client-key PATH        Client Ed25519 identity (default client.key).
-  --domain NAME            Match server --domain (default t.undertow.invalid).
+  --domain NAME            Match server --domain (DNS only).
   --tun-name NAME          Local adapter (default undertow-vpn).
   --tunnel-address CIDR    Local address (default 172.16.253.1/24).
-  --payload-profile MODE   auto, large, or small (default auto).
+  --payload-profile MODE   DNS only: auto, large, or small (default auto).
   --verify-url URL         Public IPv4 check for --vpn only (default
                            https://api.ipify.org); empty skips verification.
   --interactive            Open a console even when input is redirected;
@@ -215,7 +234,7 @@ Examples (on the client host):
   sudo undertow client --internal --server 203.0.113.10:53 --fingerprint HEX --token-file token.key
   sudo undertow client --vpn --internal --server 203.0.113.10:53 --fingerprint HEX --token-file token.key
 
---internal alone pins the DNS server route without changing Internet/default
+--internal alone pins the carrier server route without changing Internet/default
 routes or checking public egress. After connecting, type 'agents', 'use 1',
 'routes', then 'route accept CIDR' or 'route add CIDR'. No server route command
 is needed for per-client routes; active global server routes also work.
@@ -323,14 +342,19 @@ Common:
   --pid-file PATH          Background state file for this role.
 
 Server:
-  --listen IP:PORT         UDP listener (default 0.0.0.0:53).
+  --transport MODE         dns (default), websocket, or quic.
+  --listen IP:PORT         Carrier listener (DNS :53, WebSocket/QUIC :443).
+  --tls-cert PATH          TLS certificate for WebSocket or QUIC server.
+  --tls-key PATH           TLS private key for WebSocket or QUIC server.
   --control-listen IP:PORT Local operator API (default 127.0.0.1:47889).
   --identity PATH          Server key (default identity.key).
   --tun                    Check TUN/Wintun and tunnel network.
   --forward LOCAL=REMOTE   Check a planned local TCP forward; repeatable.
 
 Agent and client:
-  --server IP:PORT         Numeric server IPv4 and UDP port.
+  --server HOST:PORT       Server host and carrier port; DNS needs numeric IPv4.
+  --tls-server-name NAME   TLS certificate name for WebSocket or QUIC.
+  --tls-insecure-skip-verify  Permit private/self-signed TLS certificate.
   --fingerprint HEX        Explicit server fingerprint; otherwise check file.
   --fingerprint-file PATH  Saved pin (default server.fingerprint).
   --trust-on-first-use     Allow first contact without a saved pin.
@@ -398,7 +422,9 @@ forward — reach one internal TCP service without a TUN:
 Use 'route add CIDR' in the client console if a reachable route is not
 advertised. Type 'quit' in the client console to stop it and remove routes.
 On the server, 'quit' detaches and 'stop' shuts down. Ctrl+C stops a
-foreground agent. See docs/quickstart.md for full steps.
+foreground agent. Use the same console commands with --transport websocket
+(TCP/443) or --transport quic (UDP/443) on all roles; the server needs
+--tls-cert and --tls-key. See docs/quickstart.md for full steps.
 `)
 	return err
 }

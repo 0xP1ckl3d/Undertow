@@ -10,7 +10,7 @@
                  ▀
 ```
 
-Undertow carries encrypted sessions over direct DNS on UDP. A **server** accepts connections, an unprivileged **agent** connects from a network you want to reach, and a privileged **client** tunnels traffic from its own machine. Choose the goal below, then follow the [copy/paste quickstart](docs/quickstart.md).
+Undertow carries encrypted sessions over direct DNS, HTTPS/WebSocket, or QUIC. A **server** accepts connections, an unprivileged **agent** connects from a network you want to reach, and a privileged **client** tunnels traffic from its own machine. Choose the goal below, then follow the [copy/paste quickstart](docs/quickstart.md).
 
 ## What are you trying to do?
 
@@ -36,9 +36,11 @@ undertow agent --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file toke
 sudo undertow client --internal --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
 ```
 
-The commands run on separate hosts. In a terminal, `server` and `client` each open a console. Type `agents`, `use 1`, `show`, and `routes`; on a client, use `route accept CIDR` for an advertised network or `route add CIDR` for another reachable network. `background` detaches either console without stopping its worker. Return with `undertow server attach` or `undertow client attach`. The server needs `--tun` only when the server host itself will route to an internal network; Internet egress from a client uses server sockets. See [quickstart](docs/quickstart.md) for verification and cleanup by goal.
+These commands use the default DNS carrier on separate hosts. For HTTPS/WebSocket on TCP/443 or QUIC on UDP/443, see [transport choices](docs/quickstart.md#choose-a-transport). In a terminal, `server` and `client` each open a console. Type `agents`, `use 1`, `show`, and `routes`; on a client, use `route accept CIDR` for an advertised network or `route add CIDR` for another reachable network. `background` detaches either console without stopping its worker. Return with `undertow server attach` or `undertow client attach`. The server needs `--tun` only when the server host itself will route to an internal network; Internet egress from a client uses server sockets. See [quickstart](docs/quickstart.md) for verification and cleanup by goal.
 
 ## How the pieces connect
+
+This diagram uses the default DNS carrier; WebSocket and QUIC replace its wire connection while keeping the session, console, and pivot behavior.
 
 ```mermaid
 flowchart LR
@@ -141,4 +143,3 @@ if ($LASTEXITCODE -ne 0) { throw 'Build failed; bin\undertow.exe may be an older
 - [Performance and reliability measurements](docs/benchmarks.md)
 
 Undertow is experimental. Linux VPN egress and Windows-agent pivot TCP, UDP, and ICMP have been exercised on separate hosts. A matched live iodine comparison and a controlled DNS loss/RTT grid are recorded in [the benchmark guide](docs/benchmarks.md). Windows client Wintun installation still needs an elevated live acceptance run. This code is [GPL-3.0-only](LICENSE); bundled third-party components keep their own licences.
-

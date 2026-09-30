@@ -100,6 +100,15 @@ func TestClientRejectsAcceptedRouteCollidingWithLocalNetwork(t *testing.T) {
 	}
 }
 
+func TestClientRejectsRouteContainingCarrierEndpoint(t *testing.T) {
+	client := &liveClientConsole{serverIP: netip.MustParseAddr("203.0.113.10"), carrierIP: netip.MustParseAddr("198.51.100.20"), tunnelPrefix: netip.MustParsePrefix("172.16.253.0/24")}
+	var output bytes.Buffer
+	err := client.routeCommand(context.Background(), []string{"route", "add", "198.51.100.0/24", "agent-a"}, &output)
+	if err == nil || !strings.Contains(err.Error(), "carrier endpoint") {
+		t.Fatalf("carrier route collision=%v", err)
+	}
+}
+
 func TestClientRoutesPersistAcrossLoads(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "client-routes.json")
 	want := []control.AcceptedRoute{{Prefix: "192.168.0.0/22", AgentID: "agent-a"}, {Prefix: "10.10.0.0/16", AgentID: "agent-a", Manual: true}}

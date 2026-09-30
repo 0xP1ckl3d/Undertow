@@ -22,6 +22,12 @@ func normalizeFingerprint(value string) (string, error) {
 }
 
 func resolveServerFingerprint(ctx context.Context, server, domain, explicit, path string, trustFirstUse bool) (string, bool, error) {
+	return resolveFingerprint(ctx, explicit, path, trustFirstUse, func(ctx context.Context) (string, error) {
+		return dns.DiscoverFingerprint(ctx, server, domain)
+	})
+}
+
+func resolveFingerprint(ctx context.Context, explicit, path string, trustFirstUse bool, discover func(context.Context) (string, error)) (string, bool, error) {
 	if explicit != "" {
 		if trustFirstUse {
 			return "", false, errors.New("choose --fingerprint or --trust-on-first-use")
@@ -40,7 +46,7 @@ func resolveServerFingerprint(ctx context.Context, server, domain, explicit, pat
 	}
 	discoverCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	fingerprint, err := dns.DiscoverFingerprint(discoverCtx, server, domain)
+	fingerprint, err := discover(discoverCtx)
 	return fingerprint, true, err
 }
 

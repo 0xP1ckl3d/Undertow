@@ -2,7 +2,7 @@
 
 ## What runs where?
 
-- **Server:** the reachable UDP listener and local operator API. It creates the server identity and accepts agent and VPN client sessions. It can create a proxy TUN/Wintun for routed internal access, but VPN Internet egress itself uses server sockets.
+- **Server:** the reachable carrier listener and local operator API. It creates the server identity and accepts agent and VPN client sessions. It can create a proxy TUN/Wintun for routed internal access, but VPN Internet egress itself uses server sockets.
 - **Agent:** a connector on the internal network. It opens TCP, UDP, and ICMP operations for the server. It needs no root/Administrator privilege, virtual adapter, route changes, or inbound port.
 - **Client:** a separate, elevated process that creates its own TUN/Wintun. `--vpn` changes Internet routes; `--internal` alone adds only internal routes through agents; both flags combine them.
 - **Operator commands:** `status`, `agent list/show/select`, `route add/del/list`, and `session kill` run on the server host against a token protected loopback API.
@@ -19,9 +19,9 @@ sudo undertow client --internal --server SERVER_IP:53 --fingerprint FINGERPRINT 
 sudo undertow client --vpn --internal --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
 ```
 
-`--vpn` installs two IPv4 `/1` routes and verifies public egress. `--internal` alone pins the direct-DNS server route and creates the TUN without changing the Internet/default route or requiring a public egress check. Once connected, type `agents`, `use 1`, and `routes` in the client console; use `route accept CIDR` for an advertised subnet or `route add CIDR` for another network reachable from that agent. This setup needs no server route command. Server configured routes are also supported when an operator wants global route management. Both flags provide VPN Internet egress and agent routes. At least one flag is required. See [deployment scenarios](scenarios.md) for tests.
+`--vpn` installs two IPv4 `/1` routes and verifies public egress. `--internal` alone pins the carrier server route and creates the TUN without changing the Internet/default route or requiring a public egress check. Once connected, type `agents`, `use 1`, and `routes` in the client console; use `route accept CIDR` for an advertised subnet or `route add CIDR` for another network reachable from that agent. This setup needs no server route command. Server configured routes are also supported when an operator wants global route management. Both flags provide VPN Internet egress and agent routes. At least one flag is required. See [deployment scenarios](scenarios.md) for tests.
 
-Undertow uses **direct UDP DNS**, addressed to a numeric server IP and port. The default synthetic domain is `t.undertow.invalid`; it must match on both ends. Public DNS delegation is not required. Allow the chosen UDP port through the server firewall. UDP/53 and virtual interfaces commonly need elevated privileges.
+The examples on this page use **direct UDP DNS**, addressed to a numeric server IP and port. Undertow also supports HTTPS/WebSocket on TCP/443 and QUIC on UDP/443; see [Quickstart transport choices](quickstart.md#choose-a-transport). The default synthetic domain is `t.undertow.invalid`; it must match on both ends. Public DNS delegation is not required. Allow the chosen UDP port through the server firewall. UDP/53 and virtual interfaces commonly need elevated privileges.
 
 ## Build and first session
 
@@ -59,7 +59,7 @@ All modes use an encrypted session and a server identity fingerprint. `--auth` c
 | --- | --- | --- | --- |
 | Token (default) | `--auth token --token-file token.key` or `--auth token --token TOKEN_HEX` | same token through either flag | Copy the file securely or share its hex value securely |
 | Password | `--auth password --password-file password.key` | same flags | Share the password securely; each host writes its own restricted file |
-| Open | `--auth none` | `--auth none` | No enrollment secret; anyone who reaches UDP listener may enroll |
+| Open | `--auth none` | `--auth none` | No enrollment secret; anyone who reaches the carrier listener may enroll |
 
 You can copy `token.key` as a file, or paste the server's hex token into a PowerShell file with `echo "TOKEN_HEX" > token.key`. Undertow accepts PowerShell's UTF-16LE text as well as UTF-8. Use the exact token generated on the server; a different token will fail enrollment. Treat the token as a secret.
 

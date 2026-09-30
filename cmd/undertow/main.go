@@ -169,7 +169,8 @@ func serve(args []string) error {
 	}
 	f := flag.NewFlagSet("server", flag.ContinueOnError)
 	lifecycle := addLifecycleFlags(f, "server")
-	listen := f.String("listen", "0.0.0.0:53", "direct DNS UDP listen address")
+	carrier := addCarrierFlags(f)
+	listen := f.String("listen", "", "carrier listen address (default DNS UDP :53, WebSocket TCP :443, QUIC UDP :443)")
 	domain := f.String("domain", "t.undertow.invalid", "synthetic DNS domain")
 	identityPath := f.String("identity", "identity.key", "server identity key file")
 	tokenPath := f.String("token-file", "", "enrolment token file (default token.key)")
@@ -261,7 +262,7 @@ func serve(args []string) error {
 	if err != nil {
 		return err
 	}
-	srv, err := dns.Listen(*listen, *domain, identity, token)
+	srv, err := carrier.listen(*listen, *domain, identity, token)
 	if err != nil {
 		return err
 	}
@@ -304,62 +305,58 @@ func serve(args []string) error {
 		log.Printf("local forward %s -> %s", l.Addr(), parts[1])
 		go pivot.ServeForward(ctx, l, parts[1], choose)
 	}
-	log.Printf("direct DNS listening on %s; fingerprint %s", srv.Addr(), security.Fingerprint(identity))
+	log.Printf("%s listening on %s; fingerprint %s", carrier.describe(), srv.Addr(), security.Fingerprint(identity))
 	if err := markBackgroundReady(); err != nil {
 		return err
 	}
 	go func() {
 		for {
-			select {
-			case p := <-srv.Accepted():
-				if p == nil {
-					return
-				}
-				log.Printf("session connected: %s from %s", p.Snapshot().AgentID, p.Snapshot().Remote)
-				if *probeEcho {
-					go echo(ctx, p)
-					continue
-				}
-				go func() {
-					streamMux := mux.New(ctx, p.Channel(), true)
-					helloCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-					hello, err := streamMux.RecvControl(helloCtx)
-					cancel()
-					if err != nil {
-						log.Printf("session %d control handshake failed: %v", p.Session.ID(), err)
-						streamMux.Close()
-						return
-					}
-					if control.IsVPNHello(hello) {
-						internal := control.VPNInternal(hello)
-						log.Printf("VPN client ready: session=%d remote=%s internal=%t", p.Session.ID(), p.Snapshot().Remote, internal)
-						if err := streamMux.SendControl(ctx, []byte(`{"mode":"vpn","ready":true}`)); err != nil {
-							streamMux.Close()
-							return
-						}
-						manager.RegisterClient(p, streamMux, internal, control.VPNHostname(hello))
-						pivot.ServeVPNInteractive(ctx, streamMux, func(destination netip.Addr) (*mux.Mux, bool) {
-							return manager.ResolveClientEgress(p.Session.ID(), destination)
-						}, func() bool { return true }, func(ctx context.Context, stream *mux.Stream) {
-							if stream.Destination() == pivot.FileDestination {
-								manager.ServeFileRelay(ctx, stream)
-							} else if stream.Destination() == pivot.InteractiveRelayDestination {
-								manager.ServeInteractiveRelay(ctx, stream)
-							} else {
-								manager.ServeRemote(ctx, controlToken, p.Session.ID(), stream)
-							}
-						})
-						manager.UnregisterClient(p.Session.ID(), streamMux)
-						log.Printf("VPN client disconnected: session=%d", p.Session.ID())
-						streamMux.Close()
-						return
-					}
-					manager.Register(p, streamMux)
-					manager.UpdateInventory(p.Snapshot().AgentID, streamMux, hello)
-				}()
-			case <-ctx.Done():
+			p, err := srv.Accept(ctx)
+			if err != nil {
 				return
 			}
+			log.Printf("session connected: %s from %s", p.Snapshot().AgentID, p.Snapshot().Remote)
+			if *probeEcho {
+				go echo(ctx, p)
+				continue
+			}
+			go func() {
+				streamMux := mux.New(ctx, p.Channel(), true)
+				helloCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+				hello, err := streamMux.RecvControl(helloCtx)
+				cancel()
+				if err != nil {
+					log.Printf("session %d control handshake failed: %v", p.Snapshot().ID, err)
+					streamMux.Close()
+					return
+				}
+				if control.IsVPNHello(hello) {
+					internal := control.VPNInternal(hello)
+					log.Printf("VPN client ready: session=%d remote=%s internal=%t", p.Snapshot().ID, p.Snapshot().Remote, internal)
+					if err := streamMux.SendControl(ctx, []byte(`{"mode":"vpn","ready":true}`)); err != nil {
+						streamMux.Close()
+						return
+					}
+					manager.RegisterClient(p, streamMux, internal, control.VPNHostname(hello))
+					pivot.ServeVPNInteractive(ctx, streamMux, func(destination netip.Addr) (*mux.Mux, bool) {
+						return manager.ResolveClientEgress(p.Snapshot().ID, destination)
+					}, func() bool { return true }, func(ctx context.Context, stream *mux.Stream) {
+						if stream.Destination() == pivot.FileDestination {
+							manager.ServeFileRelay(ctx, stream)
+						} else if stream.Destination() == pivot.InteractiveRelayDestination {
+							manager.ServeInteractiveRelay(ctx, stream)
+						} else {
+							manager.ServeRemote(ctx, controlToken, p.Snapshot().ID, stream)
+						}
+					})
+					manager.UnregisterClient(p.Snapshot().ID, streamMux)
+					log.Printf("VPN client disconnected: session=%d", p.Snapshot().ID)
+					streamMux.Close()
+					return
+				}
+				manager.Register(p, streamMux)
+				manager.UpdateInventory(p.Snapshot().AgentID, streamMux, hello)
+			}()
 		}
 	}()
 	go func() {
@@ -394,7 +391,8 @@ func echo(ctx context.Context, p transport.Peer) {
 func agent(args []string) error {
 	f := flag.NewFlagSet("agent", flag.ContinueOnError)
 	lifecycle := addLifecycleFlags(f, "agent")
-	server := f.String("server", "", "direct DNS server IP:port")
+	carrier := addCarrierFlags(f)
+	server := f.String("server", "", "carrier server IPv4:port")
 	domain := f.String("domain", "t.undertow.invalid", "synthetic DNS domain")
 	fingerprint := f.String("fingerprint", "", "pinned SHA-256 server public-key fingerprint")
 	fingerprintFile := f.String("fingerprint-file", "server.fingerprint", "saved server fingerprint")
@@ -439,9 +437,12 @@ func agent(args []string) error {
 	if *profileFlag != "auto" && *profileFlag != "large" && *profileFlag != "small" {
 		return errors.New("invalid --payload-profile")
 	}
+	if *carrier.kind != "dns" && *profileFlag != "auto" {
+		return errors.New("--payload-profile applies only to DNS transport")
+	}
 	ctx, stop := commandContext()
 	defer stop()
-	pinnedFingerprint, savePin, err := resolveServerFingerprint(ctx, *server, *domain, *fingerprint, *fingerprintFile, *trustFirstUse)
+	pinnedFingerprint, savePin, err := carrier.fingerprint(ctx, *server, *domain, *fingerprint, *fingerprintFile, *trustFirstUse)
 	if err != nil {
 		return err
 	}
@@ -454,16 +455,7 @@ func agent(args []string) error {
 		return err
 	}
 	for {
-		var c *dns.Client
-		if *profileFlag == "auto" {
-			c, err = dns.DialAdaptive(ctx, *server, *domain, pinnedFingerprint, token, key)
-		} else {
-			profile := byte(0)
-			if *profileFlag == "small" {
-				profile = 1
-			}
-			c, err = dns.DialProfile(ctx, *server, *domain, pinnedFingerprint, token, key, profile)
-		}
+		c, err := carrier.dial(ctx, *server, *domain, pinnedFingerprint, token, key, *profileFlag)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil
@@ -488,7 +480,11 @@ func agent(args []string) error {
 			c.Close()
 			return err
 		}
-		log.Printf("connected: session=%d agent=%s fragment=%d", c.Session.ID(), security.Fingerprint(key), c.Session.Stats().FragmentSize)
+		if dnsClient, ok := c.(*dns.Client); ok {
+			log.Printf("connected: session=%d agent=%s fragment=%d", c.ID(), security.Fingerprint(key), dnsClient.Session.Stats().FragmentSize)
+		} else {
+			log.Printf("connected: session=%d agent=%s transport=%s", c.ID(), security.Fingerprint(key), *carrier.kind)
+		}
 		if *probe || *probeCount > 0 {
 			err = runProbes(ctx, c, *probeSize, *probeCount, *interval)
 		} else {
@@ -500,9 +496,13 @@ func agent(args []string) error {
 			streamMux.Close()
 			err = io.EOF
 		}
-		stats, q, r := c.Stats()
-		adaptive := c.AdaptiveStats()
-		log.Printf("session finished: queries=%d responses=%d tx=%d rx=%d retransmits=%d rtt=%s fragment=%d payload_adjustments=%d queued=%d in_flight=%d cwnd=%d peer_window=%d dns_outstanding=%d dns_target=%d dns_health_window=%d", q, r, stats.TXBytes, stats.RXBytes, stats.Retransmits, stats.RTT, stats.FragmentSize, stats.PayloadAdjustments, stats.Queued, stats.InFlight, stats.CongestionWindow, stats.PeerReceiveWindow, adaptive.Outstanding, adaptive.Target, adaptive.HealthWindow)
+		if dnsClient, ok := c.(*dns.Client); ok {
+			stats, q, r := dnsClient.Stats()
+			adaptive := dnsClient.AdaptiveStats()
+			log.Printf("session finished: queries=%d responses=%d tx=%d rx=%d retransmits=%d rtt=%s fragment=%d payload_adjustments=%d queued=%d in_flight=%d cwnd=%d peer_window=%d dns_outstanding=%d dns_target=%d dns_health_window=%d", q, r, stats.TXBytes, stats.RXBytes, stats.Retransmits, stats.RTT, stats.FragmentSize, stats.PayloadAdjustments, stats.Queued, stats.InFlight, stats.CongestionWindow, stats.PeerReceiveWindow, adaptive.Outstanding, adaptive.Target, adaptive.HealthWindow)
+		} else {
+			log.Printf("session finished: transport=%s", *carrier.kind)
+		}
 		c.Close()
 		if *probeCount > 0 && err == nil {
 			return nil
@@ -519,7 +519,11 @@ func agent(args []string) error {
 	}
 }
 
-func runProbes(ctx context.Context, c *dns.Client, size int, count uint64, interval time.Duration) error {
+func runProbes(ctx context.Context, c transport.Connection, size int, count uint64, interval time.Duration) error {
+	var sessionDone <-chan struct{}
+	if dnsClient, ok := c.(*dns.Client); ok {
+		sessionDone = dnsClient.Session.Done()
+	}
 	probeCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var sent, received atomic.Uint64
@@ -565,7 +569,7 @@ func runProbes(ctx context.Context, c *dns.Client, size int, count uint64, inter
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-c.Session.Done():
+		case <-sessionDone:
 			return io.EOF
 		case err := <-errCh:
 			return err
@@ -593,7 +597,7 @@ func runProbes(ctx context.Context, c *dns.Client, size int, count uint64, inter
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-c.Session.Done():
+		case <-sessionDone:
 			return io.EOF
 		case err := <-errCh:
 			return err

@@ -172,6 +172,47 @@ forward list
 
 **Verify on INTERNAL TARGET:** `curl http://AGENT_IP:8080/`. **Background/stop:** `background` keeps the forward active; `sudo undertow client attach` returns. Type `forward del 0.0.0.0:8080`, then `quit` to stop the client. Ctrl+C stops the HTTP service and **AGENT**; type `stop` on **SERVER**. The forward also closes if either endpoint disconnects.
 
+## Choose a transport
+
+The examples above use **DNS** (direct UDP/53). Keep it for the DNS VPN use case when direct UDP DNS is the available outbound path, including some restrictive or captive portal networks. The same server, agent, and client console commands work with these alternatives:
+
+| Goal | Carrier | Network path |
+| --- | --- | --- |
+| General HTTPS compatibility, including HTTP CONNECT proxy environments | `websocket` | TCP/443 with TLS and a WebSocket upgrade |
+| Higher performance where UDP/443 is open | `quic` | QUIC over UDP/443 |
+
+For either alternative, provision a TLS certificate and key on **SERVER**. These commands use a certificate for `vpn.example.com`, the server hostname `vpn.example.com`, the fingerprint printed by `undertow init`, and the same `token.key` as above. Allow the named inbound port on **SERVER**.
+
+**WebSocket goal → SERVER + AGENT + optional CLIENT → start:**
+
+```sh
+# SERVER, terminal 1; TCP/443
+sudo undertow server --transport websocket --tls-cert server.crt --tls-key server.key
+
+# AGENT, terminal 2
+undertow agent --transport websocket --server vpn.example.com:443 --fingerprint FINGERPRINT --token-file token.key
+
+# CLIENT, terminal 3 when internal routing is wanted
+sudo undertow client --transport websocket --internal --server SERVER_IP:443 --tls-server-name vpn.example.com --fingerprint FINGERPRINT --token-file token.key
+```
+
+**Use the CLIENT console:** `agents`, `use 1`, `show`, `routes`, `route accept 10.20.0.0/16` (or `route add 10.20.0.0/16`). **Verify on CLIENT:** `curl http://10.20.0.50/`. **Background/stop:** `background` detaches, `sudo undertow client attach` returns, and `quit` stops the client. On **SERVER**, `background` detaches and `stop` shuts it down; Ctrl+C stops **AGENT**. For Internet egress without an agent, use `--vpn` instead of `--internal` on **CLIENT** and verify with `curl -4 https://api.ipify.org`.
+
+**QUIC goal → same components and consoles → start:**
+
+```sh
+# SERVER, terminal 1; UDP/443
+sudo undertow server --transport quic --tls-cert server.crt --tls-key server.key
+
+# AGENT, terminal 2
+undertow agent --transport quic --server vpn.example.com:443 --fingerprint FINGERPRINT --token-file token.key
+
+# CLIENT, terminal 3 when internal routing is wanted
+sudo undertow client --transport quic --internal --server SERVER_IP:443 --tls-server-name vpn.example.com --fingerprint FINGERPRINT --token-file token.key
+```
+
+**Use and verify:** follow the same client console and `curl` steps as WebSocket. **Background/stop:** use the same `background`, `attach`, `quit`, and server `stop` commands. A private or self-signed TLS certificate needs `--tls-insecure-skip-verify` on **AGENT** and **CLIENT**; keep `--fingerprint FINGERPRINT` to verify the separate Undertow identity. The TLS certificate and the Undertow identity key are distinct. See the [CLI reference](cli-reference.md) for `--websocket-path` and transport-specific flags.
+
 ## For scripts and automation
 
 The same operations have standalone commands. For example, on **SERVER** after an agent connects, `sudo undertow status --json` gives its full ID, and `sudo undertow route add 10.20.0.0/16 --via AGENT_ID` configures a global route. `sudo undertow route del 10.20.0.0/16` removes it. Use `server --background` or `client --background` for deliberately detached startup, and `server --foreground` or `client --foreground` for a foreground worker without the interactive console. See [deployment scenarios](scenarios.md), [console commands](console.md), and the [CLI reference](cli-reference.md) for detailed options.

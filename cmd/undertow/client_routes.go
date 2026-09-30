@@ -197,7 +197,7 @@ func (c *liveClientConsole) applyGlobalRouteStatus(data []byte) error {
 	if internal {
 		for _, route := range status.Routes {
 			prefix := route.Prefix.Masked()
-			if !route.Active || !prefix.IsValid() || !prefix.Addr().Is4() || prefix.Bits() == 0 || prefix.Contains(c.serverIP) || prefix.Contains(c.tunnelPrefix.Addr()) || c.tunnelPrefix.Contains(prefix.Addr()) {
+			if !route.Active || !prefix.IsValid() || !prefix.Addr().Is4() || prefix.Bits() == 0 || prefix.Contains(c.serverIP) || prefix.Contains(c.carrierIP) || prefix.Contains(c.tunnelPrefix.Addr()) || c.tunnelPrefix.Contains(prefix.Addr()) {
 				continue
 			}
 			conflict := false
@@ -242,8 +242,8 @@ func (c *liveClientConsole) activateRoute(ctx context.Context, route control.Acc
 		return errors.New("VPN client is not connected")
 	}
 	prefix, err := netip.ParsePrefix(route.Prefix)
-	if err != nil || !prefix.Addr().Is4() || prefix.Contains(c.serverIP) || prefix.Contains(c.tunnelPrefix.Addr()) || c.tunnelPrefix.Contains(prefix.Addr()) {
-		return errors.New("route is invalid or overlaps the DNS server or client tunnel network")
+	if err != nil || !prefix.Addr().Is4() || prefix.Contains(c.serverIP) || prefix.Contains(c.carrierIP) || prefix.Contains(c.tunnelPrefix.Addr()) || c.tunnelPrefix.Contains(prefix.Addr()) {
+		return errors.New("route is invalid or overlaps the server, carrier endpoint, or client tunnel network")
 	}
 	path := fmt.Sprintf("/v1/clients/%d/routes", id)
 	if _, err := c.call(ctx, http.MethodPost, path, route); err != nil {
@@ -323,8 +323,8 @@ func (c *liveClientConsole) routeCommand(ctx context.Context, args []string, out
 	}
 	if len(args) == 4 && args[0] == "route" && (args[1] == "accept" || args[1] == "add") {
 		prefix, err := netip.ParsePrefix(args[2])
-		if err != nil || !prefix.Addr().Is4() || prefix.Contains(c.serverIP) || prefix.Contains(c.tunnelPrefix.Addr()) || c.tunnelPrefix.Contains(prefix.Addr()) {
-			return errors.New("route must be IPv4 CIDR outside the DNS server and client tunnel networks")
+		if err != nil || !prefix.Addr().Is4() || prefix.Contains(c.serverIP) || prefix.Contains(c.carrierIP) || prefix.Contains(c.tunnelPrefix.Addr()) || c.tunnelPrefix.Contains(prefix.Addr()) {
+			return errors.New("route must be IPv4 CIDR outside the server, carrier endpoint, and client tunnel networks")
 		}
 		prefix = prefix.Masked()
 		for _, local := range c.localNetworks {

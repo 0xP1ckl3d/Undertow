@@ -8,7 +8,7 @@ The fastest internal-only setup needs no server route configuration: start the s
 
 ### Server role
 
-The server accepts direct-DNS sessions, authenticates agents and clients, owns the local operator API, and routes traffic to server sockets or selected agents. Its proxy TUN is optional.
+The server accepts DNS, HTTPS/WebSocket, or QUIC sessions, authenticates agents and clients, owns the local operator API, and routes traffic to server sockets or selected agents. Its proxy TUN is optional.
 
 ```text
 Server: undertow init
@@ -34,7 +34,13 @@ VPN client: sudo undertow client --internal --server SERVER_IP:53 --fingerprint 
 VPN client console: agents
 ```
 
-### Direct DNS transport and encrypted multiplexing
+### Transport choices and encrypted multiplexing
+
+Choose `--transport dns` (default) when direct UDP/53 is available, including some restrictive or captive portal networks; `--transport websocket` for HTTPS compatibility over TCP/443 and HTTP CONNECT proxies; or `--transport quic` for UDP/443. The server and connecting agent/client select the same carrier. WebSocket and QUIC need server `--tls-cert` and `--tls-key`; peers verify TLS and independently pin the Undertow Ed25519 fingerprint. See [Quickstart transport examples](docs/quickstart.md#choose-a-transport) and the [CLI reference](docs/cli-reference.md#transport-selection).
+
+The same authenticated session, mux, routing, jobs, file transfer, and console operations run over all three carriers. WebSocket uses a persistent TLS connection; QUIC uses a bidirectional stream over UDP/443. DNS keeps its own adaptive wire behavior.
+
+### Direct DNS details
 
 The carrier is direct DNS over UDP to the configured numeric server address and domain. It does not depend on a recursive resolver or iodine. An authenticated encrypted session carries mux streams for network flows, commands, files, and control traffic. DNS polling, outstanding queries, fragment size, send window, and receive window adapt to path conditions.
 
@@ -84,7 +90,7 @@ VPN client: sudo undertow client --internal --server SERVER_IP:53 --client-key o
 
 ### Full IPv4 VPN mode
 
-`--vpn` installs `0.0.0.0/1` and `128.0.0.0/1` on the client, pins the physical DNS-server route, and verifies public egress by default. The server uses its own sockets for Internet traffic. IPv6 is outside this mode.
+`--vpn` installs `0.0.0.0/1` and `128.0.0.0/1` on the client, pins the physical server route, and verifies public egress by default. The server uses its own sockets for Internet traffic. IPv6 is outside this mode.
 
 ```text
 VPN client: sudo undertow client --vpn --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
@@ -93,7 +99,7 @@ VPN client: curl -4 https://api.ipify.org
 
 ### Internal-only routing mode
 
-`--internal` creates the client TUN/Wintun and pins the DNS transport route without installing Internet `/1` routes or requiring a public egress check. The client's default Internet route remains in place. Accept a reported route in the client console; no server route command is needed.
+`--internal` creates the client TUN/Wintun and pins the carrier server route without installing Internet `/1` routes or requiring a public egress check. The client's default Internet route remains in place. Accept a reported route in the client console; no server route command is needed.
 
 ```text
 VPN client: sudo undertow client --internal --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key

@@ -1,6 +1,6 @@
 # Deployment scenarios
 
-These commands use `undertow` as shorthand for `./bin/undertow` on Linux or `.\bin\undertow.exe` on Windows. Replace all uppercase placeholders. Use the same enrollment and fingerprint settings on both ends; [getting started](getting-started.md) explains token, password, open enrollment, and trust on first use. On Linux, prefix operator commands with `sudo` when an elevated server owns `control.key`.
+These examples use the default DNS carrier. For WebSocket or QUIC, use [Quickstart transport choices](quickstart.md#choose-a-transport). These commands use `undertow` as shorthand for `./bin/undertow` on Linux or `.\bin\undertow.exe` on Windows. Replace all uppercase placeholders. Use the same enrollment and fingerprint settings on both ends; [getting started](getting-started.md) explains token, password, open enrollment, and trust on first use. On Linux, prefix operator commands with `sudo` when an elevated server owns `control.key`.
 
 ## 1. Confirm an unprivileged agent
 

@@ -53,3 +53,29 @@ func TestDoctorAddressAndOverlap(t *testing.T) {
 		t.Fatal("reported unrelated networks as overlapping")
 	}
 }
+
+func TestDoctorWebSocketPath(t *testing.T) {
+	dir := t.TempDir()
+	token := filepath.Join(dir, "token.key")
+	if err := os.WriteFile(token, []byte(strings.Repeat("a", 64)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	err := doctorCommand([]string{"agent", "--transport", "websocket", "--websocket-path", "bad", "--server", "127.0.0.1:443", "--fingerprint", strings.Repeat("b", 64), "--token-file", token, "--pid-file", filepath.Join(dir, "missing.pid")}, &output)
+	if err == nil || !strings.Contains(output.String(), "FAIL WebSocket path") {
+		t.Fatalf("err=%v output=%s", err, output.String())
+	}
+}
+
+func TestDoctorWebSocketHostname(t *testing.T) {
+	dir := t.TempDir()
+	token := filepath.Join(dir, "token.key")
+	if err := os.WriteFile(token, []byte(strings.Repeat("a", 64)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	err := doctorCommand([]string{"agent", "--transport", "websocket", "--server", "vpn.example.com:443", "--fingerprint", strings.Repeat("b", 64), "--token-file", token, "--pid-file", filepath.Join(dir, "missing.pid")}, &output)
+	if err != nil || !strings.Contains(output.String(), "Result: 0 fail(s)") {
+		t.Fatalf("err=%v output=%s", err, output.String())
+	}
+}

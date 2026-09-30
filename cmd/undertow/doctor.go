@@ -36,6 +36,7 @@ func doctorCommand(args []string, output io.Writer) error {
 	role := args[0]
 	f := flag.NewFlagSet("doctor "+role, flag.ContinueOnError)
 	f.SetOutput(io.Discard)
+	carrier := addCarrierFlags(f)
 	auth := f.String("auth", "token", "enrollment mode")
 	tokenFile := f.String("token-file", "token.key", "enrollment token")
 	token := f.String("token", "", "enrollment token value")
@@ -47,7 +48,7 @@ func doctorCommand(args []string, output io.Writer) error {
 	var routes advertisedRoutes
 	var forwardValues forwards
 	if role == "server" {
-		listen = f.String("listen", "0.0.0.0:53", "UDP listener")
+		listen = f.String("listen", "", "carrier listener")
 		controlListen = f.String("control-listen", "127.0.0.1:47889", "operator API")
 		identity = f.String("identity", "identity.key", "server key")
 		tunEnabled = f.Bool("tun", false, "server proxy TUN")
@@ -71,8 +72,18 @@ func doctorCommand(args []string, output io.Writer) error {
 	if f.NArg() > 0 {
 		return fmt.Errorf("doctor %s: unexpected argument %q", role, f.Arg(0))
 	}
+	if err := carrier.validate(); err != nil {
+		return err
+	}
 	r := &doctorReport{w: output}
 	fmt.Fprintf(output, "Undertow doctor: %s (read-only)\n", role)
+	r.pass("transport", *carrier.kind)
+	if *carrier.kind == "websocket" && (*carrier.path == "" || (*carrier.path)[0] != '/' || strings.ContainsAny(*carrier.path, "?#")) {
+		r.fail("WebSocket path", "--websocket-path must start with / and contain no query or fragment")
+	}
+	if *carrier.kind != "dns" && *carrier.skipTLSVerify {
+		r.warn("TLS verification", "certificate verification disabled; pin the Undertow identity with --fingerprint")
+	}
 	r.pass("platform", runtime.GOOS+"/"+runtime.GOARCH)
 	privileged := doctorPrivileged()
 	if role == "agent" {
@@ -82,12 +93,27 @@ func doctorCommand(args []string, output io.Writer) error {
 	} else if role == "client" || *tunEnabled {
 		r.fail("privilege", "TUN/Wintun setup needs root or Administrator; rerun elevated")
 	} else {
-		r.warn("privilege", "not elevated; binding UDP/53 may need root on Linux")
+		r.warn("privilege", "not elevated; binding ports below 1024 may need root on Linux")
 	}
 	checkDoctorCredential(r, *auth, *tokenFile, *token, *passwordFile, *password)
 	if role == "server" {
+		if *listen == "" {
+			if *carrier.kind == "dns" {
+				*listen = "0.0.0.0:53"
+			} else {
+				*listen = "0.0.0.0:443"
+			}
+		}
 		checkDoctorFile(r, "identity", *identity, false, "run 'undertow init' to create the server identity")
-		checkDoctorBind(r, "UDP listener", "udp4", *listen)
+		if *carrier.kind != "dns" {
+			checkDoctorFile(r, "TLS certificate", *carrier.cert, true, "provide --tls-cert PEM")
+			checkDoctorFile(r, "TLS key", *carrier.key, true, "provide --tls-key PEM")
+		}
+		if *carrier.kind == "websocket" {
+			checkDoctorBind(r, "TCP listener", "tcp4", *listen)
+		} else {
+			checkDoctorBind(r, "UDP listener", "udp4", *listen)
+		}
 		checkDoctorBind(r, "operator API", "tcp4", *controlListen)
 		for _, value := range forwardValues {
 			local, _, _ := strings.Cut(value, "=")
@@ -97,7 +123,10 @@ func doctorCommand(args []string, output io.Writer) error {
 			checkDoctorTunnel(r, *tunnelAddress, netip.Addr{}, nil)
 		}
 	} else {
-		serverIP := checkDoctorServer(r, *server)
+		serverIP := checkDoctorCarrierServer(r, *server, *carrier.kind)
+		if role == "client" && *carrier.kind != "dns" && !serverIP.IsValid() {
+			r.warn("carrier route", "hostname or proxy endpoint is resolved on connection; confirm it stays outside the client tunnel network")
+		}
 		if *fingerprint != "" {
 			if _, err := normalizeFingerprint(*fingerprint); err != nil {
 				r.fail("fingerprint", err.Error()+"; copy the value printed by 'undertow init'")
@@ -199,6 +228,28 @@ func checkDoctorServer(r *doctorReport, value string) netip.Addr {
 	}
 	r.pass("server address", value+" is syntactically valid")
 	return ip
+}
+
+func checkDoctorCarrierServer(r *doctorReport, value, carrier string) netip.Addr {
+	if carrier == "dns" {
+		return checkDoctorServer(r, value)
+	}
+	host, rawPort, err := net.SplitHostPort(value)
+	port, portErr := strconv.Atoi(rawPort)
+	if err != nil || portErr != nil || port < 1 || port > 65535 || host == "" || strings.ContainsAny(host, "/\\ ") {
+		r.fail("server address", "set --server to a reachable host:port, such as vpn.example.com:443")
+		return netip.Addr{}
+	}
+	if ip, parseErr := netip.ParseAddr(host); parseErr == nil {
+		if ip.IsUnspecified() {
+			r.fail("server address", "use a reachable host or IP, not an unspecified address")
+			return netip.Addr{}
+		}
+		r.pass("server address", value+" is syntactically valid")
+		return ip
+	}
+	r.pass("server address", value+" is syntactically valid; DNS resolution will occur on connection")
+	return netip.Addr{}
 }
 
 func checkDoctorBind(r *doctorReport, name, network, address string) {

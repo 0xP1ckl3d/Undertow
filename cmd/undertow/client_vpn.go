@@ -27,7 +27,6 @@ import (
 	"undertow/internal/pivot"
 	"undertow/internal/security"
 	"undertow/internal/transport"
-	"undertow/internal/transport/dns"
 	"undertow/internal/tun"
 )
 
@@ -37,9 +36,10 @@ func clientCommand(args []string) error {
 	}
 	f := flag.NewFlagSet("client", flag.ContinueOnError)
 	lifecycle := addLifecycleFlags(f, "client")
+	carrier := addCarrierFlags(f)
 	vpn := f.Bool("vpn", false, "route IPv4 traffic through the privileged VPN client")
 	internal := f.Bool("internal", false, "use configured agent routes without changing the Internet route")
-	server := f.String("server", "", "direct DNS server IPv4:port")
+	server := f.String("server", "", "server host:port (numeric IPv4 for DNS)")
 	domain := f.String("domain", "t.undertow.invalid", "synthetic DNS domain")
 	fingerprint := f.String("fingerprint", "", "pinned server identity fingerprint")
 	fingerprintFile := f.String("fingerprint-file", "server.fingerprint", "saved server fingerprint")
@@ -111,20 +111,26 @@ func clientCommand(args []string) error {
 	if *profileFlag != "auto" && *profileFlag != "large" && *profileFlag != "small" {
 		return errors.New("invalid --payload-profile")
 	}
+	if *carrier.kind != "dns" && *profileFlag != "auto" {
+		return errors.New("--payload-profile applies only to DNS transport")
+	}
 	host, _, err := net.SplitHostPort(*server)
 	if err != nil {
 		return err
 	}
 	serverIP, err := netip.ParseAddr(host)
-	if err != nil || !serverIP.Is4() {
-		return errors.New("--server must contain an IPv4 address")
+	if *carrier.kind == "dns" && (err != nil || !serverIP.Is4()) {
+		return errors.New("DNS --server must contain an IPv4 address")
+	}
+	if *carrier.kind != "dns" && (err != nil || !serverIP.Is4()) {
+		serverIP = netip.Addr{}
 	}
 	prefix, err := netip.ParsePrefix(*address)
 	if err != nil || !prefix.Addr().Is4() {
 		return errors.New("--tunnel-address must be IPv4 CIDR")
 	}
 	if prefix.Contains(serverIP) {
-		return errors.New("VPN tunnel network contains the DNS server address")
+		return errors.New("VPN tunnel network contains the server address")
 	}
 	networks, err := tun.ExistingNetworks()
 	if err != nil {
@@ -234,7 +240,7 @@ func clientCommand(args []string) error {
 			}
 		}()
 	}
-	pinnedFingerprint, savePin, err := resolveServerFingerprint(ctx, *server, *domain, *fingerprint, *fingerprintFile, *trustFirstUse)
+	pinnedFingerprint, savePin, err := carrier.fingerprint(ctx, *server, *domain, *fingerprint, *fingerprintFile, *trustFirstUse)
 	if err != nil {
 		return err
 	}
@@ -247,17 +253,30 @@ func clientCommand(args []string) error {
 		return err
 	}
 	for ctx.Err() == nil {
-		var c *dns.Client
-		if *profileFlag == "auto" {
-			c, err = dns.DialAdaptive(ctx, *server, *domain, pinnedFingerprint, token, key)
-		} else {
-			profile := byte(0)
-			if *profileFlag == "small" {
-				profile = 1
-			}
-			c, err = dns.DialProfile(ctx, *server, *domain, pinnedFingerprint, token, key, profile)
-		}
+		c, err := carrier.dial(ctx, *server, *domain, pinnedFingerprint, token, key, *profileFlag)
 		if err == nil {
+			carrierIP := serverIP
+			if remote, ok := c.(interface{ RemoteAddr() string }); ok {
+				if host, _, splitErr := net.SplitHostPort(remote.RemoteAddr()); splitErr == nil {
+					if peerIP, parseErr := netip.ParseAddr(host); parseErr == nil && peerIP.Is4() {
+						carrierIP = peerIP
+					}
+				}
+			}
+			if !carrierIP.Is4() {
+				c.Close()
+				return errors.New("VPN client requires an IPv4 carrier endpoint")
+			}
+			if prefix.Contains(carrierIP) {
+				c.Close()
+				return errors.New("VPN tunnel network contains the carrier endpoint address")
+			}
+			live.routeMu.Lock()
+			if !serverIP.IsValid() {
+				live.serverIP = carrierIP
+			}
+			live.carrierIP = carrierIP
+			live.routeMu.Unlock()
 			if savePin {
 				if err := saveServerFingerprint(*fingerprintFile, pinnedFingerprint); err != nil {
 					c.Close()
@@ -266,7 +285,7 @@ func clientCommand(args []string) error {
 				log.Printf("trusted server fingerprint saved to %s: %s", *fingerprintFile, pinnedFingerprint)
 				savePin = false
 			}
-			err = runVPN(ctx, c, serverIP, *vpn, *internal, *tunName, *address, prefix, *verifyURL, live.set)
+			err = runVPN(ctx, c, carrierIP, *vpn, *internal, *tunName, *address, prefix, *verifyURL, live.set)
 			c.Close()
 			if err != nil && !errors.Is(err, io.EOF) && ctx.Err() == nil {
 				live.notify("VPN error: " + err.Error())
@@ -300,6 +319,7 @@ type liveClientConsole struct {
 	routes        []control.AcceptedRoute
 	events        chan string
 	serverIP      netip.Addr
+	carrierIP     netip.Addr
 	tunnelPrefix  netip.Prefix
 }
 
@@ -349,7 +369,7 @@ func (c *liveClientConsole) transferProgress(ctx context.Context, encoded []byte
 	return pivot.TransferFileProgress(ctx, session, input.AgentID, input.Operation, input.LocalPath, input.RemotePath, progress)
 }
 
-func runVPN(parent context.Context, c transport.Connection, serverIP netip.Addr, vpn, internal bool, name, address string, prefix netip.Prefix, verifyURL string, onActive func(*mux.Mux, uint64, *tun.Device)) error {
+func runVPN(parent context.Context, c transport.Connection, carrierIP netip.Addr, vpn, internal bool, name, address string, prefix netip.Prefix, verifyURL string, onActive func(*mux.Mux, uint64, *tun.Device)) error {
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	m := mux.New(ctx, c, false)
@@ -420,9 +440,9 @@ func runVPN(parent context.Context, c transport.Connection, serverIP netip.Addr,
 			log.Print("VPN packet stack did not stop before reconnect")
 		}
 	}()
-	unpin, err := tun.PinServer(serverIP)
+	unpin, err := tun.PinServer(carrierIP)
 	if err != nil {
-		return fmt.Errorf("pin DNS carrier route: %w", err)
+		return fmt.Errorf("pin carrier route: %w", err)
 	}
 	defer unpin()
 	removeModeRoutes, err := installClientModeRoutes(device, vpn)
@@ -431,7 +451,7 @@ func runVPN(parent context.Context, c transport.Connection, serverIP netip.Addr,
 	}
 	defer removeModeRoutes()
 	if vpn && verifyURL != "" {
-		log.Printf("VPN routes installed through %s; verifying egress", serverIP)
+		log.Printf("VPN routes installed through %s; verifying egress", carrierIP)
 		verifyCtx, verifyCancel := context.WithTimeout(ctx, 30*time.Second)
 		type verificationResult struct {
 			ip  string
@@ -461,9 +481,9 @@ func runVPN(parent context.Context, c transport.Connection, serverIP netip.Addr,
 		log.Printf("public egress IP: %s", publicIP)
 	}
 	if vpn {
-		log.Printf("VPN active through %s; internal pivots=%t", serverIP, internal)
+		log.Printf("VPN active through %s; internal pivots=%t", carrierIP, internal)
 	} else {
-		log.Printf("internal tunnel active through %s; Internet routes unchanged", serverIP)
+		log.Printf("internal tunnel active through %s; Internet routes unchanged", carrierIP)
 	}
 	if err := markBackgroundReady(); err != nil {
 		return err

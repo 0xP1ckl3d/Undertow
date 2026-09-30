@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/hashicorp/yamux v0.1.2
+	github.com/quic-go/quic-go v0.58.0
 	github.com/tetratelabs/wazero v1.12.0
 	github.com/vishvananda/netlink v1.3.1
 	github.com/xtaci/smux v1.5.57
@@ -16,5 +17,7 @@ require (
 require (
 	github.com/google/btree v1.1.2 // indirect
 	github.com/vishvananda/netns v0.0.5 // indirect
+	golang.org/x/crypto v0.50.0 // indirect
+	golang.org/x/net v0.53.0 // indirect
 	golang.org/x/time v0.7.0 // indirect
 )
