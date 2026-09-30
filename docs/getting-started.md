@@ -49,7 +49,7 @@ The server prints a fingerprint. Copy `token.key` securely to the agent host, th
 undertow agent --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
 ```
 
-On the server, `sudo undertow status` should show the agent under **Agents** when the elevated server created `control.key`. A connected VPN client appears under **VPN clients**; it needs no agent route for Internet egress. Stop either foreground process with Ctrl+C. The server identity stays on the server. Each agent and VPN client creates its **own** Ed25519 key file (`agent.key` or `client.key`) on first run. Never copy `identity.key` to a client.
+The terminal server command opens its operator console. Type `agents`, `use 1`, and `show` to inspect the agent, or `status` for the full view. A connected VPN client appears under **VPN clients**; it needs no agent route for Internet egress. On the server, `background` or `quit` detaches, `sudo undertow server attach` returns, and `stop` shuts the worker down gracefully. Stop the foreground agent with Ctrl+C. The server identity stays on the server. Each agent and VPN client creates its **own** Ed25519 key file (`agent.key` or `client.key`) on first run. Never copy `identity.key` to a client.
 
 ## Enrollment choices
 

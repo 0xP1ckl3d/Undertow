@@ -57,6 +57,8 @@ Creates or reuses an Ed25519 server key at `identity.key`, creates or reuses a r
 
 The server may require privilege to bind UDP/53 or create a proxy interface. A second positional `server` is an error; write `undertow server --listen ...`. For real deployments, use token or password enrollment. `--auth none` lets any reachable peer enroll, access network paths, and execute programs on agents that allow it; the server prints a warning at startup.
 
+In a terminal, `server` starts a separate worker and opens its operator console. `background`, `quit`, and `exit` detach without stopping the worker. `undertow server attach` returns; `logs` shows recent worker logs, `logs follow` streams them until Enter, and `stop` shuts the worker down gracefully. `server --background` skips the console. `server --foreground` runs the worker directly for service managers or debugging. If startup used custom `--pid-file`, `--control-listen`, `--control-token-file`, or `--log-file`, provide the matching `--pid-file`, `--control`, `--control-token-file`, or `--log-file` on `server attach`.
+
 ## `agent`
 
 `undertow agent --server IP:PORT [--fingerprint HEX | --trust-on-first-use] [FLAGS]`
@@ -120,13 +122,13 @@ In a terminal, any client mode opens the interactive console by default. The tun
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `--foreground` | Active if no mode selected | Server/agent run in the terminal. VPN client opens its console when terminal input is present. |
+| `--foreground` | Agent default | Run the worker in the foreground without a console for server/client; agent already runs in the foreground. Useful for service managers, containers, debugging, and automation. |
 | `--background` | Off | Detach, logging to a file and creating protected PID/control state. |
 | `--stop` | Off | Ask the background process to stop gracefully. |
 | `--log-file PATH` | `undertow-MODE.log` | Background log path. |
 | `--pid-file PATH` | `undertow-MODE.pid` | Background control state path. |
 
-Choose only one of foreground, background, and stop. `--stop` needs the same `--pid-file` used on startup; the other connection flags are not needed for stop. A background process runs with the privilege of the command that launched it; a privileged server or VPN client should also be stopped at the needed privilege. The interactive VPN's worker retains the launch privilege when its console detaches. Graceful stop cleans owned routes; forced termination may require manual OS route inspection.
+Choose only one of foreground, background, and stop. With no lifecycle flag in a terminal, server and client open their consoles; without a terminal they run in the foreground. `--stop` needs the same `--pid-file` used on startup; the other connection flags are not needed for stop. A worker runs with the privilege of the command that launched it; a privileged server or VPN client should also be stopped at the needed privilege. Graceful stop cleans owned routes; forced termination may require manual OS route inspection.
 
 ## Operator commands
 
@@ -136,6 +138,7 @@ These commands run on the server host and use its loopback API. All accept `--co
 | --- | --- |
 | `undertow status [--json]` | Connected agents and VPN clients separately, their hostnames, selected agent, route state, counters. |
 | `undertow console` | Interactive console attached to the running server's loopback API. |
+| `undertow server attach` | Reopen the server console after detaching; accepts the worker's PID, control, token, and log paths. |
 | `undertow agent list [--json]` | Alias of `status`; also shows VPN clients. |
 | `undertow agent show AGENT_ID [--json]` | Detailed human view, or JSON, for one agent. |
 | `undertow agent select AGENT_ID` | Set selected agent for operations that use the selection. |

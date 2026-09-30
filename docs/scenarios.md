@@ -110,7 +110,7 @@ Selection chooses the default agent for operations that permit it; an explicit `
 
 ## 7. Foreground, background, and diagnostic probes
 
-`--foreground` is the default for server, agent, and VPN client. To detach, use `--background`; the process writes a log and a protected PID/control state file in the current directory. Stop it gracefully with the same command mode and `--stop` from that directory, or supply the original `--pid-file`:
+In a terminal, `server` and `client` open their consoles while a separate worker stays running. Type `background` to detach and use `undertow server attach` or `undertow client attach` to return. The agent runs in the foreground by default. For deliberately detached startup, use `--background`; for a foreground server or client worker without a console, use `--foreground`. Detached workers write a log and protected PID/control state file in the current directory. Stop one gracefully with its console command (`stop` on the server, `quit` on the client) or with `--stop` from that directory, supplying the original `--pid-file` when customized:
 
 ```sh
 sudo undertow server --listen 0.0.0.0:53 --tun --background
@@ -121,7 +121,7 @@ sudo undertow client --vpn --server SERVER_IP:53 --fingerprint FINGERPRINT --bac
 sudo undertow client --stop
 ```
 
-Use `--log-file PATH --pid-file PATH` on start to separate multiple instances, and the same `--pid-file` on stop. Prefer a file for passwords; command line passwords can be read from process listings. A background start waits for the server to listen, the agent to connect, or the VPN to become active before reporting success. If readiness times out, it stops the child and reports an error. The log contains diagnostics without the terminal banner. Graceful stop withdraws owned routes. A forced kill can leave OS route state and should be followed by manual inspection.
+Use `--log-file PATH --pid-file PATH` on start to separate multiple instances, and the same paths on `server attach` or the same `--pid-file` on stop. Prefer a file for passwords; command line passwords can be read from process listings. A background start waits for the server to listen, the agent to connect, or the VPN to become active before reporting success. If readiness times out, it stops the child and reports an error. The log contains diagnostics without the terminal banner. Graceful stop withdraws owned routes. A forced kill can leave OS route state and should be followed by manual inspection.
 
 To test the encrypted transport without target sockets, start a dedicated server with `--probe-echo` and an unused UDP port, then run an agent with `--probe` against that port:
 
@@ -134,16 +134,16 @@ Run the second command on the same host for this loopback example. `--probe-echo
 
 ## 8. Interactive consoles and agent commands
 
-Run the server and agent normally. Current agent capabilities are allowed by default; add `--deny=exec` where operators must not launch arbitrary programs, or combine names such as `--deny=exec,upload,download`. Built-in host operations remain available unless `hostops` is also denied:
+Run the server and agent normally. The server terminal opens its operator console. Current agent capabilities are allowed by default; add `--deny=exec` where operators must not launch arbitrary programs, or combine names such as `--deny=exec,upload,download`. Built-in host operations remain available unless `hostops` is also denied:
 
 ```sh
 undertow agent --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
 ```
 
-On the server host, open the operator console. Use `sudo` if the server created `control.key` with root only access:
+On the server host, use the console opened by `undertow server`. After detaching, reconnect with:
 
 ```sh
-sudo undertow console
+sudo undertow server attach
 ```
 
 Inside the console:

@@ -1,6 +1,6 @@
 # Undertow feature catalogue
 
-Undertow runs on **Linux and Windows**. The commands below use `undertow` as the executable name; substitute `./bin/undertow` on Linux or `.\bin\undertow.exe` in Windows PowerShell. Replace `SERVER_IP`, `FINGERPRINT`, `AGENT_ID`, and example network addresses with values from your deployment. A line labeled **Server** runs on the Undertow server host; **Agent** runs on a host inside the target network; **VPN client** runs on the host whose applications will use the tunnel; **Other internal host** is a machine reached through the agent. Console lines run after the preceding `undertow console` or `undertow client` command opens its prompt.
+Undertow runs on **Linux and Windows**. The commands below use `undertow` as the executable name; substitute `./bin/undertow` on Linux or `.\bin\undertow.exe` in Windows PowerShell. Replace `SERVER_IP`, `FINGERPRINT`, `AGENT_ID`, and example network addresses with values from your deployment. A line labeled **Server** runs on the Undertow server host; **Agent** runs on a host inside the target network; **VPN client** runs on the host whose applications will use the tunnel; **Other internal host** is a machine reached through the agent. In a terminal, `undertow server` and `undertow client` open their consoles automatically.
 
 The fastest internal-only setup needs no server route configuration: start the server and agent, connect a client with `--internal`, then use `agents`, `use 1`, `routes`, and `route accept CIDR` in the **VPN client** console. Use `route add CIDR` there for a known network that was not reported.
 
@@ -322,10 +322,10 @@ With this example, built-in host operations and interactive sessions still work.
 
 ### Server and client consoles
 
-The server console uses the authenticated local loopback API. The client console opens automatically in a terminal and manages its own route acceptance, forwards, commands, jobs, and files. `agents`, `use NUMBER`, `help`, and `back` provide an agent-focused workflow.
+The server console opens automatically in a terminal and uses the authenticated local loopback API. The client console also opens automatically and manages its own route acceptance, forwards, commands, jobs, and files. `agents`, `use NUMBER`, `help`, and `back` provide an agent-focused workflow.
 
 ```text
-Server: sudo undertow console
+Server: sudo undertow server --listen 0.0.0.0:53
 Server console: agents
 Server console: use 1
 Server console: show
@@ -337,7 +337,7 @@ VPN client console: help
 
 ### Background, detach, and attach
 
-Server, agent, and client support `--foreground`, `--background`, `--stop`, `--log-file`, and `--pid-file`. A client console can detach with `background` while the worker, routes, jobs, and forwards continue, then attach again. `quit` stops the client and removes owned routes.
+Server, agent, and client support `--foreground`, `--background`, `--stop`, `--log-file`, and `--pid-file`. In a terminal, server and client open consoles by default; `--foreground` runs their workers without a console. Either console can detach with `background` while its worker continues, then attach again. On the server, `quit` detaches and `stop` shuts down; on the client, `quit` stops the client and removes owned routes.
 
 ```text
 VPN client console: background

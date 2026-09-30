@@ -1,6 +1,6 @@
 # Interactive consoles
 
-Undertow has two interactive consoles. Run `undertow console` on the **server host** to manage global routes and connected agents. Run `undertow client --vpn --server SERVER_IP:53` in a terminal on the **VPN client host** to open its local console after the VPN connects. That console manages only its own accepted routes and internal routing mode. Both consoles can select an agent, so commands inside its menu do not require a long agent ID.
+Undertow has two interactive consoles. Run `undertow server` in a terminal on the **server host** to start its worker and open the operator console. Run `undertow client --vpn --server SERVER_IP:53` in a terminal on the **VPN client host** to start its worker and open the client console. Both consoles can select an agent, so commands inside its menu do not require a long agent ID. The client console manages only that client's accepted routes and internal routing mode.
 
 See [getting started](getting-started.md) for enrollment, fingerprint, and privilege setup. In the examples below, `undertow` means `./bin/undertow` on Linux or `.\bin\undertow.exe` on Windows. Use `sudo` for server console access if the elevated server owns `control.key`; a VPN client needs elevation to install routes.
 
@@ -14,7 +14,7 @@ See [getting started](getting-started.md) for enrollment, fingerprint, and privi
 | `use NUMBER` | Enter the numbered agent's menu. An unambiguous hostname or ID prefix also works. `select NUMBER` is an alias within the console. |
 | `back` | Return from an agent menu to the main menu. |
 | `routes` | Show routes; from an agent menu, filter to that agent. |
-| `quit` or `exit` | Leave the server console. In the VPN client console, stop the VPN and remove its owned routes. |
+| `quit` or `exit` | Detach the server console without stopping its worker. In the VPN client console, stop the VPN and remove its owned routes. |
 
 Agent numbers can change after connections change. Run `agents` again before selecting by number. Type `help` after `use` to see that agent's menu. Quote a path or argument containing spaces with single or double quotes. The console parses quotes; it does not expand shell variables or run shell syntax.
 
@@ -22,17 +22,18 @@ When input is an interactive terminal, Up and Down recall commands and Tab compl
 
 ## Server console
 
-Start the server separately, then on the server host run:
+Start the server on the server host; its console opens automatically. After an agent joins, use:
 
 ```text
-undertow console
+sudo undertow server --listen 0.0.0.0:53 --tun
 agents
 use 1
+show
 route add 10.20.0.0/16
 routes
 back
 status
-quit
+background
 ```
 
 | Command | Where | Action |
@@ -53,12 +54,15 @@ quit
 | `agent show AGENT_ID` | Main menu | Show that agent's detailed telemetry. |
 | `exec AGENT_ID PROGRAM [ARGS]` | Main menu | Start one program directly on the named agent. |
 | `HOST_OP AGENT_ID [ARGS]` | Main menu | Run a built-in host operation on the named agent. See the table below. |
+| `logs` / `logs follow` | Either menu | Show recent worker logs or follow new lines until Enter. |
+| `background` / `quit` / `exit` | Either menu | Detach the console while the server continues. |
+| `stop` | Either menu | Gracefully stop the server worker. |
 
 `route add` on the server affects server managed routing. The server's optional proxy TUN is needed for the server host to send ordinary IP traffic to that route. Agent selection in the interactive menu is local to the console; the separate `undertow agent select AGENT_ID` command changes the server's API selection.
 
 Each agent also reports structured IPv4 routes when available. The client console's `routes` command labels directly attached networks and networks reached through a gateway, including the interface and route source. It shows the agent's default route separately for information. Use `route accept CIDR` in the selected-agent menu for a reported candidate, or `route add CIDR` for another route you know that agent can reach. Both install only on this VPN client. A prefix overlapping this client's existing local networks is rejected.
 
-The server console uses the server's loopback API. If its address or token file was customized, pass `undertow console --control IP:PORT --control-token-file PATH`. This control credential stays on the server host. The enrollment token used by clients and agents is separate.
+After detaching, run `sudo undertow server attach` to return. A server started with `--background` can be attached the same way. If startup used custom `--pid-file`, `--control-listen`, `--control-token-file`, or `--log-file` paths, supply the matching `--pid-file`, `--control`, `--control-token-file`, or `--log-file` on `server attach`. `undertow console` remains available to connect directly to a server's loopback API, including a `server --foreground` worker. The control credential stays on the server host and differs from the enrollment token shared with agents and clients.
 
 ## VPN client console
 
