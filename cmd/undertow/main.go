@@ -87,6 +87,8 @@ func main() {
 		} else {
 			err = writeExamples(os.Stdout)
 		}
+	case "doctor":
+		err = doctorCommand(os.Args[2:], os.Stdout)
 	default:
 		_ = writeHelp(os.Stderr, "")
 		os.Exit(2)

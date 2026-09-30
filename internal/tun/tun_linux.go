@@ -21,6 +21,14 @@ type Device struct {
 	routes map[string]*netlink.Route
 }
 
+// CheckAvailability inspects the local TUN device without creating an interface.
+func CheckAvailability() error {
+	if _, err := os.Stat("/dev/net/tun"); err != nil {
+		return fmt.Errorf("/dev/net/tun is unavailable: %w; load the tun module or enable the device", err)
+	}
+	return nil
+}
+
 // Open creates a non-persistent TUN interface. Closing the descriptor removes
 // the interface; explicit routes are removed first if still owned by it.
 func Open(name, address string) (*Device, error) {

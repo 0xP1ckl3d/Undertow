@@ -54,6 +54,7 @@ Commands:
   route      Add, remove, or list agent pivot routes.
   session    Disconnect an agent session.
   examples   Show common setups with commands by machine.
+  doctor     Check local prerequisites before starting a role.
   version    Print build version.
 
 Run 'undertow help COMMAND' for flags and examples, or see README.md.
@@ -297,6 +298,38 @@ session; a running agent may reconnect automatically.
 `
 	case "examples":
 		return writeExamples(w)
+	case "doctor":
+		body = `undertow doctor — read-only local startup checks
+
+Usage: undertow doctor server|agent|client [FLAGS]
+
+Common:
+  --auth MODE              token (default), password, or none.
+  --token-file PATH        Enrollment token (default token.key).
+  --password-file PATH     Password file when --auth password.
+  --pid-file PATH          Background state file for this role.
+
+Server:
+  --listen IP:PORT         UDP listener (default 0.0.0.0:53).
+  --control-listen IP:PORT Local operator API (default 127.0.0.1:47889).
+  --identity PATH          Server key (default identity.key).
+  --tun                    Check TUN/Wintun and tunnel network.
+  --forward LOCAL=REMOTE   Check a planned local TCP forward; repeatable.
+
+Agent and client:
+  --server IP:PORT         Numeric server IPv4 and UDP port.
+  --fingerprint HEX        Explicit server fingerprint; otherwise check file.
+  --fingerprint-file PATH  Saved pin (default server.fingerprint).
+  --trust-on-first-use     Allow first contact without a saved pin.
+
+Client:
+  --tunnel-address CIDR   Client TUN network (default 172.16.253.1/24).
+  --route CIDR            Check an intended internal route; repeatable.
+
+Use --tunnel-address 172.16.254.1/24 for a server proxy TUN by default.
+Doctor makes no network or route changes. FAIL exits nonzero; WARN calls out
+checks that need operator attention.
+`
 	case "version":
 		body = "undertow version — print the build version and commit.\n"
 	default:

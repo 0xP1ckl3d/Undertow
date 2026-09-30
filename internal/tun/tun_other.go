@@ -10,6 +10,8 @@ import (
 
 type Device struct{}
 
+func CheckAvailability() error { return errors.New("TUN is unsupported on this platform") }
+
 func Open(name, address string) (*Device, error) {
 	return nil, errors.New("proxy TUN is currently supported on Linux only")
 }

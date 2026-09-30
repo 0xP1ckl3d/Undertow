@@ -28,6 +28,50 @@ var wintunArchive []byte
 
 const wintunArchiveSHA256 = "07c256185d6ee3652e09fa55c0b673e2624b565e02c4b9091c79ca7d2f24ef51"
 
+// CheckAvailability verifies the bundled driver and any already extracted DLL.
+// It does not create an adapter or write a DLL.
+func CheckAvailability() error {
+	if sum := sha256.Sum256(wintunArchive); hex.EncodeToString(sum[:]) != wintunArchiveSHA256 {
+		return errors.New("bundled Wintun archive hash mismatch")
+	}
+	entryName := "wintun/bin/" + runtime.GOARCH + "/wintun.dll"
+	z, err := zip.NewReader(bytes.NewReader(wintunArchive), int64(len(wintunArchive)))
+	if err != nil {
+		return err
+	}
+	var bundledDLL []byte
+	for _, entry := range z.File {
+		if entry.Name == entryName {
+			r, err := entry.Open()
+			if err != nil {
+				return err
+			}
+			bundledDLL, err = io.ReadAll(io.LimitReader(r, 1<<20))
+			_ = r.Close()
+			if err != nil {
+				return err
+			}
+			break
+		}
+	}
+	if len(bundledDLL) == 0 {
+		return fmt.Errorf("Wintun DLL unavailable for %s", runtime.GOARCH)
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(filepath.Dir(exe), "wintun.dll")
+	if existing, err := os.ReadFile(path); err == nil {
+		if sha256.Sum256(existing) != sha256.Sum256(bundledDLL) {
+			return fmt.Errorf("existing %s differs from bundled Wintun 0.14.1; inspect the DLL before starting", path)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("cannot read %s: %w", path, err)
+	}
+	return nil
+}
+
 type Device struct {
 	name    string
 	adapter *wintun.Adapter

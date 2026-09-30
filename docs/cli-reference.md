@@ -4,6 +4,19 @@ Run `undertow help` or `undertow help COMMAND` for terminal help. Linux binary: 
 
 Run `undertow examples` (or `undertow help examples`) for short commands by host covering server pivots, internal-only clients, VPN egress, combined routing, and a single TCP forward. For verification and cleanup, see the [quickstart](quickstart.md).
 
+Run `undertow doctor server|agent|client [FLAGS]` before starting a role to check local credentials, addresses, bind ports, background state, privilege, TUN/Wintun availability, and route overlaps. Pass the relevant startup options, such as `--server`, `--tun`, `--tunnel-address`, `--route CIDR`, or `--forward LOCAL=REMOTE`. Doctor reports `PASS`, `WARN`, or `FAIL` with a remedy and changes no configuration. `FAIL` exits nonzero. For example:
+
+```sh
+# SERVER
+undertow doctor server --listen 0.0.0.0:53 --tun --forward 127.0.0.1:18080=10.20.0.50:80
+
+# AGENT
+undertow doctor agent --server SERVER_IP:53 --fingerprint FINGERPRINT
+
+# CLIENT
+undertow doctor client --server SERVER_IP:53 --fingerprint FINGERPRINT --internal --route 10.20.0.0/16
+```
+
 ## Enrollment and identity shared by connection modes
 
 | Flag | Modes | Meaning |
