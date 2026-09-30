@@ -132,27 +132,18 @@ func DiscoverFingerprint(ctx context.Context, serverAddr, domain string) (string
 		return "", err
 	}
 	domain = strings.ToLower(strings.TrimSuffix(domain, ".")) + "."
-	for i := 0; i < 4; i++ {
-		response, err := exchange(ctx, conn, domain, hs.Hello())
-		if err != nil {
-			return "", err
-		}
-		if len(response) > 0 && response[0] == security.Cookie {
-			if err := hs.AcceptCookie(response); err != nil {
-				return "", err
-			}
-			continue
-		}
-		fingerprint, err := security.ServerHelloFingerprint(response)
-		if err != nil {
-			return "", err
-		}
-		if _, err := hs.VerifyServerHello(response, fingerprint); err != nil {
-			return "", err
-		}
-		return fingerprint, nil
+	response, err := exchangeHello(ctx, conn, domain, hs)
+	if err != nil {
+		return "", err
 	}
-	return "", security.ErrHandshake
+	fingerprint, err := security.ServerHelloFingerprint(response)
+	if err != nil {
+		return "", err
+	}
+	if _, err := hs.VerifyServerHello(response, fingerprint); err != nil {
+		return "", err
+	}
+	return fingerprint, nil
 }
 
 func DialProfile(ctx context.Context, serverAddr, domain, fingerprint string, token []byte, agentKey ed25519.PrivateKey, profile byte) (*Client, error) {
@@ -199,22 +190,9 @@ func dialWithSize(ctx context.Context, serverAddr, domain, fingerprint string, t
 	}
 	hs.Profile = profile
 	hs.FragmentSize = uint16(size)
-	var response []byte
-	for i := 0; i < 4; i++ {
-		response, err = exchange(ctx, conn, domain, hs.Hello())
-		if err != nil {
-			return nil, err
-		}
-		if len(response) > 0 && response[0] == security.Cookie {
-			if err = hs.AcceptCookie(response); err != nil {
-				return nil, err
-			}
-			continue
-		}
-		if len(response) > 0 && response[0] == security.ServerHello {
-			break
-		}
-		return nil, security.ErrHandshake
+	response, err := exchangeHello(ctx, conn, domain, hs)
+	if err != nil {
+		return nil, err
 	}
 	keys, err := hs.VerifyServerHello(response, fingerprint)
 	if err != nil {
@@ -273,6 +251,36 @@ func dialWithSize(ctx context.Context, serverAddr, domain, fingerprint string, t
 	go c.run(runCtx)
 	go func() { <-runCtx.Done(); sess.Close() }()
 	return c, nil
+}
+
+// A lost cookie or server hello is retried with the same client nonce and
+// ephemeral key. Authentication still verifies the signed transcript and pin.
+func exchangeHello(ctx context.Context, conn *net.UDPConn, domain string, hs *security.ClientState) ([]byte, error) {
+	var lastErr error
+	for attempt := 0; attempt < 16; attempt++ {
+		response, err := exchange(ctx, conn, domain, hs.Hello())
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			lastErr = err
+			continue
+		}
+		if len(response) > 0 && response[0] == security.Cookie {
+			if err := hs.AcceptCookie(response); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		if len(response) > 0 && response[0] == security.ServerHello {
+			return response, nil
+		}
+		return nil, security.ErrHandshake
+	}
+	if lastErr != nil {
+		return nil, fmt.Errorf("handshake retries exhausted: %w", lastErr)
+	}
+	return nil, security.ErrHandshake
 }
 
 func (c *Client) Send(ctx context.Context, b []byte) error { return c.Session.Send(ctx, b) }
