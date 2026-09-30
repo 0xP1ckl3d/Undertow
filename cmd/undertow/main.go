@@ -23,6 +23,7 @@ import (
 	"undertow/internal/pivot"
 	"undertow/internal/routing"
 	"undertow/internal/security"
+	"undertow/internal/transport"
 	"undertow/internal/transport/dns"
 	"undertow/internal/tun"
 )
@@ -302,7 +303,7 @@ func serve(args []string) error {
 					continue
 				}
 				go func() {
-					streamMux := mux.New(ctx, p.Session, true)
+					streamMux := mux.New(ctx, p.Channel(), true)
 					helloCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 					hello, err := streamMux.RecvControl(helloCtx)
 					cancel()
@@ -360,13 +361,13 @@ func serve(args []string) error {
 	return srv.Serve(ctx)
 }
 
-func echo(ctx context.Context, p *dns.Peer) {
+func echo(ctx context.Context, p transport.Peer) {
 	for {
-		b, err := p.Session.Recv(ctx)
+		b, err := p.Channel().Recv(ctx)
 		if err != nil {
 			return
 		}
-		if err = p.Session.Send(ctx, b); err != nil {
+		if err = p.Channel().Send(ctx, b); err != nil {
 			return
 		}
 	}

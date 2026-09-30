@@ -26,6 +26,7 @@ import (
 	"undertow/internal/netstack"
 	"undertow/internal/pivot"
 	"undertow/internal/security"
+	"undertow/internal/transport"
 	"undertow/internal/transport/dns"
 	"undertow/internal/tun"
 )
@@ -348,7 +349,7 @@ func (c *liveClientConsole) transferProgress(ctx context.Context, encoded []byte
 	return pivot.TransferFileProgress(ctx, session, input.AgentID, input.Operation, input.LocalPath, input.RemotePath, progress)
 }
 
-func runVPN(parent context.Context, c *dns.Client, serverIP netip.Addr, vpn, internal bool, name, address string, prefix netip.Prefix, verifyURL string, onActive func(*mux.Mux, uint64, *tun.Device)) error {
+func runVPN(parent context.Context, c transport.Connection, serverIP netip.Addr, vpn, internal bool, name, address string, prefix netip.Prefix, verifyURL string, onActive func(*mux.Mux, uint64, *tun.Device)) error {
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	m := mux.New(ctx, c, false)
@@ -468,7 +469,7 @@ func runVPN(parent context.Context, c *dns.Client, serverIP netip.Addr, vpn, int
 		return err
 	}
 	if onActive != nil {
-		onActive(m, c.Session.ID(), device)
+		onActive(m, c.ID(), device)
 		defer onActive(nil, 0, nil)
 	}
 	select {

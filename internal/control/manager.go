@@ -23,7 +23,7 @@ import (
 	"undertow/internal/mux"
 	"undertow/internal/pivot"
 	"undertow/internal/routing"
-	"undertow/internal/transport/dns"
+	"undertow/internal/transport"
 )
 
 type RouteDevice interface {
@@ -92,7 +92,7 @@ type AcceptedRoute struct {
 }
 
 type clientState struct {
-	peer     *dns.Peer
+	peer     transport.Peer
 	mux      *mux.Mux
 	internal bool
 	hostname string
@@ -100,7 +100,7 @@ type clientState struct {
 }
 
 type agentState struct {
-	peer           *dns.Peer
+	peer           transport.Peer
 	mux            *mux.Mux
 	inventory      AgentInfo
 	inventoryReady bool
@@ -129,9 +129,9 @@ func NewManager(routes *routing.Table, device RouteDevice, virtualNetwork netip.
 	return &Manager{agents: make(map[string]*agentState), clients: make(map[uint64]*clientState), forwards: make(map[string]*forwardState), jobs: make(map[string]*jobState), routes: routes, device: device, virtualNetwork: virtualNetwork.Masked(), proxyIP: proxyIP, virtualByAgent: make(map[string]netip.Addr), virtualUsed: make(map[netip.Addr]bool)}
 }
 
-func (m *Manager) RegisterClient(peer *dns.Peer, streamMux *mux.Mux, internal bool, hostname string) {
+func (m *Manager) RegisterClient(peer transport.Peer, streamMux *mux.Mux, internal bool, hostname string) {
 	m.mu.Lock()
-	m.clients[peer.Session.ID()] = &clientState{peer: peer, mux: streamMux, internal: internal, hostname: safeHostname(hostname), accepted: make(map[netip.Prefix]AcceptedRoute)}
+	m.clients[peer.Snapshot().ID] = &clientState{peer: peer, mux: streamMux, internal: internal, hostname: safeHostname(hostname), accepted: make(map[netip.Prefix]AcceptedRoute)}
 	m.mu.Unlock()
 }
 
@@ -280,7 +280,7 @@ func (m *Manager) ClientList() []ClientInfo {
 	return out
 }
 
-func (m *Manager) Register(peer *dns.Peer, streamMux *mux.Mux) {
+func (m *Manager) Register(peer transport.Peer, streamMux *mux.Mux) {
 	id := peer.Snapshot().AgentID
 	m.mu.Lock()
 	virtual := m.virtualByAgent[id]

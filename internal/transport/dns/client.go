@@ -17,6 +17,7 @@ import (
 
 	"undertow/internal/security"
 	"undertow/internal/session"
+	"undertow/internal/transport"
 )
 
 type Client struct {
@@ -33,6 +34,8 @@ type Client struct {
 	target       atomic.Int64
 	healthWindow atomic.Int64
 }
+
+var _ transport.Connection = (*Client)(nil)
 
 type pollSocket struct {
 	conn *net.UDPConn
@@ -284,6 +287,7 @@ func exchangeHello(ctx context.Context, conn *net.UDPConn, domain string, hs *se
 }
 
 func (c *Client) Send(ctx context.Context, b []byte) error { return c.Session.Send(ctx, b) }
+func (c *Client) ID() uint64                               { return c.Session.ID() }
 func (c *Client) SendPriority(ctx context.Context, b []byte) error {
 	return c.Session.SendPriority(ctx, b)
 }

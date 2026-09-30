@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
+	"io"
 	"log"
 	"net"
 	"strings"
@@ -15,6 +16,7 @@ import (
 
 	"undertow/internal/security"
 	"undertow/internal/session"
+	"undertow/internal/transport"
 )
 
 type Peer struct {
@@ -42,13 +44,12 @@ func (p *Peer) SetVirtualIP(address string) {
 	p.mu.Unlock()
 }
 
-type PeerInfo struct {
-	ID                         uint64
-	AgentID, Remote, VirtualIP string
-	Connected, LastSeen        time.Time
-	Authenticated              bool
-	Transport                  session.Stats
-}
+func (p *Peer) Channel() transport.SessionTransport { return p.Session }
+
+type PeerInfo = transport.PeerInfo
+
+var _ transport.Peer = (*Peer)(nil)
+var _ transport.Listener = (*Server)(nil)
 
 type Server struct {
 	conn         *net.UDPConn
@@ -90,6 +91,17 @@ func Listen(addr, domain string, identity ed25519.PrivateKey, token []byte) (*Se
 
 func (s *Server) Addr() net.Addr         { return s.conn.LocalAddr() }
 func (s *Server) Accepted() <-chan *Peer { return s.accepted }
+
+func (s *Server) Accept(ctx context.Context) (transport.Peer, error) {
+	select {
+	case p := <-s.accepted:
+		return p, nil
+	case <-s.closed:
+		return nil, io.EOF
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
 
 func (s *Server) Peers() []PeerInfo {
 	s.mu.RLock()
