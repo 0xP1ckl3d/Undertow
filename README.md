@@ -1,6 +1,42 @@
 # Undertow
 
-Undertow carries encrypted sessions over direct DNS on UDP. Run an unprivileged **agent** on a network you want to reach, a **server** to accept sessions and select routes, or a privileged **client** to route Internet traffic, internal traffic, or both. Server Internet egress uses its own sockets; the server proxy TUN is needed only for routed internal pivots.
+```text
+                        ▄▓                    █▄
+     ▄                 ░▒░                    ▒▓█                ▄    ▄
+█▄   ██▄▄█▄     ▄█ ▄▄▄▄█▓█▄ ▄▄▄▄▄▄▄▄▄█▄▄▄▄▄▄ ▄▓▓█▄▄ ▄▄▄▄▄▄▄▄█▄   ██▄  ██▄▄
+█░█  █▓█ ▓░█▄  █▒░█░█  █▓█ █░█ ▄█▀   █░█ ▀█▓█ ▒▓█  █░█  █▓█ █░█  █▓█  ░▓█
+▒▓█  ░▓█ ▒▓█ ▀▄░▓█▒▓█  ░▓█ ▒▓█▀ ▄▄   ▒▓█  ▀▀  ░▓░  ▒▓█  ░▓█ ▒▓█  ░▓█  ▒▓█
+▀██▄▄▀█▀ ░██   ▀██▀██▄▄▀██ ▀██▄▄▀██▄ ███      ▀██▄▄▀██▄▄▀█▀ ▀██▄▄▀█▀▄▄▀█▀
+                 ▀
+```
+
+Undertow carries encrypted sessions over direct DNS on UDP. A **server** accepts connections, an unprivileged **agent** connects from a network you want to reach, and a privileged **client** tunnels traffic from its own machine. Choose the goal below, then follow the [copy/paste quickstart](docs/quickstart.md).
+
+## What are you trying to do?
+
+| Goal | Components | Start here |
+| --- | --- | --- |
+| Reach an internal network from the server | Server + agent | `server --tun`, `agent`, `route add` |
+| Reach an internal network from a laptop, keeping its Internet route | Server + agent + client | `client --internal` |
+| Route a laptop's IPv4 Internet traffic through the server | Server + client | `client --vpn` |
+| Use server Internet egress and reach an internal network | Server + agent + client | `client --vpn --internal` |
+| Reach one internal TCP service | Server + agent | `server --forward` |
+| Expose a client service on an agent host | Server + agent + client | Client console `forward add` |
+
+On **SERVER**, run `undertow init` once to create `identity.key` and `token.key` and print the server fingerprint. Keep `identity.key` on the server; securely copy `token.key` to each **AGENT** or **CLIENT**. Replace `SERVER_IP` and `FINGERPRINT` below. Run `undertow` as `./bin/undertow` when built from this repository.
+
+```sh
+# SERVER (root is usually needed for UDP/53)
+sudo undertow server --listen 0.0.0.0:53 --identity identity.key --token-file token.key
+
+# AGENT (unprivileged, on a host that can reach internal targets)
+undertow agent --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
+
+# CLIENT (root is needed for TUN; choose a routing mode from the table)
+sudo undertow client --internal --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
+```
+
+The commands run on separate hosts. The agent changes no routes. In the client console, type `agents`, `use 1`, `routes`, then `route accept CIDR` for an advertised internal network or `route add CIDR` for another reachable network. The server needs `--tun` only when the server host itself will route to an internal network; Internet egress from a client uses server sockets. See [quickstart](docs/quickstart.md) for exact commands, verification, privileges, and cleanup for each goal.
 
 ## How the pieces connect
 
@@ -93,27 +129,9 @@ if ($LASTEXITCODE -ne 0) { throw 'Build failed; bin\undertow.exe may be an older
 .\bin\undertow.exe help agent
 ```
 
-## First connection
-
-Run these on separate hosts. `init` prints the server fingerprint and creates `identity.key` and `token.key`. Copy **only** `token.key` to the agent through a secure channel; keep `identity.key` on the server. Replace `SERVER_IP` and `FINGERPRINT` with your values.
-
-Server:
-
-```sh
-./bin/undertow init
-sudo ./bin/undertow server --listen 0.0.0.0:53 --identity identity.key --token-file token.key
-```
-
-Agent:
-
-```sh
-./bin/undertow agent --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
-```
-
-Back on the server, `sudo ./bin/undertow status` shows the connected agent when the elevated server created `control.key`. Run `./bin/undertow help`, `./bin/undertow help server`, `./bin/undertow help agent`, or `./bin/undertow help client` for built-in guidance.
-
 ## Guides
 
+- [Goal-oriented quickstart with commands by host](docs/quickstart.md)
 - [Exhaustive feature catalogue with commands by machine](features.md)
 - [Setup, roles, enrollment and fingerprints](docs/getting-started.md)
 - [Scenario commands: pivot, VPN, forwarding and lifecycle](docs/scenarios.md)
