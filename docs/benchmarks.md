@@ -4,7 +4,7 @@ These results were measured on 2026-09-30. The raw records and exact setup are i
 
 ## Test paths and workloads
 
-The controlled DNS test runs direct authenticated DNS/UDP over an in-process path shaper on Windows 10.0.26200, i9-13950HX, Go 1.25.0, revision `3a1c72f`. It covers all 90 combinations of RTT 5/25/50/100/200 ms, independent datagram loss 0/1/2/5/10/20%, and 1/10/100 concurrent echo streams. The first phase exchanges 64-byte messages; the second exchanges 2 KiB messages. The latter is an echo burst, **not sustained TCP**. Each cell has a 55-second limit and each phase a 35-second limit. The JSONL includes latency, echo throughput, retransmits, duplicates, DNS query rate, peak congestion window, peak outstanding queries, and final payload fragment size.
+The controlled DNS test runs direct authenticated DNS/UDP over an in-process path shaper on Windows 10.0.26200, i9-13950HX, Go 1.25.0, revision `c868849`. It covers all 90 combinations of RTT 5/25/50/100/200 ms, independent datagram loss 0/1/2/5/10/20%, and 1/10/100 concurrent echo streams. The first phase exchanges 64-byte messages; the second exchanges 2 KiB messages. The latter is an echo burst, **not sustained TCP**. Each cell has a 55-second limit and each phase a 35-second limit. The JSONL includes latency, echo throughput, retransmits, duplicates, DNS query rate, peak congestion window, peak outstanding queries, and final payload fragment size.
 
 The live comparison used a Linux VM client (Linux 6.11.2, 8 vCPUs) and a Linux server (Linux 6.8.11, 2 vCPUs) over the same public UDP path, without a packet shaper. Both tunnels served identical 64-byte and 1 MiB files from the tunnel server address. Undertow used direct DNS/UDP, encrypted transport, and automatic payload discovery. The baseline was iodine 0.7.0 using DNS NULL queries, Base128 upstream, Raw downstream, 1186-byte downstream fragments, EDNS0 and lazy mode, with raw UDP mode disabled. The tools ran sequentially and each workload has one sample.
 
@@ -41,20 +41,20 @@ Raw UDP data is in [live-udp-2026-09-30.jsonl](benchmark-results/live-udp-2026-0
 
 The complete 90-cell matrix is in [shaped-direct-dns-2026-09-30.jsonl](benchmark-results/shaped-direct-dns-2026-09-30.jsonl). The shaper delays or drops complete DNS datagrams in both directions with a fixed deterministic mixer. It does not emulate a resolver, WAN queueing, or a TUN. A cell with an `error` reached a phase deadline, so its zero throughput fields do not mean zero bytes crossed the path.
 
-All 1-flow and 10-flow cells completed. At **each** RTT, the 100-flow cells completed at 0–5% loss and reached the deadline at 10% and 20% loss: 80 completed cells and 10 deadline cells overall. Selected 100-flow results show how sharply random loss affects this version:
+All 1-flow and 10-flow cells completed. Of the 100-flow cells, 21 completed and nine reached the deadline: 81 completed cells overall. The timeout cells were 20% loss at 5 and 25 ms; 10% and 20% at 50 and 100 ms; and 5%, 10% and 20% at 200 ms. Selected 100-flow results show how sharply random loss affects this version:
 
 | RTT / loss | 64-byte median / p95 | 2 KiB echo throughput | Queries/s | Retransmits | Peak cwnd / outstanding |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 5 ms / 0% | 26.8 / 43.5 ms | 2529.0 KiB/s | 1816.8 | 0 | 31 / 16 |
-| 5 ms / 5% | 26.1 / 4085.6 ms | 24.2 KiB/s | 22.9 | 16 | 20 / 16 |
-| 25 ms / 0% | 109.8 / 193.7 ms | 429.5 KiB/s | 345.2 | 0 | 32 / 31 |
-| 25 ms / 5% | 134.2 / 10904.7 ms | 16.4 KiB/s | 14.2 | 16 | 18 / 18 |
-| 100 ms / 0% | 409.1 / 914.9 ms | 126.8 KiB/s | 94.4 | 0 | 32 / 31 |
-| 100 ms / 5% | 716.5 / 16264.8 ms | 13.7 KiB/s | 11.0 | 15 | 19 / 19 |
-| 200 ms / 0% | 808.8 / 1413.8 ms | 56.6 KiB/s | 45.7 | 0 | 32 / 31 |
-| 200 ms / 5% | 1208.4 / 12043.8 ms | 11.9 KiB/s | 9.8 | 25 | 18 / 18 |
+| 5 ms / 0% | 24.4 / 44.5 ms | 2418.1 KiB/s | 1734.2 | 0 | 31 / 16 |
+| 5 ms / 5% | 50.2 / 2748.7 ms | 30.3 KiB/s | 30.8 | 17 | 18 / 16 |
+| 25 ms / 0% | 127.6 / 272.3 ms | 315.5 KiB/s | 263.5 | 0 | 32 / 31 |
+| 25 ms / 5% | 163.0 / 8396.2 ms | 22.1 KiB/s | 18.4 | 17 | 18 / 18 |
+| 100 ms / 0% | 427.3 / 745.7 ms | 115.1 KiB/s | 91.0 | 0 | 32 / 31 |
+| 100 ms / 5% | 629.8 / 11233.1 ms | 13.4 KiB/s | 10.8 | 26 | 18 / 18 |
+| 200 ms / 0% | 824.7 / 1842.9 ms | 63.0 KiB/s | 46.8 | 0 | 32 / 31 |
+| 200 ms / 5% | 1030.2 / 11320.7 ms | timed out | 10.3 | 17 | 19 / 19 |
 
-This loss sensitivity and long tail latency are significant remaining performance limits. The shaper's independent loss in both DNS directions means one query/response exchange can lose either datagram. A timeout is an incomplete test workload under the stated deadline, rather than evidence of corrupt data. All completed echoes were checked for size and content.
+This loss sensitivity and long tail latency are significant remaining performance limits. The shaper's independent loss in both DNS directions means one query/response exchange can lose either datagram. A timeout is an incomplete test workload under the stated deadline, rather than evidence of corrupt data. All completed echoes were checked for size and content. An earlier full grid with the fixed two-second query deadline had ten timeouts; the low-RTT data-query deadline in `c868849` reduced that to nine in this single rerun. One high-RTT 5% cell timed out in the rerun after completing previously, so this is insufficient to claim a stable improvement across the full grid.
 
 The adaptive profile was selected automatically: payload size is probed in both directions before the session, outstanding DNS queries grow with queued traffic and path health, and idle polling backs off while retaining a quick first-packet slot. The encrypted send and receive packet windows are capped at 64. In the shaped data, `fragment_size` is the final size, and the congestion and outstanding query values are peaks sampled every 20 ms. Query rate and retransmits cover the echo phases. The live iodine run did not expose comparable encrypted retransmit or congestion-window counters, so those metrics are reported for Undertow's shaped path only.
 
