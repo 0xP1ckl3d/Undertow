@@ -19,6 +19,8 @@ The three client modes do different jobs:
 
 The commands below use Linux and the current direct DNS carrier on UDP/53. `undertow` means `./bin/undertow` if you built from source (`mkdir -p bin && go build -buildvcs=false -o bin/undertow ./cmd/undertow`, Go 1.25+). On Windows use `.\bin\undertow.exe` and an Administrator PowerShell for the client or a server with `--tun`; the agent needs no elevation. Allow inbound UDP/53 on **SERVER**. Run these examples in terminals so `server` and `client` open their consoles automatically.
 
+If you forget which carrier the running server uses, enter `status` in its console or run `sudo undertow status` on the server host. It shows DNS, WebSocket, or QUIC, the TCP/UDP listen address, and any TLS mode or WebSocket path needed to connect.
+
 Prepare enrollment once on **SERVER**:
 
 ```sh

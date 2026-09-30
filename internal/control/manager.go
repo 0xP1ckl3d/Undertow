@@ -91,6 +91,16 @@ type AcceptedRoute struct {
 	Manual  bool   `json:"manual,omitempty"`
 }
 
+type ServerInfo struct {
+	Transport     string `json:"transport"`
+	Network       string `json:"network"`
+	Listen        string `json:"listen"`
+	Domain        string `json:"domain,omitempty"`
+	WebSocketPath string `json:"websocket_path,omitempty"`
+	TLSMode       string `json:"tls_mode,omitempty"`
+	Fingerprint   string `json:"fingerprint,omitempty"`
+}
+
 type clientState struct {
 	peer     transport.Peer
 	mux      *mux.Mux
@@ -112,6 +122,7 @@ type agentState struct {
 }
 type Manager struct {
 	mu             sync.RWMutex
+	server         ServerInfo
 	agents         map[string]*agentState
 	clients        map[uint64]*clientState
 	forwards       map[string]*forwardState
@@ -123,6 +134,12 @@ type Manager struct {
 	proxyIP        netip.Addr
 	virtualByAgent map[string]netip.Addr
 	virtualUsed    map[netip.Addr]bool
+}
+
+func (m *Manager) SetServerInfo(info ServerInfo) {
+	m.mu.Lock()
+	m.server = info
+	m.mu.Unlock()
 }
 
 func NewManager(routes *routing.Table, device RouteDevice, virtualNetwork netip.Prefix, proxyIP netip.Addr) *Manager {
@@ -750,8 +767,9 @@ func (m *Manager) handler(token string) http.Handler {
 	muxer.HandleFunc("GET /v1/status", func(w http.ResponseWriter, r *http.Request) {
 		m.mu.RLock()
 		selected := m.selected
+		server := m.server
 		m.mu.RUnlock()
-		jsonReply(w, http.StatusOK, map[string]any{"agents": m.AgentList(), "clients": m.ClientList(), "routes": m.routes.List(), "selected_agent": selected})
+		jsonReply(w, http.StatusOK, map[string]any{"server": server, "agents": m.AgentList(), "clients": m.ClientList(), "routes": m.routes.List(), "selected_agent": selected})
 	})
 	muxer.HandleFunc("GET /v1/agents/{id}", func(w http.ResponseWriter, r *http.Request) {
 		for _, a := range m.AgentList() {

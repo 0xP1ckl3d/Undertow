@@ -266,6 +266,23 @@ func serve(args []string) error {
 	if err != nil {
 		return err
 	}
+	serverInfo := control.ServerInfo{Transport: *carrier.kind, Listen: srv.Addr().String(), Fingerprint: security.Fingerprint(identity)}
+	if *carrier.kind == "dns" {
+		serverInfo.Network = "udp"
+		serverInfo.Domain = *domain
+	} else {
+		serverInfo.TLSMode = "certificate"
+		if *carrier.selfSigned {
+			serverInfo.TLSMode = "self-signed"
+		}
+		if *carrier.kind == "websocket" {
+			serverInfo.Network = "tcp"
+			serverInfo.WebSocketPath = *carrier.path
+		} else {
+			serverInfo.Network = "udp"
+		}
+	}
+	manager.SetServerInfo(serverInfo)
 	ctx, stop := commandContext()
 	defer stop()
 	go func() {

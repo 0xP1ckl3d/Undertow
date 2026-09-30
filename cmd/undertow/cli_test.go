@@ -144,6 +144,7 @@ func TestAttachedTransferStreamsProgressAndCancellation(t *testing.T) {
 func TestStatusShowsAgentAndVPNHostnames(t *testing.T) {
 	report := pivot.Capabilities{Pivot: true, Exec: false, Upload: false, Download: true}.Report()
 	data, err := json.Marshal(map[string]any{
+		"server":  control.ServerInfo{Transport: "websocket", Network: "tcp", Listen: "0.0.0.0:443", WebSocketPath: "/undertow", TLSMode: "self-signed", Fingerprint: "server-pin"},
 		"agents":  []control.AgentInfo{{ID: "agent-one", Hostname: "agent-host", Capabilities: &report}},
 		"clients": []control.ClientInfo{{SessionID: 7, Hostname: "vpn-host"}},
 	})
@@ -154,7 +155,7 @@ func TestStatusShowsAgentAndVPNHostnames(t *testing.T) {
 	if err := renderStatus(&output, data); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "agent-host") || !strings.Contains(output.String(), "vpn-host") {
+	if !strings.Contains(output.String(), "Server: websocket (tcp) listening on 0.0.0.0:443") || !strings.Contains(output.String(), "WebSocket path: /undertow") || !strings.Contains(output.String(), "TLS: self-signed") || !strings.Contains(output.String(), "Fingerprint: server-pin") || !strings.Contains(output.String(), "agent-host") || !strings.Contains(output.String(), "vpn-host") {
 		t.Fatalf("hostnames missing from status: %s", output.String())
 	}
 	if !strings.Contains(output.String(), "supported=pivot,exec,hostops,interactive,scripts,wasm,upload,download,listeners allowed=pivot,download") {

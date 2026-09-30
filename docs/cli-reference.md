@@ -172,7 +172,7 @@ These commands run on the server host and use its loopback API. All accept `--co
 
 | Command | Meaning |
 | --- | --- |
-| `undertow status [--json]` | Connected agents and VPN clients separately, their hostnames, selected agent, route state, counters. |
+| `undertow status [--json]` | Active server carrier, TCP/UDP listen address, DNS domain or WebSocket path, TLS mode, server fingerprint, plus connected agents and VPN clients, route state, and counters. |
 | `undertow console` | Interactive console attached to the running server's loopback API. |
 | `undertow server attach` | Reopen the server console after detaching; accepts the worker's PID, control, token, and log paths. |
 | `undertow agent list [--json]` | Alias of `status`; also shows VPN clients. |

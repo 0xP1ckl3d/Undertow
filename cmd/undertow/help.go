@@ -295,7 +295,7 @@ The VPN client console also supports per-agent TCP 'forward add/list/del'.
 For example, after 'use 1': forward add 0.0.0.0:8080 127.0.0.1:8080.
 `
 	case "status":
-		body = `undertow status — inspect agents, VPN clients, and routes
+		body = `undertow status — inspect the active server carrier, agents, VPN clients, and routes
 
 Usage: undertow status [--json] [--control IP:PORT] [--control-token-file PATH]
 

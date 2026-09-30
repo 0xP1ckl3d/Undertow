@@ -178,6 +178,7 @@ func statusCommand(args []string) error {
 
 func renderStatus(w io.Writer, data []byte) error {
 	var status struct {
+		Server   control.ServerInfo   `json:"server"`
 		Agents   []control.AgentInfo  `json:"agents"`
 		Clients  []control.ClientInfo `json:"clients"`
 		Routes   []routing.Route      `json:"routes"`
@@ -185,6 +186,22 @@ func renderStatus(w io.Writer, data []byte) error {
 	}
 	if err := json.Unmarshal(data, &status); err != nil {
 		return err
+	}
+	if status.Server.Transport != "" {
+		fmt.Fprintf(w, "Server: %s (%s) listening on %s\n", status.Server.Transport, status.Server.Network, status.Server.Listen)
+		if status.Server.Domain != "" {
+			fmt.Fprintf(w, "DNS domain: %s\n", status.Server.Domain)
+		}
+		if status.Server.WebSocketPath != "" {
+			fmt.Fprintf(w, "WebSocket path: %s\n", status.Server.WebSocketPath)
+		}
+		if status.Server.TLSMode != "" {
+			fmt.Fprintf(w, "TLS: %s\n", status.Server.TLSMode)
+		}
+		if status.Server.Fingerprint != "" {
+			fmt.Fprintf(w, "Fingerprint: %s\n", status.Server.Fingerprint)
+		}
+		fmt.Fprintln(w)
 	}
 	fmt.Fprintf(w, "Agents (%d)\n", len(status.Agents))
 	fmt.Fprintf(w, "%-18s %-16s %-24s %-18s %8s %8s %7s %4s %4s\n", "ID", "Virtual IP", "Host", "Remote", "RX", "TX", "Streams", "Jobs", "Fwd")

@@ -25,6 +25,7 @@ type routeDevice struct {
 func TestVPNClientAppearsInStatusAndIsRemoved(t *testing.T) {
 	table := routing.New(nil)
 	manager := NewManager(table, nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	manager.SetServerInfo(ServerInfo{Transport: "quic", Network: "udp", Listen: "0.0.0.0:443", TLSMode: "self-signed", Fingerprint: "server-pin"})
 	var keys security.Keys
 	s, err := session.New(702, keys, false)
 	if err != nil {
@@ -40,13 +41,14 @@ func TestVPNClientAppearsInStatusAndIsRemoved(t *testing.T) {
 	response := httptest.NewRecorder()
 	manager.handler("test-token").ServeHTTP(response, request)
 	var status struct {
+		Server  ServerInfo   `json:"server"`
 		Agents  []AgentInfo  `json:"agents"`
 		Clients []ClientInfo `json:"clients"`
 	}
 	if err := json.Unmarshal(response.Body.Bytes(), &status); err != nil {
 		t.Fatal(err)
 	}
-	if len(status.Agents) != 0 || len(status.Clients) != 1 || status.Clients[0].SessionID != 702 || !status.Clients[0].Internal || status.Clients[0].Hostname != "vpn-host" {
+	if status.Server.Transport != "quic" || status.Server.Listen != "0.0.0.0:443" || status.Server.TLSMode != "self-signed" || len(status.Agents) != 0 || len(status.Clients) != 1 || status.Clients[0].SessionID != 702 || !status.Clients[0].Internal || status.Clients[0].Hostname != "vpn-host" {
 		t.Fatalf("unexpected status: %+v", status)
 	}
 	if err := manager.SetClientInternal(702, false); err != nil || manager.ClientInternal(702) {
