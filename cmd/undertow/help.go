@@ -90,6 +90,7 @@ Connection and identity:
   --websocket-path PATH     WebSocket URL path (default /undertow).
   --tls-cert PATH           TLS certificate PEM (WebSocket and QUIC).
   --tls-key PATH            TLS private key PEM (WebSocket and QUIC).
+  --tls-self-signed         Generate a temporary TLS certificate in memory.
   --identity PATH           Server Ed25519 key (default identity.key).
   --auth MODE               token (default), password, or none/open enrollment.
   --token-file PATH         Enrollment token for token mode (default token.key).
@@ -126,6 +127,8 @@ Examples:
   sudo undertow server --listen 0.0.0.0:53 --tun --background
   sudo undertow server --transport websocket --tls-cert server.crt --tls-key server.key
   sudo undertow server --transport quic --tls-cert server.crt --tls-key server.key
+  sudo undertow server --transport websocket --tls-self-signed
+  sudo undertow server --transport quic --tls-self-signed
   sudo undertow server --stop
 
 In a terminal, server starts a worker and opens the operator console.
@@ -346,6 +349,7 @@ Server:
   --listen IP:PORT         Carrier listener (DNS :53, WebSocket/QUIC :443).
   --tls-cert PATH          TLS certificate for WebSocket or QUIC server.
   --tls-key PATH           TLS private key for WebSocket or QUIC server.
+  --tls-self-signed        Generate a temporary TLS certificate in memory.
   --control-listen IP:PORT Local operator API (default 127.0.0.1:47889).
   --identity PATH          Server key (default identity.key).
   --tun                    Check TUN/Wintun and tunnel network.
@@ -424,7 +428,7 @@ advertised. Type 'quit' in the client console to stop it and remove routes.
 On the server, 'quit' detaches and 'stop' shuts down. Ctrl+C stops a
 foreground agent. Use the same console commands with --transport websocket
 (TCP/443) or --transport quic (UDP/443) on all roles; the server needs
---tls-cert and --tls-key. See docs/quickstart.md for full steps.
+--tls-cert and --tls-key, or --tls-self-signed. See docs/quickstart.md for full steps.
 `)
 	return err
 }

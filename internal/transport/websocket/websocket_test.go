@@ -55,7 +55,7 @@ func TestWebSocketSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	cert, key := testCertificate(t)
-	server, err := Listen("127.0.0.1:0", "/undertow", cert, key, identity, token)
+	server, err := Listen("127.0.0.1:0", "/undertow", cert, key, false, identity, token)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,5 +117,32 @@ func TestWebSocketSession(t *testing.T) {
 	message, err = serverMux.RecvControl(ctx)
 	if err != nil || string(message) != "control" {
 		t.Fatalf("mux control %q: %v", message, err)
+	}
+}
+
+func TestSelfSignedDirectIP(t *testing.T) {
+	_, identity, _ := ed25519.GenerateKey(rand.Reader)
+	_, clientKey, _ := ed25519.GenerateKey(rand.Reader)
+	token := make([]byte, 32)
+	_, _ = rand.Read(token)
+	server, err := Listen("127.0.0.1:0", "/undertow", "", "", true, identity, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	go func() { _ = server.Serve(ctx) }()
+	options := DialOptions{Address: server.Addr().String(), Path: "/undertow", TLSInsecureSkipVerify: true}
+	if _, err := Dial(ctx, options, security.Fingerprint(clientKey), token, clientKey); err == nil {
+		t.Fatal("wrong identity accepted")
+	}
+	conn, err := Dial(ctx, options, security.Fingerprint(identity), token, clientKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := server.Accept(ctx); err != nil {
+		t.Fatal(err)
 	}
 }

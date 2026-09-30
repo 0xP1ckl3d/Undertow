@@ -6,7 +6,6 @@ import (
 	"crypto/tls"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"sync"
@@ -15,6 +14,7 @@ import (
 	quicgo "github.com/quic-go/quic-go"
 	"undertow/internal/transport"
 	"undertow/internal/transport/stream"
+	"undertow/internal/transport/tlscert"
 )
 
 const alpn = "undertow/1"
@@ -82,13 +82,10 @@ type Server struct {
 
 var _ transport.Listener = (*Server)(nil)
 
-func Listen(addr, certFile, keyFile string, identity ed25519.PrivateKey, token []byte) (*Server, error) {
-	if certFile == "" || keyFile == "" {
-		return nil, errors.New("QUIC server requires --tls-cert and --tls-key")
-	}
-	certificate, err := tls.LoadX509KeyPair(certFile, keyFile)
+func Listen(addr, certFile, keyFile string, selfSigned bool, identity ed25519.PrivateKey, token []byte) (*Server, error) {
+	certificate, err := tlscert.Load(certFile, keyFile, selfSigned)
 	if err != nil {
-		return nil, fmt.Errorf("load TLS certificate: %w", err)
+		return nil, err
 	}
 	listener, err := quicgo.ListenAddr(addr, &tls.Config{Certificates: []tls.Certificate{certificate}, NextProtos: []string{alpn}, MinVersion: tls.VersionTLS13}, nil)
 	if err != nil {

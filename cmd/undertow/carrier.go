@@ -15,15 +15,16 @@ import (
 
 type carrierFlags struct {
 	kind, path, cert, key, serverName *string
-	skipTLSVerify                     *bool
+	skipTLSVerify, selfSigned         *bool
 }
 
 func addCarrierFlags(f *flag.FlagSet) carrierFlags {
 	return carrierFlags{
 		kind:          f.String("transport", "dns", "carrier: dns, websocket, or quic"),
 		path:          f.String("websocket-path", "/undertow", "WebSocket HTTP path"),
-		cert:          f.String("tls-cert", "", "server TLS certificate PEM for WebSocket"),
-		key:           f.String("tls-key", "", "server TLS private key PEM for WebSocket"),
+		cert:          f.String("tls-cert", "", "server TLS certificate PEM for WebSocket or QUIC"),
+		key:           f.String("tls-key", "", "server TLS private key PEM for WebSocket or QUIC"),
+		selfSigned:    f.Bool("tls-self-signed", false, "generate an ephemeral self-signed server TLS certificate"),
 		serverName:    f.String("tls-server-name", "", "TLS certificate server name for WebSocket"),
 		skipTLSVerify: f.Bool("tls-insecure-skip-verify", false, "skip TLS certificate verification (Undertow fingerprint is still required)"),
 	}
@@ -33,8 +34,11 @@ func (f carrierFlags) validate() error {
 	if *f.kind != "dns" && *f.kind != "websocket" && *f.kind != "quic" {
 		return errors.New("--transport must be dns, websocket, or quic")
 	}
-	if *f.kind == "dns" && (*f.cert != "" || *f.key != "" || *f.serverName != "" || *f.skipTLSVerify) {
+	if *f.kind == "dns" && (*f.cert != "" || *f.key != "" || *f.serverName != "" || *f.skipTLSVerify || *f.selfSigned) {
 		return errors.New("TLS flags require --transport websocket or quic")
+	}
+	if *f.selfSigned && (*f.cert != "" || *f.key != "") {
+		return errors.New("--tls-self-signed cannot be combined with --tls-cert or --tls-key")
 	}
 	return nil
 }
@@ -59,10 +63,10 @@ func (f carrierFlags) listen(addr, domain string, identity ed25519.PrivateKey, t
 		}
 	}
 	if *f.kind == "websocket" {
-		return websocket.Listen(addr, *f.path, *f.cert, *f.key, identity, token)
+		return websocket.Listen(addr, *f.path, *f.cert, *f.key, *f.selfSigned, identity, token)
 	}
 	if *f.kind == "quic" {
-		return quic.Listen(addr, *f.cert, *f.key, identity, token)
+		return quic.Listen(addr, *f.cert, *f.key, *f.selfSigned, identity, token)
 	}
 	return dns.Listen(addr, domain, identity, token)
 }
@@ -70,6 +74,9 @@ func (f carrierFlags) listen(addr, domain string, identity ed25519.PrivateKey, t
 func (f carrierFlags) dial(ctx context.Context, server, domain, fingerprint string, token []byte, key ed25519.PrivateKey, profileFlag string) (transport.Connection, error) {
 	if err := f.validate(); err != nil {
 		return nil, err
+	}
+	if *f.selfSigned {
+		return nil, errors.New("--tls-self-signed is a server-only flag")
 	}
 	if *f.kind == "websocket" {
 		return websocket.Dial(ctx, f.webOptions(server), fingerprint, token, key)
@@ -90,6 +97,9 @@ func (f carrierFlags) dial(ctx context.Context, server, domain, fingerprint stri
 func (f carrierFlags) fingerprint(ctx context.Context, server, domain, explicit, path string, trustFirstUse bool) (string, bool, error) {
 	if err := f.validate(); err != nil {
 		return "", false, err
+	}
+	if *f.selfSigned {
+		return "", false, errors.New("--tls-self-signed is a server-only flag")
 	}
 	if *f.kind == "dns" {
 		return resolveServerFingerprint(ctx, server, domain, explicit, path, trustFirstUse)

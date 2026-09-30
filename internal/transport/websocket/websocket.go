@@ -20,6 +20,7 @@ import (
 
 	"undertow/internal/transport"
 	"undertow/internal/transport/stream"
+	"undertow/internal/transport/tlscert"
 )
 
 const upgradeGUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -40,16 +41,13 @@ type Server struct {
 
 var _ transport.Listener = (*Server)(nil)
 
-func Listen(addr, path, certFile, keyFile string, identity ed25519.PrivateKey, token []byte) (*Server, error) {
+func Listen(addr, path, certFile, keyFile string, selfSigned bool, identity ed25519.PrivateKey, token []byte) (*Server, error) {
 	if path == "" || path[0] != '/' || strings.ContainsAny(path, "?#") {
 		return nil, errors.New("WebSocket path must start with / and contain no query or fragment")
 	}
-	if certFile == "" || keyFile == "" {
-		return nil, errors.New("WebSocket server requires --tls-cert and --tls-key")
-	}
-	certificate, err := tls.LoadX509KeyPair(certFile, keyFile)
+	certificate, err := tlscert.Load(certFile, keyFile, selfSigned)
 	if err != nil {
-		return nil, fmt.Errorf("load TLS certificate: %w", err)
+		return nil, err
 	}
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {

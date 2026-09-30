@@ -38,7 +38,7 @@ All roles default to `--transport dns`. Select the same carrier on the server an
 | `websocket` | HTTPS WebSocket on TCP/443 | Ordinary enterprise HTTPS egress or an HTTP CONNECT proxy is available. The client reads standard proxy environment variables. |
 | `quic` | QUIC on UDP/443 | UDP/443 is allowed and lower transport overhead is desired. |
 
-For WebSocket or QUIC, the server requires `--tls-cert PATH --tls-key PATH`. Agents and clients verify the TLS certificate by default. Use `--tls-server-name NAME` when connecting to a numeric IP whose certificate has a DNS name; for a private or self-signed certificate, `--tls-insecure-skip-verify` permits the TLS connection while the separate Undertow `--fingerprint` pin still verifies the server identity. A WebSocket VPN client pins the actual carrier peer (the proxy when one is used) outside its VPN routes. `--websocket-path` defaults to `/undertow` and must match at both endpoints. DNS `--domain` and `--payload-profile` do not apply to WebSocket or QUIC.
+For WebSocket or QUIC, the server requires `--tls-cert PATH --tls-key PATH` or `--tls-self-signed`. The latter generates a temporary certificate in memory on each start, so a direct IP connection needs no domain or certificate files. Agents and clients verify the TLS certificate by default. Use `--tls-server-name NAME` when connecting to a numeric IP whose certificate has a DNS name; for a private or self-signed certificate, `--tls-insecure-skip-verify` permits the TLS connection while the separate Undertow `--fingerprint` pin still verifies the server identity. Obtain that fingerprint from a trusted server operator; do not use first-use discovery on an untrusted network. A WebSocket VPN client pins the actual carrier peer (the proxy when one is used) outside its VPN routes. `--websocket-path` defaults to `/undertow` and must match at both endpoints. DNS `--domain` and `--payload-profile` do not apply to WebSocket or QUIC.
 
 ```sh
 # SERVER (TCP/443)
@@ -68,7 +68,8 @@ Creates or reuses an Ed25519 server key at `identity.key`, creates or reuses a r
 | --- | --- | --- |
 | `--transport dns\|websocket\|quic` | `dns` | Carrier to listen on. |
 | `--listen IP:PORT` | DNS `0.0.0.0:53`; other carriers `0.0.0.0:443` | UDP for DNS/QUIC, TCP for WebSocket. |
-| `--tls-cert PATH`, `--tls-key PATH` | None | Required TLS PEM files for WebSocket/QUIC. |
+| `--tls-cert PATH`, `--tls-key PATH` | None | TLS PEM files for WebSocket/QUIC when `--tls-self-signed` is not used. |
+| `--tls-self-signed` | Off | Generate a temporary self-signed TLS certificate in memory; mutually exclusive with TLS files. |
 | `--websocket-path PATH` | `/undertow` | HTTPS upgrade path for WebSocket. |
 | `--identity PATH` | `identity.key` | Server Ed25519 identity key. |
 | `--domain NAME` | `t.undertow.invalid` | DNS question domain. |

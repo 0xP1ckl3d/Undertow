@@ -105,7 +105,7 @@ func doctorCommand(args []string, output io.Writer) error {
 			}
 		}
 		checkDoctorFile(r, "identity", *identity, false, "run 'undertow init' to create the server identity")
-		if *carrier.kind != "dns" {
+		if *carrier.kind != "dns" && !*carrier.selfSigned {
 			checkDoctorFile(r, "TLS certificate", *carrier.cert, true, "provide --tls-cert PEM")
 			checkDoctorFile(r, "TLS key", *carrier.key, true, "provide --tls-key PEM")
 		}

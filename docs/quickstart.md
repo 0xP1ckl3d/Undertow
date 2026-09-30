@@ -181,7 +181,7 @@ The examples above use **DNS** (direct UDP/53). Keep it for the DNS VPN use case
 | General HTTPS compatibility, including HTTP CONNECT proxy environments | `websocket` | TCP/443 with TLS and a WebSocket upgrade |
 | Higher performance where UDP/443 is open | `quic` | QUIC over UDP/443 |
 
-For either alternative, provision a TLS certificate and key on **SERVER**. These commands use a certificate for `vpn.example.com`, the server hostname `vpn.example.com`, the fingerprint printed by `undertow init`, and the same `token.key` as above. Allow the named inbound port on **SERVER**.
+For either alternative, use a domain and TLS certificate as below, or use a direct server IP and `--tls-self-signed` as shown afterward. Allow the named inbound port on **SERVER**.
 
 **WebSocket goal → SERVER + AGENT + optional CLIENT → start:**
 
@@ -212,6 +212,8 @@ sudo undertow client --transport quic --internal --server SERVER_IP:443 --tls-se
 ```
 
 **Use and verify:** follow the same client console and `curl` steps as WebSocket. **Background/stop:** use the same `background`, `attach`, `quit`, and server `stop` commands. A private or self-signed TLS certificate needs `--tls-insecure-skip-verify` on **AGENT** and **CLIENT**; keep `--fingerprint FINGERPRINT` to verify the separate Undertow identity. The TLS certificate and the Undertow identity key are distinct. See the [CLI reference](cli-reference.md) for `--websocket-path` and transport-specific flags.
+
+**No domain or certificate files:** on **SERVER**, run `sudo undertow server --transport websocket --tls-self-signed` (or `--transport quic`). On **AGENT** and **CLIENT**, connect to `--server SERVER_IP:443` with `--tls-insecure-skip-verify --fingerprint FINGERPRINT`. Obtain the Undertow fingerprint from `undertow init` on the server through a trusted channel. The generated TLS certificate changes on each server start, while the Undertow identity remains stable. Use the same console, connectivity checks, and background/stop steps above.
 
 ## For scripts and automation
 
