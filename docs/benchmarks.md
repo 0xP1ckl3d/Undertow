@@ -4,7 +4,7 @@ These results were measured on 2026-09-30. The raw records and exact setup are i
 
 ## Test paths and workloads
 
-The controlled DNS test runs direct authenticated DNS/UDP over an in-process path shaper on Windows 10.0.26200, i9-13950HX, Go 1.25.0, revision `c868849`. It covers all 90 combinations of RTT 5/25/50/100/200 ms, independent datagram loss 0/1/2/5/10/20%, and 1/10/100 concurrent echo streams. The first phase exchanges 64-byte messages; the second exchanges 2 KiB messages. The latter is an echo burst, **not sustained TCP**. Each cell has a 55-second limit and each phase a 35-second limit. The JSONL includes latency, echo throughput, retransmits, duplicates, DNS query rate, peak congestion window, peak outstanding queries, and final payload fragment size.
+The controlled DNS test runs direct authenticated DNS/UDP over an in-process path shaper on Windows 10.0.26200, i9-13950HX, Go 1.25.0. Full grids were run at baseline revision `c868849`, recovery revision `a0a67d0`, and final revision `5bc458d`. Each covers all 90 combinations of RTT 5/25/50/100/200 ms, independent datagram loss 0/1/2/5/10/20%, and 1/10/100 concurrent echo streams. The first phase exchanges 64-byte messages; the second exchanges 2 KiB messages. The latter is an echo burst, **not sustained TCP**. Each cell has a 55-second limit and each phase a 35-second limit. The JSONL includes latency, echo throughput, retransmits, duplicates, DNS query rate, peak congestion window, peak outstanding queries, and final payload fragment size.
 
 The live comparison used a Linux VM client (Linux 6.11.2, 8 vCPUs) and a Linux server (Linux 6.8.11, 2 vCPUs) over the same public UDP path, without a packet shaper. Both tunnels served identical 64-byte and 1 MiB files from the tunnel server address. Undertow used direct DNS/UDP, encrypted transport, and automatic payload discovery. The baseline was iodine 0.7.0 using DNS NULL queries, Base128 upstream, Raw downstream, 1186-byte downstream fragments, EDNS0 and lazy mode, with raw UDP mode disabled. The tools ran sequentially and each workload has one sample.
 
@@ -39,7 +39,7 @@ Raw UDP data is in [live-udp-2026-09-30.jsonl](benchmark-results/live-udp-2026-0
 
 A 2 MiB file was timed through the client console, server relay, and Linux agent on the live Undertow path. Upload took 6.494 seconds (315.4 KiB/s); download took 5.712 seconds (358.6 KiB/s). Both completion hashes and the downloaded file's SHA-256 matched the source. These are one run each, with progress reporting enabled. The [raw transfer records](benchmark-results/live-transfer-2026-09-30.jsonl) include bytes and elapsed time. A separate 16 MiB upload was cancelled around 10%; it left no destination or partial file and the console remained usable.
 
-## Controlled DNS path
+## Controlled DNS path: baseline
 
 The complete 90-cell matrix is in [shaped-direct-dns-2026-09-30.jsonl](benchmark-results/shaped-direct-dns-2026-09-30.jsonl). The shaper delays or drops complete DNS datagrams in both directions with a fixed deterministic mixer. It does not emulate a resolver, WAN queueing, or a TUN. A cell with an `error` reached a phase deadline, so its zero throughput fields do not mean zero bytes crossed the path.
 
@@ -59,6 +59,24 @@ All 1-flow and 10-flow cells completed. Of the 100-flow cells, 21 completed and 
 This loss sensitivity and long tail latency are significant remaining performance limits. The shaper's independent loss in both DNS directions means one query/response exchange can lose either datagram. A timeout is an incomplete test workload under the stated deadline, rather than evidence of corrupt data. All completed echoes were checked for size and content. An earlier full grid with the fixed two-second query deadline had ten timeouts; the low-RTT data-query deadline in `c868849` reduced that to nine in this single rerun. One high-RTT 5% cell timed out in the rerun after completing previously, so this is insufficient to claim a stable improvement across the full grid.
 
 The adaptive profile was selected automatically: payload size is probed in both directions before the session, outstanding DNS queries grow with queued traffic and path health, and idle polling backs off while retaining a quick first-packet slot. The encrypted send and receive packet windows are capped at 64. In the shaped data, `fragment_size` is the final size, and the congestion and outstanding query values are peaks sampled every 20 ms. Query rate and retransmits cover the echo phases. The live iodine run did not expose comparable encrypted retransmit or congestion-window counters, so those metrics are reported for Undertow's shaped path only.
+
+## Final adaptive DNS loss-recovery grid
+
+The [final 90-cell records](benchmark-results/shaped-direct-dns-final-2026-09-30.jsonl) are from `5bc458d`. Packet congestion now halves once per recovery episode, and failed DNS queries reduce the query budget at most once per 500 ms or twice the measured RTT, whichever is longer. Automatic payload discovery, the 64-packet send/receive bounds, reordered-response handling, and priority control traffic remain in place. The [intermediate grid](benchmark-results/shaped-direct-dns-recovery-2026-09-30.jsonl) at `a0a67d0` omitted query-error backoff and exposed a low-loss throughput regression; the final revision restores a bounded version of that signal.
+
+The final grid completed 81/90 cells, the same total as the baseline. Its nine deadline cells were 100 flows at 5 and 25 ms/20% loss; 50 ms/10% and 20%; 100 ms/10% and 20%; and 200 ms/10% and 20%, plus 10 flows at 100 ms/20%. The 200 ms/5%/100-flow cell completed in the final run after timing out in the baseline, while the 100 ms/20%/10-flow cell moved the other way. These are single runs, so neither change proves a stable completion-rate improvement.
+
+At 5% loss and 100 flows, the following pairs show baseline → final 64-byte request p95 latency and 2 KiB echo throughput. Echo content was verified in every completed cell.
+
+| RTT | Small-request p95 | 2 KiB echo throughput |
+| --- | ---: | ---: |
+| 5 ms | 2749 → 1107 ms | 30.3 → 56.7 KiB/s |
+| 25 ms | 8396 → 3713 ms | 22.1 → 55.7 KiB/s |
+| 50 ms | 13737 → 7382 ms | 15.8 → 16.8 KiB/s |
+| 100 ms | 11233 → 8333 ms | 13.4 → 15.6 KiB/s |
+| 200 ms | 11321 → 11035 ms | timed out → 12.9 KiB/s |
+
+Other cells varied in both directions. For example, 50 ms/1%/100 flows measured 116.0 KiB/s in the baseline grid and 57.0 KiB/s in the final grid, with worse small-request p95; targeted repeats of this cell varied substantially with query scheduling. The measured result is an improvement for several 5% cells, **not** a blanket speedup or a fix for high-loss tail latency. Nine deadline cells and multi-second tails remain the significant performance limit.
 
 ## Live feature and interoperability checks
 
