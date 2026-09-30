@@ -37,6 +37,8 @@ UDP pivot echo was measured from the Linux VM through Undertow to the Windows ag
 
 Raw UDP data is in [live-udp-2026-09-30.jsonl](benchmark-results/live-udp-2026-09-30.jsonl).
 
+A 2 MiB file was timed through the client console, server relay, and Linux agent on the live Undertow path. Upload took 6.494 seconds (315.4 KiB/s); download took 5.712 seconds (358.6 KiB/s). Both completion hashes and the downloaded file's SHA-256 matched the source. These are one run each, with progress reporting enabled. The [raw transfer records](benchmark-results/live-transfer-2026-09-30.jsonl) include bytes and elapsed time. A separate 16 MiB upload was cancelled around 10%; it left no destination or partial file and the console remained usable.
+
 ## Controlled DNS path
 
 The complete 90-cell matrix is in [shaped-direct-dns-2026-09-30.jsonl](benchmark-results/shaped-direct-dns-2026-09-30.jsonl). The shaper delays or drops complete DNS datagrams in both directions with a fixed deterministic mixer. It does not emulate a resolver, WAN queueing, or a TUN. A cell with an `error` reached a phase deadline, so its zero throughput fields do not mean zero bytes crossed the path.
@@ -77,7 +79,7 @@ $env:UNDERTOW_PERF_FLOWS='1,10,100'
 go test -buildvcs=false -timeout 40m ./internal/transport/dns -run '^TestShapedDirectDNS$' -count=1 -v
 ```
 
-Use [benchmark_http.py](../tools/benchmark_http.py) for the matched HTTP requests and [benchmark_udp.py](../tools/benchmark_udp.py) for UDP pivot echo. Run each on the named host shown in the [result metadata](benchmark-results/README.md); the tools print machine-readable JSON. The regular benchmarks remain available for local regressions:
+Use [benchmark_http.py](../tools/benchmark_http.py) for the matched HTTP requests, [benchmark_udp.py](../tools/benchmark_udp.py) for UDP pivot echo, and [benchmark_transfer.py](../tools/benchmark_transfer.py) to time console uploads/downloads on Linux with `pexpect`. Run each on the named host shown in the [result metadata](benchmark-results/README.md); the tools print machine-readable JSON. The regular benchmarks remain available for local regressions:
 
 ```sh
 go test ./internal/transport/dns -run '^$' -bench '^BenchmarkDirectDNS$' -benchtime=5x -count=3

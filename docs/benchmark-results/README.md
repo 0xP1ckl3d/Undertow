@@ -30,3 +30,12 @@ python3 tools/benchmark_udp.py measure --host AGENT_INTERNAL_IP --port 18087 --f
 ```
 
 Each flow sends one UDP datagram and validates a reversed echo. The reported throughput is application payload for that short burst, not sustained UDP capacity. All six cells completed without errors. The Linux client had accepted the Windows agent's route through its console, with no server route command.
+
+`live-transfer-2026-09-30.jsonl` records one timed 2 MiB upload and download from the Linux VM client to a Linux agent on that VM, relayed through the public Undertow server. The source was random data; the console reported the byte count and SHA-256 and the helper verified the downloaded file independently. Upload and download used separate destination paths that did not exist. The timer includes console command and completion reporting. Reproduce from the Linux VPN client checkout after starting a detached client and selecting a connected agent (Python `pexpect` 4.9.0 was installed for this run):
+
+```sh
+dd if=/dev/urandom of=/tmp/undertow-transfer-source.bin bs=1048576 count=2 status=none
+python3 tools/benchmark_transfer.py --pid-file /tmp/undertow-client.pid --agent AGENT_ID --source /tmp/undertow-transfer-source.bin --remote /tmp/undertow-transfer-agent.bin --download /tmp/undertow-transfer-downloaded.bin
+```
+
+The helper attaches to the client console, times both commands, checks the completion hashes, verifies the downloaded file, and detaches. The remote and download destinations must be absent before running it. The cancellation check used a separate 16 MiB file and pressed Ctrl-] in the client console during upload; the destination and temporary file were absent afterward.
