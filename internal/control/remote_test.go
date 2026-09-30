@@ -91,6 +91,42 @@ func TestConnectedVPNClientHasLimitedAPI(t *testing.T) {
 	}
 }
 
+func TestRemoteResponseWaitsForRequestFin(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	a, b := make(chan []byte, 256), make(chan []byte, 256)
+	server := mux.New(ctx, &remoteTestTransport{in: a, out: b, done: make(chan struct{})}, true)
+	client := mux.New(ctx, &remoteTestTransport{in: b, out: a, done: make(chan struct{})}, false)
+	defer server.Close()
+	defer client.Close()
+	manager := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	go pivot.ServeVPNInteractive(ctx, server, manager.ResolveEgress, func() bool { return false }, func(ctx context.Context, stream *mux.Stream) {
+		manager.ServeRemote(ctx, "operator-secret", 704, stream)
+	})
+	stream, err := client.Open(ctx, pivot.ControlDestination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	if err := json.NewEncoder(stream).Encode(remoteRequest{Method: http.MethodGet, Path: "/v1/status"}); err != nil {
+		t.Fatal(err)
+	}
+	// The JSON request is complete before its FIN arrives. The server must
+	// keep the stream open long enough to return the response body.
+	time.Sleep(50 * time.Millisecond)
+	if err := stream.CloseWrite(); err != nil {
+		t.Fatal(err)
+	}
+	responseBytes, err := io.ReadAll(stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var response remoteResponse
+	if err := json.Unmarshal(responseBytes, &response); err != nil || response.Status != http.StatusOK || len(response.Body) == 0 {
+		t.Fatalf("remote response lost: status=%d bytes=%d err=%v", response.Status, len(response.Body), err)
+	}
+}
+
 func TestVPNClientJobPathsAreScopedToJobAPI(t *testing.T) {
 	for _, tc := range []struct {
 		method, path string

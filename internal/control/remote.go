@@ -52,6 +52,12 @@ func (m *Manager) ServeRemote(ctx context.Context, token string, clientID uint64
 		writeRemoteResponse(stream, remoteResponse{Status: http.StatusBadRequest, Body: []byte("invalid request")})
 		return
 	}
+	// The decoder can finish at the JSON newline before the client's FIN is
+	// delivered. Wait for that half-close so the deferred stream.Close does
+	// not reset and discard a response that is still queued for sending.
+	if _, err := io.CopyN(io.Discard, stream, 6<<20); err != io.EOF {
+		return
+	}
 	if !strings.HasPrefix(request.Path, "/v1/") || len(request.Path) > 2048 || request.Method != http.MethodGet && request.Method != http.MethodPost && request.Method != http.MethodDelete {
 		writeRemoteResponse(stream, remoteResponse{Status: http.StatusBadRequest, Body: []byte("invalid API request")})
 		return
