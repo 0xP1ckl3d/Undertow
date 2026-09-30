@@ -1,0 +1,31 @@
+{
+  "path": "Linux VM on local LAN -> public EC2 server -> Windows agent -> HTTP server on Windows vEthernet; no packet shaper",
+  "server": {
+    "cpu": "Intel Xeon E5-2686 v4 @ 2.30GHz",
+    "tls": "ephemeral self-signed certificate, client/agent skip CA verification and pin SHA-256 fingerprint f4b9783ee28f46e1fae4067c3caf4dc6e7a15379add7faf369dbf2e8eed5412e",
+    "os": "Linux 6.8.11-cloud-amd64 x86_64",
+    "websocket_path": "/undertow",
+    "logical_cpus": 2,
+    "host": "EC2 Kali",
+    "endpoint": "13.210.247.60:443"
+  },
+  "agent": {
+    "server": "Python 3.12.10 http.server",
+    "host": "Windows TALON",
+    "http_endpoint": "172.23.224.1:18080",
+    "cpu": "Intel Core i9-13950HX",
+    "os": "Windows 11 Pro 10.0.26200 amd64"
+  },
+  "test_date": "2026-10-01 Australia/Sydney (UTC timestamps per run)",
+  "methodology": "Three sequential repeats per carrier; each helper request checks exact byte count and SHA-256; competing workload starts ten 1 MiB transfers, waits 0.5 seconds, then starts ten 64-byte requests; results are aggregate application payload throughput",
+  "client": {
+    "host": "pickle VM",
+    "python": "3.14.7",
+    "logical_cpus": 8,
+    "os": "Linux 6.11.2-amd64 x86_64",
+    "route": "172.23.224.0/20 via Windows agent",
+    "default_route": "192.168.50.1 via eth0",
+    "mode": "--internal",
+    "cpu": "13th Gen Intel Core i9-13950HX"
+  }
+}

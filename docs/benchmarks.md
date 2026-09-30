@@ -1,6 +1,24 @@
 # Performance and reliability measurements
 
-These results were measured on 2026-09-30. The raw records and exact setup are in [benchmark results](benchmark-results/README.md). They are single runs on the stated hosts and path, so treat differences as observations rather than a general speed claim. Every completed HTTP flow checked its byte count and SHA-256.
+The DNS and iodine results below were measured on 2026-09-30; the WebSocket/QUIC comparison was measured on 2026-10-01. The raw records and exact setups are in [benchmark results](benchmark-results/README.md). Treat differences as observations on the stated hosts and path, not general speed claims. Every completed HTTP flow checked its byte count and SHA-256.
+
+## Live WebSocket and QUIC comparison
+
+Three sequential repeats per workload used Undertow `fd282f39826d0d4d02a3097adc6ed2f6d8a9c043` on a Linux 6.11.2 VM client (8 logical CPUs, Core i9-13950HX), an EC2 Linux 6.8.11 server (2 vCPUs, Xeon E5-2686 v4), and a Windows 11 10.0.26200 agent (Core i9-13950HX). The client used `--internal` to reach a Python HTTP server on the agent at `172.23.224.1:18080` via the EC2 public endpoint `13.210.247.60:443`. WebSocket used TCP/443 and `/undertow`; QUIC used UDP/443. Both used an ephemeral self-signed TLS certificate, explicit skip-CA-verification opt-in, and a pinned Undertow server fingerprint. There was no packet shaper. The exact host, endpoint, TLS, file and hash metadata are in the [environment record](benchmark-results/carrier-environment-2026-10-01.json).
+
+Each cell is the median of three runs, with the latency pair showing the median of each run's request median and p95 (ms). Throughput is aggregate verified application payload, in KiB/s. The competing test started ten 1 MiB transfers, waited 0.5 seconds, then issued ten 64-byte requests. All 852 HTTP responses completed with the expected byte count and SHA-256; each run's result and the server's final session counters are in the [WebSocket](benchmark-results/live-websocket-2026-10-01.jsonl) and [QUIC](benchmark-results/live-quic-2026-10-01.jsonl) JSONL files.
+
+| Workload | Flows | WebSocket | QUIC |
+| --- | ---: | ---: | ---: |
+| 64-byte HTTP median / p95 | 1 | 32.2 / 32.2 ms | 31.7 / 31.7 ms |
+| 64-byte HTTP median / p95 | 10 | 51.1 / 63.1 ms | 42.1 / 44.9 ms |
+| 64-byte HTTP median / p95 | 100 | 175.3 / 1096.1 ms | 92.1 / 1097.0 ms |
+| 1 MiB HTTP aggregate | 1 | 1756.9 KiB/s | 1896.0 KiB/s |
+| 1 MiB HTTP aggregate | 10 | 2424.8 KiB/s | 2689.1 KiB/s |
+| 64-byte HTTP median / p95 during ten bulk flows | 10 | 211.9 / 216.2 ms | 211.8 / 222.1 ms |
+| Ten 1 MiB flows with competing short requests | 10 | 2400.5 KiB/s | 2833.3 KiB/s |
+
+QUIC's ten-flow bulk median was 11% higher than WebSocket's on this path. It still runs Undertow's ACK/retransmission/window protocol over one ordered QUIC stream; the server reported **zero Undertow retransmits** for both agent and client sessions in each carrier run, so these measurements do not demonstrate double retransmission. Both reached the 64-packet Undertow congestion window. The 100-flow p95 varied widely across repeats (WebSocket 623–1121 ms; QUIC 585–1104 ms), and one QUIC competing run had a 710 ms short-request p95 while the other two were 203–222 ms. Those tails could include stream head-of-line effects, HTTP server scheduling, or path variation; this clean-path test does not isolate them. No QUIC code change was justified by these measurements. Lossy-path behavior and available-bandwidth saturation were not measured.
 
 ## Test paths and workloads
 
