@@ -342,7 +342,7 @@ func (c *Client) run(ctx context.Context) {
 			active++
 			c.outstanding.Store(int64(active))
 			c.workers.Add(1)
-			go c.query(ctx, wire, results)
+			go c.query(ctx, wire, results, responseTimeout(wire, stats.RTT))
 		}
 		select {
 		case <-ctx.Done():
@@ -368,7 +368,18 @@ func (c *Client) run(ctx context.Context) {
 	}
 }
 
-func (c *Client) query(ctx context.Context, wire []byte, results chan<- error) {
+// A data packet should receive an immediate ACK or data response. Retire a
+// lost data query sooner on a proven low-RTT path. Long-held idle polls and
+// higher-RTT paths keep the full deadline to allow the server's one-second
+// hold and scheduler variance.
+func responseTimeout(wire []byte, rtt time.Duration) time.Duration {
+	if len(wire) < 2 || wire[1]&1 == 0 || rtt == 0 || rtt >= 50*time.Millisecond {
+		return 2 * time.Second
+	}
+	return 500 * time.Millisecond
+}
+
+func (c *Client) query(ctx context.Context, wire []byte, results chan<- error, timeout time.Duration) {
 	defer c.workers.Done()
 	var socket *pollSocket
 	select {
@@ -382,7 +393,7 @@ func (c *Client) query(ctx context.Context, wire []byte, results chan<- error) {
 		socket = &pollSocket{conn: conn}
 	}
 	c.queries.Add(1)
-	resp, err := exchangeBuffer(ctx, socket.conn, c.domain, wire, socket.buf[:])
+	resp, err := exchangeBufferTimeout(ctx, socket.conn, c.domain, wire, socket.buf[:], timeout)
 	if err == nil {
 		c.responses.Add(1)
 		err = c.Session.Process(resp, time.Now())
@@ -405,6 +416,10 @@ func exchange(ctx context.Context, conn *net.UDPConn, domain string, payload []b
 }
 
 func exchangeBuffer(ctx context.Context, conn *net.UDPConn, domain string, payload, buf []byte) ([]byte, error) {
+	return exchangeBufferTimeout(ctx, conn, domain, payload, buf, 2*time.Second)
+}
+
+func exchangeBufferTimeout(ctx context.Context, conn *net.UDPConn, domain string, payload, buf []byte, timeout time.Duration) ([]byte, error) {
 	name, err := RandomName(domain)
 	if err != nil {
 		return nil, err
@@ -418,7 +433,7 @@ func exchangeBuffer(ctx context.Context, conn *net.UDPConn, domain string, paylo
 	if err != nil {
 		return nil, err
 	}
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(timeout)
 	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
 		deadline = d
 	}
