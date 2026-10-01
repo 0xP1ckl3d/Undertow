@@ -63,7 +63,7 @@ func runConsoleScript(ctx context.Context, output io.Writer, editor *consoleEdit
 		if err := json.Unmarshal(data, &job); err != nil {
 			return err
 		}
-		fmt.Fprintf(output, "Script job %s started on %s. Use job output %s to inspect it.\n", job.ID, shortAgentID(job.AgentID), job.ID)
+		fmt.Fprintf(output, "Script job %s started on %s. Use job output %s, or run jobs for a numbered list.\n", job.ID, shortAgentID(job.AgentID), job.ID)
 		return nil
 	}
 	if open == nil {

@@ -254,6 +254,11 @@ func clientCommand(args []string) error {
 	}
 	for ctx.Err() == nil {
 		c, err := carrier.dial(ctx, *server, *domain, pinnedFingerprint, token, key, *profileFlag)
+		if err != nil {
+			if tlsErr := clientTLSVerificationError(err, *carrier.kind, *carrier.skipTLSVerify, *server); tlsErr != nil {
+				return tlsErr
+			}
+		}
 		if err == nil {
 			carrierIP := serverIP
 			if remote, ok := c.(interface{ RemoteAddr() string }); ok {
@@ -303,6 +308,19 @@ func clientCommand(args []string) error {
 		}
 	}
 	return nil
+}
+
+// Certificate failures need operator action. Retrying them silently can leave
+// the attached console waiting until the background startup timeout expires.
+func clientTLSVerificationError(err error, kind string, skipVerify bool, server string) error {
+	if err == nil || skipVerify || (kind != "quic" && kind != "websocket") {
+		return nil
+	}
+	message := err.Error()
+	if !strings.Contains(message, "tls: failed to verify certificate") && !strings.Contains(message, "x509:") {
+		return nil
+	}
+	return fmt.Errorf("TLS certificate verification failed for %s; if the server uses a self-signed certificate, add --tls-insecure-skip-verify (the Undertow --fingerprint is still checked): %w", server, err)
 }
 
 type liveClientConsole struct {

@@ -10,7 +10,7 @@
                  ▀
 ```
 
-Undertow carries encrypted sessions over direct DNS, HTTPS/WebSocket, or QUIC. A **server** accepts connections, an unprivileged **agent** connects from a network you want to reach, and a privileged **client** tunnels traffic from its own machine. Choose the goal below, then follow the [copy/paste quickstart](docs/quickstart.md).
+Undertow carries encrypted sessions over QUIC, HTTPS/WebSocket, or direct DNS. A **server** accepts connections, an unprivileged **agent** reaches networks from its host, and a privileged **client** tunnels traffic from its own machine. Start with the [short QUIC quickstart](docs/quickstart.md).
 
 ## What are you trying to do?
 
@@ -24,20 +24,20 @@ Undertow carries encrypted sessions over direct DNS, HTTPS/WebSocket, or QUIC. A
 | Expose a client service on an agent host | Server + agent + client | Client console `forward add` |
 | Reach a deeper network through another agent | Server + parent agent + child agent | Parent console `relay start` |
 
-On **SERVER**, run `undertow init` once to create `identity.key` and `token.key` and print the server fingerprint. Keep `identity.key` on the server; securely copy `token.key` to each **AGENT** or **CLIENT**. Replace `SERVER_IP` and `FINGERPRINT` below. Run `undertow` as `./bin/undertow` when built from this repository.
+On **SERVER**, run `./bin/undertow init` once. Keep `identity.key` there, copy `token.key` to each **AGENT** or **CLIENT**, and record the printed fingerprint. Replace `SERVER_IP` and `FINGERPRINT` below. These are the minimal Linux commands for direct IP and the default temporary self-signed TLS certificate:
 
 ```sh
-# SERVER (root is usually needed for UDP/53)
-sudo undertow server --identity identity.key --token-file token.key
+# SERVER; accepts QUIC UDP/443, WebSocket TCP/443, DNS UDP/53
+sudo ./bin/undertow server
 
-# AGENT (unprivileged, on a host that can reach internal targets)
-undertow agent --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
+# AGENT; only when an internal network is needed
+./bin/undertow agent --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify
 
-# CLIENT (root is needed for TUN; choose a routing mode from the table)
-sudo undertow client --internal --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
+# CLIENT; choose --vpn, --internal, or both
+sudo ./bin/undertow client --vpn --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify
 ```
 
-The server starts DNS on UDP/53, HTTPS/WebSocket on TCP/443, and QUIC on UDP/443 by default. The agent and client commands above choose DNS; each peer can choose a different available carrier. WebSocket and QUIC use ephemeral self-signed TLS certificates unless server certificate files are supplied. For a direct IP connection to either, use `--tls-insecure-skip-verify --fingerprint FINGERPRINT` on the peer. In a terminal, `server` and `client` each open a console. Type `agents`, `use 1`, `show`, and `routes`; on a client, use `route accept CIDR` for an advertised network or `route add CIDR` for another reachable network. `background` detaches either console without stopping its worker. Return with `undertow server attach` or `undertow client attach`. The server needs `--tun` only when the server host itself will route to an internal network; Internet egress from a client uses server sockets. See [quickstart](docs/quickstart.md) for verification and cleanup by goal.
+The server accepts all three carriers by default; peers choose one independently. `--vpn` sends the client's IPv4 Internet traffic through the server and needs no agent. `--internal` routes only selected agent networks and keeps the client's normal Internet route. Combine them for both. The **server needs `--tun` only when applications on the server host itself need routed access through an agent**. Every client mode creates its own TUN and works without a server TUN. In a terminal, `server` and `client` each open a console. For an internal route, type `agents`, `use 1`, `show`, `routes`, then `route accept CIDR` or `route add CIDR` on the client. `background` detaches without stopping; `server attach` or `client attach` returns. See the [quickstart](docs/quickstart.md) for verification, stopping, and WebSocket/DNS alternatives.
 
 ## How the pieces connect
 
@@ -88,19 +88,13 @@ flowchart LR
 
 **Agent and client are different jobs.** Put an `agent` on a host that can reach an internal network; it lets the server open sockets from that host, but changes none of that host's routes. Put a `client` on a host whose *own* applications should use the tunnel. `--vpn` installs two IPv4 `/1` Internet routes and verifies public egress. `--internal` alone installs only internal routes, leaving the client's Internet route unchanged. Combine the flags for both behaviours. After connecting, select an agent in the client console and use `route accept CIDR` for an advertised network or `route add CIDR` for a manual route. No server route command is required for those client routes. `status` lists agents and clients separately.
 
-On the **VPN client host**, choose one mode:
-
-```sh
-sudo undertow client --vpn --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
-sudo undertow client --internal --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
-sudo undertow client --vpn --internal --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
-```
+On the **VPN client host**, choose one mode using the QUIC client command above: `--vpn` for Internet egress, `--internal` for agent networks, or `--vpn --internal` for both. Keep `--transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify` for this direct-IP, self-signed setup.
 
 For internal-only setup, use the client console after the second command: `agents`, `use 1`, `routes`, then `route accept 10.20.0.0/16` (or `route add 10.20.0.0/16` for a reachable network the agent has not advertised).
 
-For interactive operation, start `undertow server` or `undertow client` in a terminal. Both open their consoles automatically. Type `agents`, then `use 1` to enter an agent and run `shell` for a live terminal, `exec` for one-shot execution, built-in host operations, `upload`, `download`, or route commands without copying its ID. Ctrl-] exits a live shell and returns to the Undertow menu. `help` changes with the menu; `back` returns to the main menu. The server console manages global routes. The client console manages its own accepted and manual routes, which persist across reconnects. On the server, `quit` detaches and `stop` shuts down; on the client, `quit` stops the VPN. Current agent capabilities are enabled by default; `agent --deny=exec,upload` still allows built-in host operations and live shells, while `--deny=hostops` and `--deny=interactive` block those separately. `status` shows supported and allowed operations. See [interactive scenarios](docs/scenarios.md#8-interactive-consoles-and-agent-commands).
+For interactive operation, start `undertow server` or `undertow client` in a terminal. Both open their consoles automatically. Type `agents`, then `use 1` to enter an agent and run `shell` for a live terminal, `exec` for one-shot execution, built-in host operations, `upload`, `download`, or route commands without copying its ID. Ctrl-] exits a live shell and returns to the Undertow menu. `help` shows short categories; `help relay`, `help route`, `help run-script`, and other topics show detailed usage. Tab completes local script, WASM, and transfer paths. `back` returns to the main menu. The server console manages global routes. The client console manages its own accepted and manual routes, which persist across reconnects. On the server, `quit` detaches and `stop` shuts down; on the client, `quit` stops the VPN. Current agent capabilities are enabled by default; `agent --deny=exec,upload` still allows built-in host operations and live shells, while `--deny=hostops` and `--deny=interactive` block those separately. `status` shows supported and allowed operations. See [interactive scenarios](docs/scenarios.md#8-interactive-consoles-and-agent-commands).
 
-For a task that should run while you use the console, select an agent and enter `job start PROGRAM [ARGS]`. Use `jobs`, `job show ID`, `job output ID`, and `job cancel ID` to manage it. Tasks remain visible after client console detach/reattach while the agent stays connected; output is retained up to 256 KiB per job.
+For a task that should run while you use the console, select an agent and enter `job start PROGRAM [ARGS]`. `jobs` shows numbered tasks; use `jobs 1` for details, `job output 1` to read output, or `job cancel 1` to stop one. Full job IDs work too. Tasks remain visible after client console detach/reattach while the agent stays connected; output is retained up to 256 KiB per job.
 
 Use `run-script bash ./check.sh` or `run-script powershell ./audit.ps1` in a selected-agent console to stream local source into that interpreter on the agent without creating a script file there. Add `--background` before the interpreter to create a job. The independent `scripts` capability can be disabled with `agent --deny=scripts`.
 

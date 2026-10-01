@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -41,6 +42,138 @@ func TestConsoleHistoryAndTabCompletion(t *testing.T) {
 	}
 	if first, second := <-lines, <-lines; first != "status" || second != "status" {
 		t.Fatalf("history/completion: %q, %q", first, second)
+	}
+}
+
+func TestConsoleHelpTopics(t *testing.T) {
+	var summary, clientSummary, relay, clientRoute bytes.Buffer
+	if err := printConsoleHelp(&summary, false, false, true, ""); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(summary.String(), "Agent work") || strings.Contains(summary.String(), "run-script [--background]") {
+		t.Fatalf("summary is not concise: %q", summary.String())
+	}
+	if err := printConsoleHelp(&clientSummary, true, false, false, ""); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(clientSummary.String(), "relay") || !strings.Contains(clientSummary.String(), "internal") {
+		t.Fatalf("client help topics are not role-specific: %q", clientSummary.String())
+	}
+	if err := printConsoleHelp(&relay, false, true, true, "relay"); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"relay start [BIND]", "relay list", "relay stop [BIND]", "--transport relay", "--deny=relay"} {
+		if !strings.Contains(relay.String(), want) {
+			t.Errorf("relay help missing %q: %q", want, relay.String())
+		}
+	}
+	if err := printConsoleHelp(&clientRoute, true, true, false, "route"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(clientRoute.String(), "route accept CIDR") || !strings.Contains(clientRoute.String(), "route add CIDR") {
+		t.Fatalf("client route help = %q", clientRoute.String())
+	}
+}
+
+func TestConsoleLocalPathCompletion(t *testing.T) {
+	t.Chdir(t.TempDir())
+	if err := os.Mkdir("scripts", 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join("scripts", "check.sh"), []byte("echo ok\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("tool.wasm", []byte("module"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("input.txt", []byte("input"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir("my scripts", 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join("my scripts", "quick check.sh"), []byte("echo ok\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	separator := string(os.PathSeparator)
+	for _, test := range []struct {
+		input, want string
+		selected    bool
+	}{
+		{"run-script bash scr", "run-script bash scripts" + separator, true},
+		{"run-script bash scripts" + separator + "che", "run-script bash scripts" + separator + "check.sh ", true},
+		{"run-script agent-1 bash scr", "run-script agent-1 bash scripts" + separator, false},
+		{"run-wasm --stdin inp", "run-wasm --stdin input.txt ", true},
+		{"run-wasm --background tool.w", "run-wasm --background tool.wasm ", true},
+		{"upload scr", "upload scripts" + separator, true},
+		{"help rou", "help route", true},
+	} {
+		t.Run(test.input, func(t *testing.T) {
+			editor := newConsoleEditor(io.Discard, true)
+			editor.selected = test.selected
+			editor.line = []rune(test.input)
+			editor.cursor = len(editor.line)
+			editor.complete()
+			if got := string(editor.line); got != test.want {
+				t.Fatalf("completion = %q, want %q", got, test.want)
+			}
+		})
+	}
+	serverEditor := newConsoleEditor(io.Discard, false)
+	serverEditor.line = []rune("help rel")
+	serverEditor.cursor = len(serverEditor.line)
+	serverEditor.complete()
+	if got := string(serverEditor.line); got != "help relay" {
+		t.Fatalf("server help completion = %q", got)
+	}
+	editor := newConsoleEditor(io.Discard, true)
+	editor.selected = true
+	editor.line = []rune(`run-script bash "my scr`)
+	editor.cursor = len(editor.line)
+	editor.complete()
+	wantDir := `run-script bash "my scripts` + separator
+	if got := string(editor.line); got != wantDir {
+		t.Fatalf("quoted directory completion = %q, want %q", got, wantDir)
+	}
+	editor.line = []rune(wantDir + "quick c")
+	editor.cursor = len(editor.line)
+	editor.complete()
+	editor.complete()
+	args, err := splitConsoleCommand(string(editor.line))
+	if err != nil || !reflect.DeepEqual(args, []string{"run-script", "bash", "my scripts" + separator + "quick check.sh"}) {
+		t.Fatalf("quoted file completion = %q, args=%q, err=%v", string(editor.line), args, err)
+	}
+}
+
+func TestConsoleTabCompletesScriptDirectoryAndFile(t *testing.T) {
+	t.Chdir(t.TempDir())
+	if err := os.Mkdir("scripts", 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join("scripts", "check.sh"), []byte("echo ok\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	editor := newConsoleEditor(&output, true)
+	editor.selected = true
+	lines := make(chan string, 1)
+	err := editor.read(context.Background(), strings.NewReader("run-script bash scr\tche\t\n"), lines)
+	if !errors.Is(err, io.EOF) {
+		t.Fatalf("read = %v", err)
+	}
+	want := "run-script bash scripts" + string(os.PathSeparator) + "check.sh "
+	if got := <-lines; got != want {
+		t.Fatalf("Tab-completed line = %q, want %q", got, want)
+	}
+}
+
+func TestConsoleHelpRelayDispatch(t *testing.T) {
+	var output bytes.Buffer
+	if err := runConsole(context.Background(), strings.NewReader("help relay\nquit\n"), &output, nil, nil, nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "relay start [BIND]") || !strings.Contains(output.String(), "--transport relay") {
+		t.Fatalf("help relay output = %q", output.String())
 	}
 }
 
@@ -181,7 +314,7 @@ func TestInteractiveServerAgentContext(t *testing.T) {
 		}
 		return nil, nil
 	}
-	input := strings.NewReader("agents\nuse 1\nhelp\nexec /usr/bin/id -u\nroute add 10.10.0.0/16\nback\nquit\n")
+	input := strings.NewReader("agents\nuse 1\nhelp\nhelp exec\nexec /usr/bin/id -u\nroute add 10.10.0.0/16\nback\nquit\n")
 	var output bytes.Buffer
 	if err := runConsole(context.Background(), input, &output, caller, nil, nil, nil, nil); err != nil {
 		t.Fatal(err)
@@ -232,17 +365,51 @@ func TestSelectedAgentStartsBackgroundJob(t *testing.T) {
 		if path == "/v1/jobs?agent_id=agent-a" {
 			return json.Marshal([]control.JobInfo{{ID: "job-1", AgentID: "agent-a", State: "running"}})
 		}
+		if path == "/v1/jobs/job-1" {
+			return json.Marshal(control.JobInfo{ID: "job-1", AgentID: "agent-a", State: "completed"})
+		}
+		if path == "/v1/jobs/job-1/output" {
+			return json.Marshal(control.JobInfo{ID: "job-1", AgentID: "agent-a", Output: "hello from job\n"})
+		}
 		return nil, fmt.Errorf("unexpected request %s", path)
 	}
 	var output bytes.Buffer
-	if err := runConsole(context.Background(), strings.NewReader("use 1\njob start powershell.exe -NoProfile\njobs\nquit\n"), &output, caller, nil, nil, nil, nil); err != nil {
+	if err := runConsole(context.Background(), strings.NewReader("use 1\njob start powershell.exe -NoProfile\njobs\njobs 1\njobs show 1\njob output 1\njobs output job-1\nhelp show 1\nquit\n"), &output, caller, nil, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "Job job-1 started") || !strings.Contains(output.String(), "Jobs (1)") {
+	if !strings.Contains(output.String(), "Job job-1 started") || !strings.Contains(output.String(), "Jobs (1):\n  1  job-1") || strings.Count(output.String(), "hello from job") != 2 || !strings.Contains(output.String(), "To inspect job 1, use job show 1") || strings.Contains(output.String(), "error:") {
 		t.Fatalf("output=%s", output.String())
 	}
-	if !slices.Contains(requests, "POST /v1/agents/agent-a/jobs") || !slices.Contains(requests, "GET /v1/jobs?agent_id=agent-a") {
+	if !slices.Contains(requests, "POST /v1/agents/agent-a/jobs") || !slices.Contains(requests, "GET /v1/jobs?agent_id=agent-a") || !slices.Contains(requests, "GET /v1/jobs/job-1") || !slices.Contains(requests, "GET /v1/jobs/job-1/output") {
 		t.Fatalf("requests=%v", requests)
+	}
+}
+
+func TestJobNumbersReferToLastPrintedList(t *testing.T) {
+	listCalls := 0
+	caller := func(_ context.Context, _, path string, _ any) ([]byte, error) {
+		switch path {
+		case "/v1/jobs":
+			listCalls++
+			if listCalls == 1 {
+				return json.Marshal([]control.JobInfo{{ID: "older", State: "completed"}})
+			}
+			return json.Marshal([]control.JobInfo{{ID: "newer", State: "running"}, {ID: "older", State: "completed"}})
+		case "/v1/jobs/older":
+			return json.Marshal(control.JobInfo{ID: "older", State: "completed"})
+		default:
+			return nil, fmt.Errorf("unexpected request %s", path)
+		}
+	}
+	var output bytes.Buffer
+	selection := new(consoleJobSelection)
+	for _, args := range [][]string{{"jobs"}, {"jobs", "1"}, {"job", "show", "1"}} {
+		if err := runConsoleJobCommand(context.Background(), &output, caller, args, "", selection); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if listCalls != 1 || strings.Count(output.String(), "Job older") != 2 {
+		t.Fatalf("list calls=%d output=%s", listCalls, output.String())
 	}
 }
 

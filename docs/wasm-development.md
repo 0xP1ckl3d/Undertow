@@ -93,12 +93,17 @@ All requests are JSON objects. Omitted numeric fields take the defaults below. R
 | Outbound network | `net.read` | `handle`, optional `limit`, `timeout_ms` | `{data_base64,bytes,eof}` |
 | Outbound network | `net.close` | `handle` | `{closed:true}` |
 | Windows Registry | `registry.read` | `key`, optional `name` | text from `reg query` |
+| Windows audit | `windows.service_names` | optional `offset`, `limit` | Sorted service registry subkey names; default page 128, maximum page 256 |
+| Windows audit | `windows.service_config` | `name` | `{name,image_path,expanded_image_path,account,type,start}` from the service registry key |
+| Windows audit | `windows.file_acl` | `path` | text from `icacls` for manual ACL review |
 
 Filesystem paths resolve on the **agent**, relative to its working directory. They are not confined to the module's source directory. `fs.list` and `fs.stat` do not follow symlinks for metadata; `fs.walk` does not descend through symlinked directories. Listing results are bounded as shown above, and large JSON results can still return `-4`. For large trees, query narrower roots. `fs.walk` defaults to depth 2, caps depth at 5, errors if the root is inaccessible, and silently omits unreadable descendants. `fs.read` starts at a byte offset (default 0), returns raw bytes as standard base64, and reads at most 32 KiB per call (default 32 KiB). It can read any file the agent process can read. `permissions` is the numeric Go `FileMode.Perm()` value; Windows permissions are not a full ACL evaluation.
 
 `dns.resolve` uses the agent's resolver and has a five-second timeout. The network operations require `address` in `host:port` form, or `[IPv6]:port`. `data` is standard base64 for up to 8 KiB of outbound bytes per call. Each read is capped at 8 KiB (`limit`, default 8 KiB). `timeout_ms` defaults to 5,000 and is capped at 5,000. A TCP exchange with no outbound data only tests connection establishment and returns immediately. A UDP exchange writes one datagram and waits for one reply; a silent service returns a timeout error. For multi-step protocols, use `net.open`, repeat `net.write` and `net.read`, then `net.close`. Handles are positive integers local to one module run, and the agent closes any remaining handles when the run ends. A missing or closed handle returns `-3`; opening a ninth concurrent handle returns `-3`. TCP reads may return fewer bytes than requested and must be repeated. A UDP read returns one datagram up to the requested limit. These operations use the agent's network reachability and privileges. They do not expose inbound listeners or arbitrary raw sockets.
 
 `registry.read` is Windows only. `key` must start with `HKLM\\`, `HKCU\\`, `HKEY_LOCAL_MACHINE\\`, or `HKEY_CURRENT_USER\\`; `name` selects one value. A missing key, blocked access, or absent `reg.exe` is a host error. Other platforms return `-2`.
+
+The `windows.*` audit operations are read-only and Windows-only. Page through `windows.service_names` with `offset` and `limit` until it returns fewer names than requested. `windows.service_config` accepts one service name and reads its current registry configuration. `expanded_image_path` resolves environment references with the agent process environment. `windows.file_acl` returns raw `icacls` output; it does not calculate effective permissions for the current token. A service path or ACL entry alone is not proof that the user can modify a service executable.
 
 ## Write and build a custom module
 

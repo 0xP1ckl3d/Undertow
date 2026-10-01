@@ -1,20 +1,25 @@
 # Privilege and configuration audit
 
-Shows the current privilege context and selected system path metadata. On Linux it flags world-writable systemd unit files. On Windows it lists selected configuration directory metadata; Windows ACLs require separate evaluation.
+A read-only WASM example inspired by [PrivescCheck](https://github.com/itm4n/PrivescCheck). It runs on the selected Undertow agent through `undertow_host_v1`, with no PowerShell script on the agent.
 
-Build from the repository root with `./examples/wasm/build.ps1 privilege-audit` or `sh examples/wasm/build.sh privilege-audit`.
+Build from the repository root with `./examples/wasm/build.ps1 privilege-audit` or `sh examples/wasm/build.sh privilege-audit`, then run:
 
 ```text
 use 1
 run-wasm examples/wasm/privilege-audit/privilege-audit.wasm
 ```
 
-Representative output:
+Implemented Windows checks:
 
-```text
-Privilege and configuration audit: workstation
-uid=1000 euid=1000 gid=1000 egid=1000 groups=[1000]
-/etc/passwd mode=-rw-r--r-- size=2412
-```
+| Check | Output | Basis |
+| --- | --- | --- |
+| AlwaysInstallElevated | Finding only when both HKLM and HKCU equal 1 | Registry values |
+| Automatic logon, LSA protection, WDigest, UAC and WSUS transport | Review or context | Registry values; no password value is printed |
+| Selected token privileges | Context | `whoami /all` snapshot |
+| Unquoted SYSTEM service paths | Review candidates with possible executable prefixes and parent ACL text | Service registry and `icacls` |
 
-See the [host API guide](../../../docs/wasm-development.md) for extending the checks.
+The service path check does **not** claim exploitability. Effective write access, an existing prefix executable, service start permissions, and restart conditions require further assessment. The module does not evaluate Windows ACLs, extract credentials, run payloads, or change the target. Unavailable registry values are omitted.
+
+This covers a subset of PrivescCheck's Windows checks. PrivescCheck also checks scheduled tasks, applications, credentials, network settings, hardening, updates, and more; those are not replicated here. On Linux, the example retains its earlier UID/GID and world-writable system path checks. Other operating systems print that no checks are implemented.
+
+See the [host API guide](../../../docs/wasm-development.md) for API details and limits.

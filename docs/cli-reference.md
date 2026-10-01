@@ -8,13 +8,13 @@ Run `undertow doctor server|agent|client [FLAGS]` before starting a role to chec
 
 ```sh
 # SERVER
-undertow doctor server --tun --forward 127.0.0.1:18080=10.20.0.50:80
+undertow doctor server
 
 # AGENT
-undertow doctor agent --server SERVER_IP:53 --fingerprint FINGERPRINT
+undertow doctor agent --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify
 
 # CLIENT
-undertow doctor client --server SERVER_IP:53 --fingerprint FINGERPRINT --internal --route 10.20.0.0/16
+undertow doctor client --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify --internal --route 10.20.0.0/16
 ```
 
 ## Enrollment and identity shared by connection modes
@@ -30,7 +30,7 @@ undertow doctor client --server SERVER_IP:53 --fingerprint FINGERPRINT --interna
 
 ## Transport selection
 
-The **server** defaults to all three listeners: DNS UDP/53, WebSocket TCP/443 and QUIC UDP/443. Agents and clients default to DNS and select one active server carrier per connection. They can use different carriers at the same time; identity, enrollment, mux, routing, console commands, jobs and files share one server control plane. On the server, `--transport dns,quic` selects a subset and `--transport quic` keeps the single-carrier form.
+The **server** defaults to all three listeners: QUIC UDP/443, WebSocket TCP/443 and DNS UDP/53. Agents and clients default to DNS in the CLI, so specify `--transport quic` or `--transport websocket` to use either of those paths. They can use different carriers at the same time; identity, enrollment, mux, routing, console commands, jobs and files share one server control plane. On the server, `--transport dns,quic` selects a subset and `--transport quic` keeps the single-carrier form.
 
 | Carrier | Server endpoint | Use when |
 | --- | --- | --- |
@@ -126,9 +126,9 @@ For a child agent, explicitly start a relay listener on its selected parent in t
 Run on the elevated **VPN client** host. Choose at least one of `--vpn` and `--internal`:
 
 ```sh
-sudo undertow client --vpn --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
-sudo undertow client --internal --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
-sudo undertow client --vpn --internal --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
+sudo undertow client --vpn --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify
+sudo undertow client --internal --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify
+sudo undertow client --vpn --internal --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify
 ```
 
 | Flag | Default | Meaning |
@@ -155,7 +155,7 @@ sudo undertow client --vpn --internal --server SERVER_IP:53 --fingerprint FINGER
 
 Every mode creates the client TUN/Wintun and pins a physical route to the carrier server. `--vpn` installs two IPv4 `/1` routes and verifies public egress by default. `--internal` alone does not change the Internet/default route or check public egress. After connecting, use `agents`, `use 1`, and `routes` in the client console, then `route accept CIDR` for an advertised subnet or `route add CIDR` for a manual per-client route. No server route command is required. If global server routes exist, internal-only mode also mirrors active ones. `--vpn --internal` provides both behaviours. Owned routes are withdrawn on graceful exit or a failed check. IPv6 is not routed. The `.1` client adapter address is local; the public egress address is reported separately in VPN mode.
 
-In a terminal, any client mode opens the interactive console by default. The tunnel runs in a separate local worker so `background` detaches the console without dropping its routes or session. Run `undertow client attach` to return; use `--pid-file PATH` if the worker uses a custom state file. `quit` stops the client and removes its routes. Ctrl+C asks before stopping. Up/Down recall commands and Tab completes the first command word. `client --background` starts without the console. A nonterminal foreground client can also be attached from another terminal. A connected client can view status, accept agent advertised routes, add its own manual route through an agent, change its own internal mode, and execute programs on agents that allow it. Client accepted routes affect only that client and persist across reconnects. Global server route management and agent selection remain on the server host. No extra credential or server setting is needed for client commands. The server's `control.key` is only for its loopback API and local operator commands; do not copy it to clients. `internal on` and `internal off` change how **new** flows use global server routes; the client's explicitly accepted routes remain active in either setting. Existing connections keep their current path. Routine logs are written to `--log-file` (default `undertow-client.log`); the console shows connection and agent changes.
+In a terminal, any client mode opens the interactive console by default. The tunnel runs in a separate local worker so `background` detaches the console without dropping its routes or session. Run `undertow client attach` to return; use `--pid-file PATH` if the worker uses a custom state file. `quit` stops the client and removes its routes. Ctrl+C asks before stopping. Up/Down recall commands; Tab completes command names, help topics, and local paths for scripts, WASM modules, and transfers. `help` shows categories and `help TOPIC` gives command details. `client --background` starts without the console. A nonterminal foreground client can also be attached from another terminal. A connected client can view status, accept agent advertised routes, add its own manual route through an agent, change its own internal mode, and execute programs on agents that allow it. Client accepted routes affect only that client and persist across reconnects. Global server route management and agent selection remain on the server host. No extra credential or server setting is needed for client commands. The server's `control.key` is only for its loopback API and local operator commands; do not copy it to clients. `internal on` and `internal off` change how **new** flows use global server routes; the client's explicitly accepted routes remain active in either setting. Existing connections keep their current path. Routine logs are written to `--log-file` (default `undertow-client.log`); the console shows connection and agent changes.
 
 ## Foreground and background lifecycle
 

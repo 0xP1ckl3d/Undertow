@@ -81,6 +81,7 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 		serverConsole = features[0]
 	}
 	selectedID, selectedLabel := "", ""
+	var jobSelection consoleJobSelection
 	known := make(map[string]control.AgentInfo)
 	type agentRefresh struct {
 		agents []control.AgentInfo
@@ -258,13 +259,20 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 			continue
 		}
 		if args[0] == "help" {
-			printConsoleHelp(output, vpnClient, selectedID != "")
-			if serverConsole.serverAttached {
-				fmt.Fprintln(output, "  logs                   Show recent server log lines")
-				fmt.Fprintln(output, "  logs follow            Stream new log lines; Enter returns")
-				fmt.Fprintln(output, "  background             Detach console; keep server running")
-				fmt.Fprintln(output, "  stop                   Gracefully stop the server")
-				fmt.Fprintln(output, "  quit / exit            Detach console; keep server running")
+			if len(args) > 2 {
+				if len(args) == 3 && args[1] == "show" {
+					fmt.Fprintf(output, "To inspect job %s, use job show %s; use job output %s to read its output. Type help jobs for job commands.\n", args[2], args[2], args[2])
+				} else {
+					fmt.Fprintln(output, "error: use help [TOPIC]")
+				}
+				continue
+			}
+			topic := ""
+			if len(args) == 2 {
+				topic = args[1]
+			}
+			if err := printConsoleHelp(output, vpnClient, selectedID != "", serverConsole.serverAttached, topic); err != nil {
+				fmt.Fprintln(output, "error:", err)
 			}
 			continue
 		}
@@ -273,6 +281,7 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 				fmt.Fprintln(output, "Already at the main menu.")
 			} else {
 				selectedID, selectedLabel = "", ""
+				jobSelection = consoleJobSelection{}
 			}
 			continue
 		}
@@ -296,6 +305,7 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 				continue
 			}
 			selectedID, selectedLabel = agent.ID, consoleAgentName(agent)
+			jobSelection = consoleJobSelection{}
 			fmt.Fprintf(output, "Selected %s (%s). Type help for agent commands.\n", selectedLabel, agent.ID)
 			continue
 		}
@@ -317,8 +327,6 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 			switch args[0] {
 			case "show":
 				args = append([]string{"show", selectedID}, args[1:]...)
-			case "jobs":
-				args = append(args, selectedID)
 			case "job":
 				if len(args) >= 2 && args[1] == "start" {
 					args = append([]string{"job", "start", selectedID}, args[2:]...)
@@ -375,6 +383,12 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 				open = features[0].wasm
 			}
 			if err := runConsoleWASM(ctx, output, editor, call, open, args); err != nil {
+				fmt.Fprintln(output, "error:", err)
+			}
+			continue
+		}
+		if args[0] == "jobs" || args[0] == "job" {
+			if err := runConsoleJobCommand(ctx, output, call, args, selectedID, &jobSelection); err != nil {
 				fmt.Fprintln(output, "error:", err)
 			}
 			continue
@@ -455,89 +469,6 @@ func findConsoleAgent(agents []control.AgentInfo, target string) (control.AgentI
 	return match, nil
 }
 
-func printConsoleHelp(output io.Writer, vpnClient, selected bool) {
-	if selected {
-		fmt.Fprint(output, `Agent commands:
-  exec PROGRAM [ARGS]    Run a program on the selected agent
-  shell [PROGRAM ARGS]   Open a live shell; Ctrl-] closes only this shell
-  run-script [--background] bash|powershell LOCAL_FILE Run source from memory
-  run-wasm [--background] [--stdin FILE] MODULE [ARGS] Run WASI module
-  job start PROGRAM [ARGS] Start a background task
-  jobs                   List this agent's tasks
-  job show|output|cancel ID Inspect or stop a task
-  pwd                    Agent working directory
-  ls [PATH]              List a directory
-  stat PATH              Show file metadata
-  mkdir PATH             Create one directory
-  rm PATH                Remove one file or empty directory
-  whoami                 Agent process user
-  ps                     Process list
-  privileges             Current user and privileges
-  env [NAME]             Environment or one variable
-  interfaces             Network interfaces and addresses
-  dns                    DNS configuration
-  route-table            Full host route table
-  routes                 Show routes and advertisements
-  route add CIDR         Add a route through this agent
-  route del CIDR         Remove a route
-  status                 Show full status
-  relay start [BIND]     Enable child-agent relay on this agent (server console)
-  relay list             Show this agent's relay listeners
-  relay stop [BIND]      Stop a relay listener
-  show                   Show detailed telemetry for this agent
-  back                   Return to the main menu
-  help                   Show this menu
-  quit                   Leave the console (server detaches; client stops)
-Quote paths or arguments containing spaces. Programs run without a shell.
-`)
-		if vpnClient {
-			fmt.Fprintln(output, "  route accept CIDR      Accept an advertised route from this agent")
-			fmt.Fprintln(output, "  upload LOCAL REMOTE    Copy a local file to this agent")
-			fmt.Fprintln(output, "  download REMOTE LOCAL  Copy a file from this agent")
-			fmt.Fprintln(output, "  forward add BIND TARGET Expose a client TCP service on this agent")
-			fmt.Fprintln(output, "  forward list           List this agent's TCP forwards")
-			fmt.Fprintln(output, "  forward del BIND       Stop this agent's TCP forward")
-			fmt.Fprintln(output, "  background             Detach console; keep VPN running")
-		}
-		return
-	}
-	if vpnClient {
-		fmt.Fprint(output, `VPN client menu:
-  agents                 List connected agents by number
-  use NUMBER             Enter an agent (ID prefix or hostname also works)
-  status                 Show agents, VPN clients, and routes
-  agent show ID          Show detailed agent telemetry
-  routes                 Show advertised and locally accepted routes
-  internal on|off        Change this client's global pivot mode
-  forward list           List this client's agent TCP forwards
-  jobs                   List background tasks
-  help                   Show this menu
-  background             Detach console; keep VPN running
-  quit                   Stop the VPN and exit
-Inside an agent, use shell, exec PROGRAM, run-script, run-wasm, upload LOCAL REMOTE, download REMOTE LOCAL, or route accept CIDR.
-Host commands: pwd, ls, stat, mkdir, rm, whoami, ps, privileges, env, interfaces, dns, route-table.
-`)
-		return
-	}
-	fmt.Fprint(output, `Server operator menu:
-  agents                 List connected agents by number
-  use NUMBER             Enter an agent (ID prefix or hostname also works)
-  status                 Show agents, VPN clients, and routes
-  transports             Show active transport listeners
-  topology               Show agent parent/child paths
-  start transport NAME [self-signed|tls-cert FILE tls-key FILE] [listen ADDR]
-  stop transport NAME [force] Stop one listener
-  agent show ID          Show detailed agent telemetry
-  routes                 Show global routes
-  jobs                   List background tasks
-  route del CIDR         Remove a global route
-  help                   Show this menu
-  quit                   Detach the server console
-Inside an agent, use shell, exec PROGRAM, run-script, run-wasm or route add CIDR.
-Host commands: pwd, ls, stat, mkdir, rm, whoami, ps, privileges, env, interfaces, dns, route-table.
-`)
-}
-
 func splitConsoleCommand(line string) ([]string, error) {
 	var args []string
 	var word strings.Builder
@@ -589,7 +520,7 @@ func runConsoleCommand(ctx context.Context, output io.Writer, call consoleCaller
 		args = []string{"show", args[2]}
 	}
 	if args[0] == "jobs" || args[0] == "job" {
-		return runConsoleJobCommand(ctx, output, call, args)
+		return runConsoleJobCommand(ctx, output, call, args, "", nil)
 	}
 	switch args[0] {
 	case "show":

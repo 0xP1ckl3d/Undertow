@@ -58,9 +58,9 @@ Commands:
   doctor     Check local prerequisites before starting a role.
   version    Print build version.
 
-Transport: DNS (default, UDP/53) for restrictive paths; WebSocket (TCP/443)
-for HTTPS egress; QUIC (UDP/443) when that path is available. Select the same
---transport on server, agent, and client. See docs/quickstart.md.
+Transport: the server listens on QUIC UDP/443, WebSocket TCP/443 and DNS UDP/53
+by default. Each agent and client chooses one listener independently. Use DNS
+when direct UDP DNS is the available path. See docs/quickstart.md.
 Run 'undertow help COMMAND' for flags and examples, or see README.md.
 All sessions are encrypted and signed by the server. Open enrollment allows
 any reachable client; trust-on-first-use cannot verify the first contact.
@@ -276,39 +276,18 @@ events appear in the console; routine logs go to --log-file.
 
 Usage: undertow console [--control IP:PORT] [--control-token-file PATH]
 
-Connects to the running server's loopback API. Use status, transports,
-start transport NAME, stop transport NAME [force], topology, routes,
-route add, route del, select, exec, help, and quit. Select an agent and
-use relay start [BIND], relay list, or relay stop [BIND] to manage an
-explicit child-agent listener. Agent execution
-is enabled on agents by default and runs a named program with arguments,
-without an implicit shell. Use 'undertow console' on the server host;
-'undertow client --internal --interactive ...' opens a client console.
-In either console, type 'agents' to list numbered agents, 'use 1' to enter
-one, 'help' for the current menu, and 'back' to return to the main menu.
-Inside the selected agent, 'shell' opens a live session; Ctrl-] returns to
-Undertow without stopping the VPN. --deny=interactive blocks these sessions.
-Use 'run-script bash LOCAL_FILE' or 'run-script powershell LOCAL_FILE' to send
-source to the agent's interpreter without storing a script there. Add
-'--background' before the language to keep it in the job list. --deny=scripts
-blocks these runs independently of exec and interactive sessions.
-Use 'run-wasm MODULE_FILE [ARGS]' to execute a WASI module from memory. Add
-'--background' to make a job; '--stdin LOCAL_FILE' supplies up to 64 KiB of
-stdin. --deny=wasm blocks it independently. Modules are limited to 4 MiB,
-16 MiB guest memory, 4 MiB output, 2 minutes and two concurrent agent runs.
-For normal terminal use, 'undertow server' opens this console automatically;
-'undertow server attach' reconnects to its worker after detaching.
-Use 'job start PROGRAM [ARGS]' inside the agent menu for a task that should
-continue while the console is detached. 'jobs', 'job show ID', 'job output ID',
-and 'job cancel ID' manage it.
-Use 'show' in the selected agent menu for detailed telemetry and routes.
-Inside an agent, use built-in pwd, ls, stat, mkdir, rm, whoami, ps,
-privileges, env, interfaces, dns, and route-table commands. --deny=exec
-blocks arbitrary programs while leaving these built-ins available;
---deny=hostops blocks the built-ins separately.
-The VPN client console also supports per-agent TCP 'forward add/list/del'.
-For example, after 'use 1': forward add 0.0.0.0:8080 127.0.0.1:8080.
+Connects to the running server's loopback API. Normal terminal use starts
+this console automatically with 'undertow server'; 'server attach' returns
+after detaching. Type 'agents', 'use 1', and 'show' to inspect an agent.
+'help' shows short categories. Type 'help relay', 'help route', 'help
+run-script', or another topic for detailed usage. Tab completes command
+names and local script, WASM, and transfer paths. Ctrl-] exits a live shell
+without closing the Undertow console. See docs/console.md for the full guide.
 `
+	case "relay", "topology", "transport", "transports", "run-script", "run-wasm", "shell", "jobs", "host":
+		return printConsoleHelp(w, false, true, false, topic)
+	case "forward", "upload", "download", "internal":
+		return printConsoleHelp(w, true, true, false, topic)
 	case "status":
 		body = `undertow status — inspect all active server listeners, agents, VPN clients, and routes
 
@@ -399,54 +378,45 @@ checks that need operator attention.
 }
 
 func writeExamples(w io.Writer) error {
-	_, err := io.WriteString(w, `Undertow examples (direct DNS on UDP/53)
+	_, err := io.WriteString(w, `Undertow examples — QUIC on UDP/443
 
-First, on SERVER: undertow init
-Copy token.key securely to AGENT/CLIENT; keep identity.key on SERVER.
-Replace SERVER_IP, FINGERPRINT, and example addresses.
-SERVER usually needs sudo for UDP/53; --tun and CLIENT need root/Admin.
+On SERVER, run 'undertow init' once. Copy token.key to AGENT and CLIENT;
+keep identity.key on SERVER. Replace SERVER_IP and FINGERPRINT. The server
+starts QUIC, WebSocket and DNS together. These IP-address examples use its
+automatic self-signed TLS certificate and a pinned Undertow fingerprint.
 
-pivot — reach an internal subnet from SERVER through AGENT:
-  SERVER  sudo undertow server --tun
-  AGENT  undertow agent --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
-  SERVER console  agents
-  SERVER console  use 1
-  SERVER console  show
-  SERVER console  route add 10.20.0.0/16
-
-internal — reach an agent network from CLIENT, keeping normal Internet:
+vpn — Internet egress from CLIENT (no AGENT and no SERVER --tun):
   SERVER  sudo undertow server
-  AGENT  undertow agent --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
-  CLIENT  sudo undertow client --internal --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
-  CLIENT console  agents
-  CLIENT console  use 1
-  CLIENT console  routes
-  CLIENT console  route accept 10.20.0.0/16
+  CLIENT  sudo undertow client --vpn --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify
+  CLIENT  curl -4 https://api.ipify.org
 
-vpn — route CLIENT IPv4 Internet traffic through SERVER:
+internal — an AGENT network from CLIENT, keeping ordinary Internet unchanged:
   SERVER  sudo undertow server
-  CLIENT  sudo undertow client --vpn --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
+  AGENT   undertow agent --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify --advertise-route 10.20.0.0/16
+  CLIENT  sudo undertow client --internal --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify
+  CLIENT console (one command per line): agents, use 1, routes,
+                                      route accept 10.20.0.0/16
+  CLIENT  curl http://10.20.0.50/
 
-vpn-internal — Internet through SERVER, internal subnet through AGENT:
-  SERVER  sudo undertow server
-  AGENT  undertow agent --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
-  CLIENT  sudo undertow client --vpn --internal --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
-  CLIENT console  agents
-  CLIENT console  use 1
-  CLIENT console  routes
-  CLIENT console  route accept 10.20.0.0/16
+vpn-internal — use --vpn --internal on CLIENT, then accept the AGENT route above.
+When the AGENT has not advertised a reachable prefix, use 'route add CIDR'.
 
-forward — reach one internal TCP service without a TUN:
+pivot — SERVER host itself needs an AGENT route: start 'sudo undertow server --tun',
+connect the AGENT, then in SERVER console enter agents, use 1, route add CIDR.
+SERVER --tun is unnecessary for any CLIENT mode or for Internet egress.
+
+forward — one TCP service on an AGENT, without any TUN:
   SERVER  sudo undertow server --forward 127.0.0.1:18080=10.20.0.50:80
-  AGENT  undertow agent --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
-  SERVER  curl http://127.0.0.1:18080/
+  AGENT   connect as above; then on SERVER: curl http://127.0.0.1:18080/
 
-Use 'route add CIDR' in the client console if a reachable route is not
-advertised. Type 'quit' in the client console to stop it and remove routes.
-On the server, 'quit' detaches and 'stop' shuts down. Ctrl+C stops a
-foreground agent. Use the same console commands with --transport websocket
-(TCP/443) or --transport quic (UDP/443) on all roles; the server needs
---tls-cert and --tls-key, or --tls-self-signed. See docs/quickstart.md for full steps.
+WebSocket: replace peer '--transport quic' with '--transport websocket';
+keep port 443 and the TLS flag. DNS VPN: use '--transport dns --server
+SERVER_IP:53' on the peer and omit the TLS flag. Each peer chooses its own
+active server listener.
+
+'background' detaches a console; 'server attach' or 'client attach' returns.
+'quit' stops CLIENT and removes its routes; 'stop' shuts down SERVER.
+See docs/quickstart.md for commands by host and verification.
 `)
 	return err
 }

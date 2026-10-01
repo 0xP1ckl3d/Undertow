@@ -60,3 +60,7 @@ func wasmInventoryFallback(ctx context.Context, path, program string, args ...st
 func wasmRegistryRead(context.Context, wasmHostRequest) (any, error) {
 	return nil, errWASMUnsupported
 }
+
+func wasmWindowsAudit(context.Context, string, wasmHostRequest) (any, error) {
+	return nil, errWASMUnsupported
+}

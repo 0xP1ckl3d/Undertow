@@ -20,6 +20,10 @@ import (
 const alpn = "undertow/1"
 const maxMessage = 2048
 
+func transportConfig() *quicgo.Config {
+	return &quicgo.Config{MaxIdleTimeout: 2 * time.Minute, KeepAlivePeriod: 15 * time.Second}
+}
+
 type messageConn struct {
 	connection *quicgo.Conn
 	stream     *quicgo.Stream
@@ -87,7 +91,7 @@ func Listen(addr, certFile, keyFile string, selfSigned bool, identity ed25519.Pr
 	if err != nil {
 		return nil, err
 	}
-	listener, err := quicgo.ListenAddr(addr, &tls.Config{Certificates: []tls.Certificate{certificate}, NextProtos: []string{alpn}, MinVersion: tls.VersionTLS13}, nil)
+	listener, err := quicgo.ListenAddr(addr, &tls.Config{Certificates: []tls.Certificate{certificate}, NextProtos: []string{alpn}, MinVersion: tls.VersionTLS13}, transportConfig())
 	if err != nil {
 		return nil, err
 	}
@@ -215,7 +219,7 @@ func dialMessage(ctx context.Context, options DialOptions) (*messageConn, error)
 	if serverName == "" {
 		serverName = host
 	}
-	connection, err := quicgo.DialAddr(ctx, options.Address, &tls.Config{ServerName: serverName, InsecureSkipVerify: options.TLSInsecureSkipVerify, NextProtos: []string{alpn}, MinVersion: tls.VersionTLS13}, nil)
+	connection, err := quicgo.DialAddr(ctx, options.Address, &tls.Config{ServerName: serverName, InsecureSkipVerify: options.TLSInsecureSkipVerify, NextProtos: []string{alpn}, MinVersion: tls.VersionTLS13}, transportConfig())
 	if err != nil {
 		return nil, err
 	}

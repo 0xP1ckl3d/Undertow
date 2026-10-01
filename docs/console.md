@@ -1,6 +1,6 @@
 # Interactive consoles
 
-Undertow has two interactive consoles. Run `undertow server` in a terminal on the **server host** to start its worker and open the operator console. Run `undertow client --vpn --server SERVER_IP:53` in a terminal on the **VPN client host** to start its worker and open the client console. Both consoles can select an agent, so commands inside its menu do not require a long agent ID. The client console manages only that client's accepted routes and internal routing mode.
+Undertow has two interactive consoles. Run `undertow server` in a terminal on the **server host** to start its worker and open the operator console. Run `undertow client --vpn --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify` on the **VPN client host** to start its worker and open the client console when using the server's default self-signed TLS certificate. Both consoles can select an agent, so commands inside its menu do not require a long agent ID. The client console manages only that client's accepted routes and internal routing mode. The server needs `--tun` only if applications on the server host itself need routed agent access.
 
 See [getting started](getting-started.md) for enrollment, fingerprint, and privilege setup. In the examples below, `undertow` means `./bin/undertow` on Linux or `.\bin\undertow.exe` on Windows. Use `sudo` for server console access if the elevated server owns `control.key`; a VPN client needs elevation to install routes.
 
@@ -8,7 +8,8 @@ See [getting started](getting-started.md) for enrollment, fingerprint, and privi
 
 | Command | Action |
 | --- | --- |
-| `help` | Show the commands available at the current menu. |
+| `help` | Show short command categories for the current console. |
+| `help TOPIC` | Show detailed usage for a command or group, such as `help relay`, `help route`, `help run-script`, or `help run-wasm`. |
 | `status` or `status --json` | Show active server listeners, each peer's carrier, agents, VPN clients, routes, and counters. |
 | `agents` | List connected agents by current number, hostname, short ID, virtual IP, carrier and relay parent. |
 | `use NUMBER` | Enter the numbered agent's menu. An unambiguous hostname or ID prefix also works. `select NUMBER` is an alias within the console. |
@@ -45,14 +46,13 @@ No agent listens for children until `relay start` succeeds. The omitted bind def
 
 Agent numbers can change after connections change. Run `agents` again before selecting by number. Type `help` after `use` to see that agent's menu. Quote a path or argument containing spaces with single or double quotes. The console parses quotes; it does not expand shell variables or run shell syntax.
 
-When input is an interactive terminal, Up and Down recall commands and Tab completes the first command word. The consoles announce an agent connection or loss without flooding the prompt with routine transport logs. In the VPN client console, Ctrl+C asks for confirmation before stopping the VPN.
+When input is an interactive terminal, Up and Down recall commands. Tab completes command names and local file paths for `run-script`, `run-wasm` (including `--stdin`), `upload`, and the local destination of `download`. Paths are read from the **console host**, not the agent; remote file arguments do not use local path completion. Tab can enter directories and complete quoted names containing spaces. `help TOPIC` and `route`/`relay` subcommands also complete. The consoles announce an agent connection or loss without flooding the prompt with routine transport logs. In the VPN client console, Ctrl+C asks for confirmation before stopping the VPN.
 
 ## Server console
 
-Start the server on the server host; its console opens automatically. After an agent joins, use:
+Start the server on the server host; its console opens automatically. Use `sudo undertow server --tun` only when applications on the **server host** need routed access through an agent. After an agent joins, enter these commands in the console:
 
 ```text
-sudo undertow server --tun
 agents
 use 1
 show
@@ -73,10 +73,11 @@ background
 | `run-script [--background] bash|powershell LOCAL_FILE` | Selected agent | Stream local script source to the interpreter without a script file on the agent; background runs appear in `jobs`. |
 | `run-wasm [--background] [--stdin LOCAL_FILE] MODULE_FILE [ARGS]` | Selected agent | Instantiate a WASI module in agent memory. Output streams live or enters `jobs`. |
 | `job start PROGRAM [ARGS]` | Selected agent | Start a task that keeps running while you use or detach the console. |
-| `jobs` | Either menu | List tasks; inside an agent, list that agent's tasks. |
-| `job show ID` | Either menu | Show task state, timestamps, exit status, and output size. |
-| `job output ID` | Either menu | Read retained output, including while the task runs. |
-| `job cancel ID` | Either menu | Stop a running task. |
+| `jobs` | Either menu | List numbered tasks; inside an agent, list that agent's tasks. |
+| `jobs NUMBER` | Either menu | Show a task from the last `jobs` list. |
+| `job show NUMBER|ID` | Either menu | Show task state, timestamps, exit status, and output size. |
+| `job output NUMBER|ID` | Either menu | Read retained output, including while the task runs. |
+| `job cancel NUMBER|ID` | Either menu | Stop a running task. |
 | `show` | Selected agent | Show detailed agent telemetry and discovered networks. |
 | `agent show AGENT_ID` | Main menu | Show that agent's detailed telemetry. |
 | `exec AGENT_ID PROGRAM [ARGS]` | Main menu | Start one program directly on the named agent. |
@@ -96,7 +97,7 @@ After detaching, run `sudo undertow server attach` to return. A server started w
 A terminal launch of `client --internal` or `client --vpn` opens the console by default. Internal-only access can be configured entirely here after the agent connects; no server `route add` is required. For example:
 
 ```text
-sudo undertow client --internal --server SERVER_IP:53 --token-file token.key
+sudo undertow client --internal --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify
 agents
 use 1
 routes
@@ -149,11 +150,11 @@ In an agent menu, `exec whoami` starts that executable directly. To run PowerShe
 
 Use `shell` in the selected-agent menu for a long-lived session. On a Linux agent this opens `/bin/sh` with a PTY; on Windows it opens `cmd.exe` with ConPTY, which provides terminal echo, line editing, resize handling, and VT output. Use `shell /bin/bash` or `shell powershell.exe -NoProfile` to choose another program. Input and output stream in both directions until the program exits or you press Ctrl-]. The console remains connected to Undertow and other agent sessions continue. An attached client console can open a new shell after detaching and reattaching. The separate `--deny=interactive` agent setting blocks live sessions without changing one-shot `exec` or host operations.
 
-For a command that should continue while you use the console, run `job start /usr/bin/find /srv -type f` on a selected Linux agent or `job start powershell.exe -NoProfile -File C:\\Scripts\\audit.ps1` on a Windows agent. The server assigns a job ID. `jobs` lists running and finished tasks; `job output ID` reads output accumulated so far; `job show ID` reports start/end times and exit code; `job cancel ID` stops one task. Jobs continue through client console detach/reattach while the agent remains connected. They use the agent's `interactive` capability. The server retains up to 256 KiB of the latest output per job and marks truncated output. A VPN client sees only its own jobs; the server operator sees all jobs. The server holds up to 512 job records for its lifetime.
+For a command that should continue while you use the console, run `job start /usr/bin/find /srv -type f` on a selected Linux agent or `job start powershell.exe -NoProfile -File C:\\Scripts\\audit.ps1` on a Windows agent. The server assigns a job ID. `jobs` lists running and finished tasks with numbers. Use `jobs 1` or `job show 1` for details, `job output 1` to read output accumulated so far, and `job cancel 1` to stop one. `jobs show 1` and `jobs output 1` also work. Numbers refer to the last list shown in that console; full IDs remain valid if the list changes. Jobs continue through client console detach/reattach while the agent remains connected. They use the agent's `interactive` capability. The server retains up to 256 KiB of the latest output per job and marks truncated output. A VPN client sees only its own jobs; the server operator sees all jobs. The server holds up to 512 job records for its lifetime.
 
 For a memory-backed script, select an agent and use `run-script bash ./check.sh` or `run-script powershell ./audit.ps1`. The file is read on the console machine and sent through Undertow to the interpreter's stdin on the agent; the agent creates no script file. Add `--background` before the language to create a job. Scripts require the independent `scripts` capability, have a 1 MiB source limit and a 10 minute runtime limit. Foreground output streams separately from stdout and stderr; background output is retained in the shared job manager.
 
-To run a WASI module, use `run-wasm ./tool.wasm option`, `run-wasm --stdin ./input.txt ./tool.wasm`, or `run-wasm --background ./long-task.wasm` in a selected-agent console. The module is instantiated from memory, receives only explicit arguments and optional stdin, and has no preopened filesystem or host network access. Agent limits are 4 MiB for module bytes, 64 KiB for stdin, 16 MiB guest linear memory, 4 MiB combined output, two minutes of execution and two simultaneous runs. The independent `wasm` capability controls both foreground and background runs. Background runs use the same job IDs, ownership, output retention and cancellation as other tasks.
+To run a WASI module, use `run-wasm ./tool.wasm option`, `run-wasm --stdin ./input.txt ./tool.wasm`, or `run-wasm --background ./long-task.wasm` in a selected-agent console. The module is instantiated from memory and receives explicit arguments and optional stdin. It has no preopened WASI filesystem or WASI network sockets, but the public `undertow_host_v1` imports let it read agent-side files and make bounded outbound network requests with the agent process's privileges. Agent limits are 4 MiB for module bytes, 64 KiB for stdin, 16 MiB guest linear memory, 4 MiB combined output, two minutes of execution and two simultaneous runs. The independent `wasm` capability controls both foreground and background runs; denying `hostops` does not disable these WASM imports. Background runs use the same job IDs, ownership, output retention and cancellation as other tasks. See the [WASM developer guide](wasm-development.md) for the host API and its limits.
 
 Uploads and downloads pass through the server and verify SHA-256. The destination parent directory must exist and the destination file must not already exist. Relative local paths resolve from the console's working directory; relative remote paths resolve from the agent process's working directory. The client console shows bytes, total, percentage, and current rate while data moves, then reports size and SHA-256 on completion. Press Ctrl-] during a transfer to cancel it; partial temporary files are removed. An attached console receives progress over the local loopback control socket, so progress updates do not consume DNS control frames. Transfers have a 30 minute limit. Agents can reject these independently with `--deny=upload` or `--deny=download`.
 

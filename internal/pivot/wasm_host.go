@@ -234,6 +234,8 @@ func wasmHostOperation(ctx context.Context, op string, req wasmHostRequest) (any
 		return wasmExchange(ctx, op, req)
 	case "registry.read":
 		return wasmRegistryRead(ctx, req)
+	case "windows.service_names", "windows.service_config", "windows.file_acl":
+		return wasmWindowsAudit(ctx, op, req)
 	default:
 		return nil, errWASMUnsupported
 	}

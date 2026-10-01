@@ -1,6 +1,6 @@
 # Deployment scenarios
 
-These examples use DNS on agents and clients; the server starts DNS, WebSocket and QUIC listeners together by default. A different agent or client can choose another active carrier independently. For transport choices and mixed paths, see the [Quickstart](quickstart.md#choose-a-transport); for child agents behind another agent, see [topology and relays](topology-and-relays.md). These commands use `undertow` as shorthand for `./bin/undertow` on Linux or `.\bin\undertow.exe` on Windows. Replace all uppercase placeholders. Use the same enrollment and fingerprint settings on both ends; [getting started](getting-started.md) explains token, password, open enrollment, and trust on first use. On Linux, prefix operator commands with `sudo` when an elevated server owns `control.key`.
+These deeper deployment examples use DNS on agents and clients; the [Quickstart](quickstart.md) uses QUIC for the short path and explains WebSocket and DNS alternatives. The server starts DNS, WebSocket and QUIC listeners together by default, and each agent or client chooses independently. For child agents behind another agent, see [topology and relays](topology-and-relays.md). These commands use `undertow` as shorthand for `./bin/undertow` on Linux or `.\bin\undertow.exe` on Windows. Replace all uppercase placeholders. Use the same enrollment and fingerprint settings on both ends; [getting started](getting-started.md) explains token, password, open enrollment, and trust on first use. On Linux, prefix operator commands with `sudo` when an elevated server owns `control.key`.
 
 ## 1. Confirm an unprivileged agent
 
@@ -225,4 +225,4 @@ VPN client console: jobs
 VPN client console: job output JOB_ID
 ```
 
-The agent instantiates the module in a pure-Go runtime without a temporary module file. The guest receives only explicit arguments and stdin, and no filesystem mount or host network access. `--deny=wasm` disables this operation without disabling scripts, one-shot exec or other jobs. Module, stdin, runtime, memory, output and concurrency limits apply as listed in [the console reference](console.md).
+The agent instantiates the module in a pure-Go runtime without a temporary module file. The guest has no preopened WASI filesystem or WASI network sockets, but `undertow_host_v1` imports permit agent-side file reads and bounded outbound network requests with the agent process's privileges. `--deny=wasm` disables the module and its imports without disabling scripts, one-shot exec or other jobs. Module, stdin, runtime, memory, output and concurrency limits apply as listed in [the console reference](console.md); see the [WASM developer guide](wasm-development.md) for host operations.

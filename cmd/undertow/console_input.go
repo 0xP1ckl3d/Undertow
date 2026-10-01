@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"strings"
 	"sync"
 )
 
@@ -200,47 +199,4 @@ func (e *consoleEditor) recall(direction int) {
 		e.line = []rune(e.history[next])
 	}
 	e.cursor = len(e.line)
-}
-
-func (e *consoleEditor) complete() {
-	input := string(e.line)
-	if strings.ContainsAny(input, " \t") || e.cursor != len(e.line) {
-		return
-	}
-	commands := []string{"agents", "use", "agent", "status", "routes", "jobs", "job", "help", "quit", "exec", "shell", "run-script", "run-wasm", "pwd", "ls", "stat", "mkdir", "rm", "whoami", "ps", "privileges", "env", "interfaces", "dns", "route-table"}
-	if e.selected {
-		commands = []string{"show", "exec", "shell", "run-script", "run-wasm", "jobs", "job", "routes", "route", "status", "back", "help", "quit", "pwd", "ls", "stat", "mkdir", "rm", "whoami", "ps", "privileges", "env", "interfaces", "dns", "route-table"}
-		if e.vpn {
-			commands = append(commands, "upload", "download")
-		}
-	}
-	if e.vpn {
-		commands = append(commands, "background", "internal", "forward")
-	} else if e.serverAttached {
-		commands = append(commands, "background", "logs", "stop")
-	}
-	var matches []string
-	for _, command := range commands {
-		if strings.HasPrefix(command, input) {
-			matches = append(matches, command)
-		}
-	}
-	if len(matches) == 0 {
-		return
-	}
-	common := matches[0]
-	for _, match := range matches[1:] {
-		for !strings.HasPrefix(match, common) {
-			common = common[:len(common)-1]
-		}
-	}
-	if common != input {
-		e.line = []rune(common)
-		e.cursor = len(e.line)
-	} else if len(matches) > 1 {
-		fmt.Fprintf(e.output, "\r\n%s\r\n", strings.Join(matches, "  "))
-	} else {
-		e.line = append(e.line, ' ')
-		e.cursor++
-	}
 }

@@ -19,3 +19,7 @@ func wasmPlatformInventory(ctx context.Context, op string) (any, error) {
 }
 
 func wasmRegistryRead(context.Context, wasmHostRequest) (any, error) { return nil, errWASMUnsupported }
+
+func wasmWindowsAudit(context.Context, string, wasmHostRequest) (any, error) {
+	return nil, errWASMUnsupported
+}

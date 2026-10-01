@@ -2,7 +2,7 @@
 
 Undertow runs on **Linux and Windows**. The commands below use `undertow` as the executable name; substitute `./bin/undertow` on Linux or `.\bin\undertow.exe` in Windows PowerShell. Replace `SERVER_IP`, `FINGERPRINT`, `AGENT_ID`, and example network addresses with values from your deployment. A line labeled **Server** runs on the Undertow server host; **Agent** runs on a host inside the target network; **VPN client** runs on the host whose applications will use the tunnel; **Other internal host** is a machine reached through the agent. In a terminal, `undertow server` and `undertow client` open their consoles automatically.
 
-The fastest internal-only setup needs no server route configuration: start the server and agent, connect a client with `--internal`, then use `agents`, `use 1`, `routes`, and `route accept CIDR` in the **VPN client** console. Use `route add CIDR` there for a known network that was not reported.
+The fastest internal-only setup needs no server route configuration: start the server and agent, connect a client with `--internal`, then use `agents`, `use 1`, `routes`, and `route accept CIDR` in the **VPN client** console. Use `route add CIDR` there for a known network that was not reported. The server needs `--tun` only if applications on the server host itself need routed access through an agent.
 
 ## Roles and identity
 
@@ -12,7 +12,7 @@ The server accepts DNS, HTTPS/WebSocket, or QUIC sessions, authenticates agents 
 
 ```text
 Server: undertow init
-Server: sudo undertow server --identity identity.key --token-file token.key
+Server: sudo undertow server
 Server: sudo undertow status
 ```
 
@@ -21,7 +21,7 @@ Server: sudo undertow status
 An agent joins from an internal host, advertises reachable networks, and opens ordinary TCP, UDP, and ICMP sockets on behalf of the server. It does not install a TUN or change its own routes.
 
 ```text
-Agent: undertow agent --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
+Agent: undertow agent --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify
 Server: sudo undertow agent list
 ```
 
@@ -30,13 +30,13 @@ Server: sudo undertow agent list
 A privileged client creates its own TUN/Wintun, connects independently of agents, and routes traffic from its own applications. Choose `--vpn`, `--internal`, or both; at least one is required.
 
 ```text
-VPN client: sudo undertow client --internal --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
+VPN client: sudo undertow client --internal --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify
 VPN client console: agents
 ```
 
 ### Transport choices and encrypted multiplexing
 
-The server starts DNS UDP/53, WebSocket TCP/443 and QUIC UDP/443 together by default. `--transport dns,quic` selects a subset and `--transport quic` keeps single-carrier startup. Each agent and client independently chooses one active carrier; mixed carriers share one server identity, enrollment policy, route table, job manager and console. DNS remains the peer default when direct UDP/53 is available, including some restrictive or captive portal networks. WebSocket suits HTTPS and HTTP CONNECT proxy paths; QUIC uses UDP/443. WebSocket and QUIC use ephemeral self-signed TLS by default or explicit `--tls-cert`/`--tls-key` files. Peers verify TLS and independently pin the Undertow Ed25519 fingerprint. The server console can start and stop listeners with `transports`, `start transport NAME`, and `stop transport NAME [force]`. See [Quickstart transport examples](docs/quickstart.md#choose-a-transport) and the [CLI reference](docs/cli-reference.md#transport-selection).
+The server starts DNS UDP/53, WebSocket TCP/443 and QUIC UDP/443 together by default. `--transport dns,quic` selects a subset and `--transport quic` keeps single-carrier startup. Each agent and client independently chooses one active carrier; mixed carriers share one server identity, enrollment policy, route table, job manager and console. The peer CLI defaults to DNS, so explicitly select `--transport quic` or `--transport websocket` when using those paths. DNS VPN is useful when direct UDP/53 is the available outbound path, including some restrictive or captive portal networks. WebSocket suits HTTPS and HTTP CONNECT proxy paths; QUIC uses UDP/443. WebSocket and QUIC use ephemeral self-signed TLS by default or explicit `--tls-cert`/`--tls-key` files. Peers verify TLS and independently pin the Undertow Ed25519 fingerprint. The server console can start and stop listeners with `transports`, `start transport NAME`, and `stop transport NAME [force]`. See [Quickstart transport choices](docs/quickstart.md#choose-another-carrier) and the [CLI reference](docs/cli-reference.md#transport-selection).
 
 The same authenticated session, mux, routing, jobs, file transfer, and console operations run over all three carriers. WebSocket uses a persistent TLS connection; QUIC uses a bidirectional stream over UDP/443. DNS keeps its own adaptive wire behavior.
 
@@ -46,7 +46,7 @@ The carrier is direct DNS over UDP to the configured numeric server address and 
 
 ```text
 Server: sudo undertow server --domain t.example.invalid --identity identity.key --token-file token.key
-Agent: undertow agent --server SERVER_IP:53 --domain t.example.invalid --fingerprint FINGERPRINT --token-file token.key --payload-profile auto
+Agent: undertow agent --transport dns --server SERVER_IP:53 --domain t.example.invalid --fingerprint FINGERPRINT --token-file token.key --payload-profile auto
 ```
 
 `--payload-profile auto` discovers and adjusts a 128–800 byte fragment size. `large` and `small` explicitly select legacy 800 and 320 byte profiles for compatibility. `agent show` exposes transport windows, RTT, retransmits, duplicates, and payload adjustments.
@@ -58,15 +58,15 @@ Token enrollment is the default: `init` creates a random `token.key` for distrib
 ```text
 Server: undertow init --identity identity.key --token-file token.key
 Server: sudo undertow server --auth token --token-file token.key
-Agent: undertow agent --server SERVER_IP:53 --auth token --token-file token.key --fingerprint FINGERPRINT
-VPN client: sudo undertow client --internal --server SERVER_IP:53 --auth token --token-file token.key --fingerprint FINGERPRINT
+Agent: undertow agent --transport quic --server SERVER_IP:443 --tls-insecure-skip-verify --auth token --token-file token.key --fingerprint FINGERPRINT
+VPN client: sudo undertow client --internal --transport quic --server SERVER_IP:443 --tls-insecure-skip-verify --auth token --token-file token.key --fingerprint FINGERPRINT
 ```
 
 Alternative enrollment sequence:
 
 ```text
 Server: sudo undertow server --auth password --password-file enrollment-password.txt
-Agent: undertow agent --server SERVER_IP:53 --auth password --password-file enrollment-password.txt --fingerprint FINGERPRINT
+Agent: undertow agent --transport quic --server SERVER_IP:443 --tls-insecure-skip-verify --auth password --password-file enrollment-password.txt --fingerprint FINGERPRINT
 ```
 
 For an intentionally open test listener:
@@ -82,8 +82,8 @@ The server has a persistent Ed25519 identity; each agent and client has its own 
 
 ```text
 Server: undertow init --identity identity.key
-Agent: undertow agent --server SERVER_IP:53 --agent-key agent-west.key --fingerprint FINGERPRINT --token-file token.key
-VPN client: sudo undertow client --internal --server SERVER_IP:53 --client-key operator-client.key --trust-on-first-use --fingerprint-file server.fingerprint --token-file token.key
+Agent: undertow agent --transport quic --server SERVER_IP:443 --tls-insecure-skip-verify --agent-key agent-west.key --fingerprint FINGERPRINT --token-file token.key
+VPN client: sudo undertow client --internal --transport quic --server SERVER_IP:443 --tls-insecure-skip-verify --client-key operator-client.key --trust-on-first-use --fingerprint-file server.fingerprint --token-file token.key
 ```
 
 ## Routing and network traffic
@@ -93,7 +93,7 @@ VPN client: sudo undertow client --internal --server SERVER_IP:53 --client-key o
 `--vpn` installs `0.0.0.0/1` and `128.0.0.0/1` on the client, pins the physical server route, and verifies public egress by default. The server uses its own sockets for Internet traffic. IPv6 is outside this mode.
 
 ```text
-VPN client: sudo undertow client --vpn --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
+VPN client: sudo undertow client --vpn --transport quic --server SERVER_IP:443 --tls-insecure-skip-verify --fingerprint FINGERPRINT --token-file token.key
 VPN client: curl -4 https://api.ipify.org
 ```
 
@@ -102,7 +102,7 @@ VPN client: curl -4 https://api.ipify.org
 `--internal` creates the client TUN/Wintun and pins the carrier server route without installing Internet `/1` routes or requiring a public egress check. The client's default Internet route remains in place. Accept a reported route in the client console; no server route command is needed.
 
 ```text
-VPN client: sudo undertow client --internal --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
+VPN client: sudo undertow client --internal --transport quic --server SERVER_IP:443 --tls-insecure-skip-verify --fingerprint FINGERPRINT --token-file token.key
 VPN client console: agents
 VPN client console: use 1
 VPN client console: routes
@@ -115,7 +115,7 @@ VPN client: curl http://10.20.1.25/
 Combine both flags to use server Internet egress and accepted or server-configured internal paths at once.
 
 ```text
-VPN client: sudo undertow client --vpn --internal --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
+VPN client: sudo undertow client --vpn --internal --transport quic --server SERVER_IP:443 --tls-insecure-skip-verify --fingerprint FINGERPRINT --token-file token.key
 VPN client console: use 1
 VPN client console: route accept 10.20.0.0/16
 VPN client: curl -4 https://api.ipify.org
@@ -137,7 +137,7 @@ Server: curl http://10.20.1.25/
 Linux clients use TUN; Windows clients use Wintun. Undertow checks for local tunnel-network collisions, installs only the routes owned by the chosen mode, and removes owned routes on graceful exit.
 
 ```text
-VPN client (Linux): sudo undertow client --internal --tun-name undertow-vpn --tunnel-address 172.16.253.1/24 --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
+VPN client (Linux): sudo undertow client --internal --tun-name undertow-vpn --tunnel-address 172.16.253.1/24 --transport quic --server SERVER_IP:443 --tls-insecure-skip-verify --fingerprint FINGERPRINT --token-file token.key
 VPN client console: quit
 ```
 
@@ -159,8 +159,8 @@ Other internal host: listen on 10.20.1.25:8080 for the HTTP example
 Several agents can be connected at once. The client selects the target agent per accepted route; the server's global route table also binds each prefix to one agent. `agents` and `show` distinguish their identities, networks, and state.
 
 ```text
-Agent on network A: undertow agent --server SERVER_IP:53 --agent-key east.key --fingerprint FINGERPRINT --token-file token.key
-Agent on network B: undertow agent --server SERVER_IP:53 --agent-key west.key --fingerprint FINGERPRINT --token-file token.key
+Agent on network A: undertow agent --transport quic --server SERVER_IP:443 --tls-insecure-skip-verify --agent-key east.key --fingerprint FINGERPRINT --token-file token.key
+Agent on network B: undertow agent --transport quic --server SERVER_IP:443 --tls-insecure-skip-verify --agent-key west.key --fingerprint FINGERPRINT --token-file token.key
 VPN client console: agents
 VPN client console: use 1
 VPN client console: route accept 10.20.0.0/16
@@ -173,7 +173,7 @@ VPN client console: route accept 10.30.0.0/16
 An agent automatically offers up IPv4 interface networks and can explicitly advertise more prefixes. Its inventory also reports discovered IPv4 routes with destination, gateway, interface, type/source, and direct-versus-routed state; its default route is separate. The client console presents candidates but never installs all discovered routes automatically.
 
 ```text
-Agent: undertow agent --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key --advertise-route 10.40.0.0/16
+Agent: undertow agent --transport quic --server SERVER_IP:443 --tls-insecure-skip-verify --fingerprint FINGERPRINT --token-file token.key --advertise-route 10.40.0.0/16
 VPN client console: use 1
 VPN client console: routes
 VPN client console: show
@@ -246,7 +246,7 @@ VPN client console: exec powershell.exe -NoProfile -Command whoami
 The built-ins are `pwd`, `ls`, `stat`, `mkdir`, `rm`, `whoami`, `ps`, `privileges`, `env`, `interfaces`, `dns`, and `route-table`. They use the independent `hostops` capability; denying `exec` does not deny them.
 
 ```text
-Agent: undertow agent --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key --deny=exec
+Agent: undertow agent --transport quic --server SERVER_IP:443 --tls-insecure-skip-verify --fingerprint FINGERPRINT --token-file token.key --deny=exec
 VPN client console: use 1
 VPN client console: whoami
 VPN client console: interfaces
@@ -303,7 +303,7 @@ VPN client console: run-wasm ./tool.wasm audit
 VPN client console: run-wasm --stdin ./input.txt ./tool.wasm
 VPN client console: run-wasm --background ./long-task.wasm
 VPN client console: job output JOB_ID
-Agent: undertow agent --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key --deny=wasm
+Agent: undertow agent --transport quic --server SERVER_IP:443 --tls-insecure-skip-verify --fingerprint FINGERPRINT --token-file token.key --deny=wasm
 ```
 
 ### Upload and download
@@ -322,7 +322,7 @@ VPN client keyboard during a transfer: Ctrl-] to cancel
 All capabilities are enabled by default: `pivot`, `exec`, `hostops`, `interactive`, `scripts`, `wasm`, `upload`, `download`, `listeners`, and `relay`. Deny any combination at agent startup; the server and agent enforce the operation at the relevant stream. `relay` allows an operator-requested child-agent listener; zero relay listeners exist until explicitly started on a selected agent. It is independent of `listeners`, which controls client-service TCP forwards.
 
 ```text
-Agent: undertow agent --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key --deny=exec,upload
+Agent: undertow agent --transport quic --server SERVER_IP:443 --tls-insecure-skip-verify --fingerprint FINGERPRINT --token-file token.key --deny=exec,upload
 Server: sudo undertow agent show AGENT_ID
 ```
 
@@ -339,7 +339,7 @@ Server: sudo undertow server
 Server console: agents
 Server console: use 1
 Server console: show
-VPN client: sudo undertow client --internal --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
+VPN client: sudo undertow client --internal --transport quic --server SERVER_IP:443 --tls-insecure-skip-verify --fingerprint FINGERPRINT --token-file token.key
 VPN client console: agents
 VPN client console: use 1
 VPN client console: help
@@ -361,7 +361,7 @@ Agent: undertow agent --stop --pid-file undertow-agent.pid
 To start detached from the outset:
 
 ```text
-VPN client: sudo undertow client --background --internal --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
+VPN client: sudo undertow client --background --internal --transport quic --server SERVER_IP:443 --tls-insecure-skip-verify --fingerprint FINGERPRINT --token-file token.key
 VPN client: sudo undertow client attach
 ```
 
@@ -382,7 +382,7 @@ VPN client console: show
 
 ```text
 Server: undertow server --transport dns --listen 0.0.0.0:5353 --probe-echo --identity identity.key --token-file token.key
-Agent: undertow agent --server SERVER_IP:5353 --fingerprint FINGERPRINT --token-file token.key --probe --probe-count 25 --probe-size 512 --probe-interval 1s
+Agent: undertow agent --transport dns --server SERVER_IP:5353 --fingerprint FINGERPRINT --token-file token.key --probe --probe-count 25 --probe-size 512 --probe-interval 1s
 VPN client console: use 1
 VPN client console: route-table
 ```

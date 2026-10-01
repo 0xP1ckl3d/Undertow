@@ -188,12 +188,22 @@ func launchBackground(mode string, args []string, logPath, pidPath string) error
 	}
 	deadline := time.NewTimer(startupTimeout)
 	defer deadline.Stop()
+	var waiting *time.Timer
+	var waitingCh <-chan time.Time
+	if mode == "client" {
+		waiting = time.NewTimer(3 * time.Second)
+		waitingCh = waiting.C
+		defer waiting.Stop()
+	}
 	tick := time.NewTicker(50 * time.Millisecond)
 	defer tick.Stop()
 	for {
 		select {
 		case err := <-done:
 			return backgroundStartupError(mode, err, logPath, logOffset)
+		case <-waitingCh:
+			fmt.Fprintf(os.Stderr, "client is connecting; waiting up to %s for VPN readiness (log %s)\n", startupTimeout, logPath)
+			waitingCh = nil
 		case <-tick.C:
 			raw, err := os.ReadFile(pidPath)
 			if err != nil {

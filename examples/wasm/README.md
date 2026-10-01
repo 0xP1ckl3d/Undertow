@@ -15,7 +15,7 @@ The script uses `GOOS=wasip1 GOARCH=wasm go build -trimpath -ldflags=-buildid=` 
 | Module | Purpose | Example command | Representative output (host dependent) |
 | --- | --- | --- | --- |
 | [`triage`](triage/main.go) | OS, architecture, user and privilege context | `run-wasm examples/wasm/triage/triage.wasm` | `Host triage: workstation (windows/amd64)`<br>`User: EXAMPLE\\analyst uid=... gid=...` |
-| [`privilege-audit`](privilege-audit/main.go) | Privilege context and writable system path checks | `run-wasm examples/wasm/privilege-audit/privilege-audit.wasm` | `Privilege and configuration audit: workstation`<br>`C:\\ProgramData mode=d--------- size=0` |
+| [`privilege-audit`](privilege-audit/main.go) | PrivescCheck-inspired Windows policy and service path audit | `run-wasm examples/wasm/privilege-audit/privilege-audit.wasm` | `Privilege and configuration audit: workstation (windows, EXAMPLE\\analyst)`<br>`Service scan: 300 names, ...` |
 | [`inventory`](inventory/main.go) | Processes, services, connections and neighbours | `run-wasm examples/wasm/inventory/inventory.wasm tcp` | `Process, service and network inventory`<br>`[connections]`<br>`TCP 127.0.0.1:... LISTENING ...` |
 | [`artifact-discovery`](artifact-discovery/main.go) | Interesting file names and metadata under a chosen root | `run-wasm examples/wasm/artifact-discovery/artifact-discovery.wasm` | `Interesting file names under C:\\Users\\analyst (metadata only):`<br>`...\\.ssh mode=d--------- size=0` |
 | [`persistence-audit`](persistence-audit/main.go) | Service startup and user autoruns | `run-wasm examples/wasm/persistence-audit/persistence-audit.wasm` | `Startup and autorun audit: workstation`<br>`SERVICE_NAME: ExampleService` |
