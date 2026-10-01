@@ -91,6 +91,33 @@ func TestClientModeRoutes(t *testing.T) {
 	}
 }
 
+func TestClientConsoleTogglesInternetRoutes(t *testing.T) {
+	device := &recordingRouteDevice{}
+	mode := &clientModeRoutes{device: device}
+	client := &liveClientConsole{modeRoutes: mode, verifyURL: ""}
+	var output bytes.Buffer
+	for _, args := range [][]string{{"vpn", "status"}, {"vpn", "on"}, {"vpn", "status"}, {"vpn", "off"}} {
+		if err := client.routeCommand(context.Background(), args, &output); err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+	}
+	mode.close()
+	if !reflect.DeepEqual(device.added, []string{"0.0.0.0/1", "128.0.0.0/1"}) || !reflect.DeepEqual(device.deleted, []string{"128.0.0.0/1", "0.0.0.0/1"}) {
+		t.Fatalf("VPN toggle routes: %+v", device)
+	}
+	if !strings.Contains(output.String(), "Internet egress through Undertow: on") || !strings.Contains(output.String(), "Internet egress through Undertow: off") {
+		t.Fatalf("VPN toggle output: %s", output.String())
+	}
+}
+
+func TestClientModeChoicesSurviveDisconnect(t *testing.T) {
+	client := &liveClientConsole{vpn: true, internal: true, events: make(chan string, 1)}
+	client.set(nil, 0, nil, nil)
+	if !client.vpn || !client.internal {
+		t.Fatalf("mode choices changed on disconnect: vpn=%t internal=%t", client.vpn, client.internal)
+	}
+}
+
 func TestClientRejectsAcceptedRouteCollidingWithLocalNetwork(t *testing.T) {
 	client := &liveClientConsole{serverIP: netip.MustParseAddr("203.0.113.10"), tunnelPrefix: netip.MustParsePrefix("172.16.253.0/24"), localNetworks: []netip.Prefix{netip.MustParsePrefix("192.168.50.0/24")}}
 	var output bytes.Buffer

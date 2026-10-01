@@ -155,7 +155,7 @@ func clientCommand(args []string) error {
 	if err != nil {
 		return err
 	}
-	live := &liveClientConsole{routeFile: *routesFile, routes: savedRoutes, serverIP: serverIP, tunnelPrefix: prefix.Masked(), localNetworks: networks, vpn: *vpn, events: make(chan string, 16)}
+	live := &liveClientConsole{routeFile: *routesFile, routes: savedRoutes, serverIP: serverIP, tunnelPrefix: prefix.Masked(), localNetworks: networks, vpn: *vpn, internal: *internal, verifyURL: *verifyURL, events: make(chan string, 16)}
 	setBackgroundConsoleHandler(func(ctx context.Context, request consoleRPCRequest) consoleRPCResponse {
 		var response consoleRPCResponse
 		switch request.Action {
@@ -203,6 +203,12 @@ func clientCommand(args []string) error {
 		live.mu.RUnlock()
 		return control.BridgeClientWASM(ctx, session, agentID, conn)
 	})
+	setBackgroundNativeHandler(func(ctx context.Context, agentID string, conn net.Conn) error {
+		live.mu.RLock()
+		session := live.session
+		live.mu.RUnlock()
+		return control.BridgeClientNative(ctx, session, agentID, conn)
+	})
 	setBackgroundTransferHandler(func(ctx context.Context, encoded json.RawMessage, progress func(pivot.TransferProgress)) (pivot.FileMessage, error) {
 		return live.transferProgress(ctx, encoded, progress)
 	})
@@ -225,6 +231,12 @@ func clientCommand(args []string) error {
 			live.mu.RUnlock()
 			return control.OpenClientWASM(ctx, session, agentID, module, args, stdin)
 		}
+		native := func(ctx context.Context, agentID string, module []byte, args []string, data []byte) (*pivot.InteractiveSession, error) {
+			live.mu.RLock()
+			session := live.session
+			live.mu.RUnlock()
+			return control.OpenClientNative(ctx, session, agentID, module, args, data)
+		}
 		transfer := func(ctx context.Context, request clientFileRequest, progress func(pivot.TransferProgress)) (pivot.FileMessage, error) {
 			encoded, err := json.Marshal(request)
 			if err != nil {
@@ -233,7 +245,7 @@ func clientCommand(args []string) error {
 			return live.transferProgress(ctx, encoded, progress)
 		}
 		go func() {
-			if err := runConsole(ctx, os.Stdin, os.Stdout, live.call, live.id, stop, live.routeCommand, live.events, consoleFeatures{open: opener, script: script, wasm: wasm, transfer: transfer}); err != nil && ctx.Err() == nil {
+			if err := runConsole(ctx, os.Stdin, os.Stdout, live.call, live.id, stop, live.routeCommand, live.events, consoleFeatures{open: opener, script: script, wasm: wasm, native: native, transfer: transfer}); err != nil && ctx.Err() == nil {
 				log.Printf("console: %v", err)
 				live.notify("Console failed: " + err.Error())
 				stop()
@@ -290,7 +302,10 @@ func clientCommand(args []string) error {
 				log.Printf("trusted server fingerprint saved to %s: %s", *fingerprintFile, pinnedFingerprint)
 				savePin = false
 			}
-			err = runVPN(ctx, c, carrierIP, serverIP, *vpn, *internal, *tunName, *address, prefix, *verifyURL, live.set)
+			live.mu.RLock()
+			vpnEnabled, internalEnabled := live.vpn, live.internal
+			live.mu.RUnlock()
+			err = runVPN(ctx, c, carrierIP, serverIP, vpnEnabled, internalEnabled, *tunName, *address, prefix, *verifyURL, live.set)
 			c.Close()
 			if err != nil && !errors.Is(err, io.EOF) && ctx.Err() == nil {
 				live.notify("VPN error: " + err.Error())
@@ -332,6 +347,9 @@ type liveClientConsole struct {
 	active        map[string]bool
 	global        map[string]bool
 	vpn           bool
+	internal      bool
+	modeRoutes    *clientModeRoutes
+	verifyURL     string
 	localNetworks []netip.Prefix
 	routeFile     string
 	routes        []control.AcceptedRoute
@@ -387,7 +405,7 @@ func (c *liveClientConsole) transferProgress(ctx context.Context, encoded []byte
 	return pivot.TransferFileProgress(ctx, session, input.AgentID, input.Operation, input.LocalPath, input.RemotePath, progress)
 }
 
-func runVPN(parent context.Context, c transport.Connection, carrierIP, serverIP netip.Addr, vpn, internal bool, name, address string, prefix netip.Prefix, verifyURL string, onActive func(*mux.Mux, uint64, *tun.Device)) error {
+func runVPN(parent context.Context, c transport.Connection, carrierIP, serverIP netip.Addr, vpn, internal bool, name, address string, prefix netip.Prefix, verifyURL string, onActive func(*mux.Mux, uint64, *tun.Device, *clientModeRoutes)) error {
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	m := mux.New(ctx, c, false)
@@ -463,9 +481,10 @@ func runVPN(parent context.Context, c transport.Connection, carrierIP, serverIP 
 		return fmt.Errorf("pin carrier route: %w", err)
 	}
 	defer unpin()
-	if vpn && carrierIP.IsLoopback() {
+	if carrierIP.IsLoopback() {
 		// A proxy on this machine also opens its own socket to the server.
-		// Keep that upstream connection outside the VPN's /1 defaults.
+		// Keep that upstream connection outside the VPN's /1 defaults,
+		// including when VPN egress is enabled later from the console.
 		if !serverIP.Is4() {
 			return errors.New("VPN through a local proxy requires a numeric IPv4 --server address")
 		}
@@ -475,11 +494,11 @@ func runVPN(parent context.Context, c transport.Connection, carrierIP, serverIP 
 		}
 		defer unpinServer()
 	}
-	removeModeRoutes, err := installClientModeRoutes(device, vpn)
-	if err != nil {
+	modeRoutes := &clientModeRoutes{device: device}
+	if err := modeRoutes.set(vpn); err != nil {
 		return err
 	}
-	defer removeModeRoutes()
+	defer modeRoutes.close()
 	if vpn && verifyURL != "" {
 		log.Printf("VPN routes installed through %s; verifying egress", carrierIP)
 		verifyCtx, verifyCancel := context.WithTimeout(ctx, 30*time.Second)
@@ -519,8 +538,8 @@ func runVPN(parent context.Context, c transport.Connection, carrierIP, serverIP 
 		return err
 	}
 	if onActive != nil {
-		onActive(m, c.ID(), device)
-		defer onActive(nil, 0, nil)
+		onActive(m, c.ID(), device, modeRoutes)
+		defer onActive(nil, 0, nil, nil)
 	}
 	select {
 	case <-ctx.Done():
@@ -533,24 +552,11 @@ func runVPN(parent context.Context, c transport.Connection, carrierIP, serverIP 
 }
 
 func installClientModeRoutes(device clientRouteDevice, vpn bool) (func(), error) {
-	if !vpn {
-		return func() {}, nil
+	modeRoutes := &clientModeRoutes{device: device}
+	if err := modeRoutes.set(vpn); err != nil {
+		return nil, err
 	}
-	routes := []string{"0.0.0.0/1", "128.0.0.0/1"}
-	installed := make([]string, 0, len(routes))
-	cleanup := func() {
-		for i := len(installed) - 1; i >= 0; i-- {
-			_ = device.DelRoute(installed[i])
-		}
-	}
-	for _, route := range routes {
-		if err := device.AddRoute(route); err != nil {
-			cleanup()
-			return nil, fmt.Errorf("install VPN route %s: %w", route, err)
-		}
-		installed = append(installed, route)
-	}
-	return cleanup, nil
+	return modeRoutes.close, nil
 }
 
 func resolveVerificationTarget(ctx context.Context, rawURL string) (string, error) {

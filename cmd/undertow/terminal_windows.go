@@ -13,6 +13,18 @@ func isConsoleTerminal(file *os.File) bool {
 	return windows.GetConsoleMode(windows.Handle(file.Fd()), &mode) == nil
 }
 
+func enableConsoleOutput(file *os.File) (func(), bool) {
+	handle := windows.Handle(file.Fd())
+	var mode uint32
+	if err := windows.GetConsoleMode(handle, &mode); err != nil {
+		return nil, false
+	}
+	if err := windows.SetConsoleMode(handle, mode|windows.ENABLE_VIRTUAL_TERMINAL_PROCESSING); err != nil {
+		return nil, false
+	}
+	return func() { _ = windows.SetConsoleMode(handle, mode) }, true
+}
+
 func setConsoleRaw(file *os.File) (func(), error) {
 	handle := windows.Handle(file.Fd())
 	var mode uint32

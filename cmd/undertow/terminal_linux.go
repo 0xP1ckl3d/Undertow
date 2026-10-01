@@ -13,6 +13,13 @@ func isConsoleTerminal(file *os.File) bool {
 	return err == nil
 }
 
+func enableConsoleOutput(file *os.File) (func(), bool) {
+	if !isConsoleTerminal(file) {
+		return nil, false
+	}
+	return func() {}, true
+}
+
 func setConsoleRaw(file *os.File) (func(), error) {
 	fd := int(file.Fd())
 	old, err := unix.IoctlGetTermios(fd, unix.TCGETS)

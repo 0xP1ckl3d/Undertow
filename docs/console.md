@@ -8,8 +8,9 @@ See [getting started](getting-started.md) for enrollment, fingerprint, and privi
 
 | Command | Action |
 | --- | --- |
-| `help` | Show short command categories for the current console. |
+| `help` | Show the full command menu for the current level. The main menu shows server/client controls; `use NUMBER` opens agent actions. |
 | `help TOPIC` | Show detailed usage for a command or group, such as `help relay`, `help route`, `help run-script`, or `help run-wasm`. |
+| `clear` or `cls` | Clear the interactive screen without changing the selected agent or worker. |
 | `status` or `status --json` | Show active server listeners, each peer's carrier, agents, VPN clients, routes, and counters. |
 | `agents` | List connected agents by current number, hostname, short ID, virtual IP, carrier and relay parent. |
 | `use NUMBER` | Enter the numbered agent's menu. An unambiguous hostname or ID prefix also works. `select NUMBER` is an alias within the console. |
@@ -46,7 +47,7 @@ No agent listens for children until `relay start` succeeds. The omitted bind def
 
 Agent numbers can change after connections change. Run `agents` again before selecting by number. Type `help` after `use` to see that agent's menu. Quote a path or argument containing spaces with single or double quotes. The console parses quotes; it does not expand shell variables or run shell syntax.
 
-When input is an interactive terminal, Up and Down recall commands. Tab completes command names and local file paths for `run-script`, `run-wasm` (including `--stdin`), `upload`, and the local destination of `download`. Paths are read from the **console host**, not the agent; remote file arguments do not use local path completion. Tab can enter directories and complete quoted names containing spaces. `help TOPIC` and `route`/`relay` subcommands also complete. The consoles announce an agent connection or loss without flooding the prompt with routine transport logs. In the VPN client console, Ctrl+C asks for confirmation before stopping the VPN.
+When input is an interactive terminal, Up and Down recall commands. Help uses colour on supported terminals and honours `NO_COLOR`. Tab completes command names and local file paths for `run-script`, `run-wasm` (including `--stdin`), `run-native` (including `--data`), `upload`, and the local destination of `download`. Paths are read from the **console host**, not the agent; remote file arguments do not use local path completion. Tab can enter directories and complete quoted names containing spaces. `help TOPIC` and `route`/`relay` subcommands also complete. The consoles announce an agent connection or loss without flooding the prompt with routine transport logs. In the VPN client console, Ctrl+C asks for confirmation before stopping the VPN.
 
 ## Server console
 
@@ -72,6 +73,7 @@ background
 | `shell [PROGRAM ARGS]` | Selected agent | Open a live command session; Ctrl-] closes the shell and returns to the Undertow menu. |
 | `run-script [--background] bash|powershell LOCAL_FILE` | Selected agent | Stream local script source to the interpreter without a script file on the agent; background runs appear in `jobs`. |
 | `run-wasm [--background] [--stdin LOCAL_FILE] MODULE_FILE [ARGS]` | Selected agent | Instantiate a WASI module in agent memory. Output streams live or enters `jobs`. |
+| `run-native [--background] [--data LOCAL_FILE] MODULE_FILE [ARGS]` | Selected Windows amd64 agent | Load a native `.module` DLL with direct Windows API access. Output streams live or enters `jobs`. |
 | `job start PROGRAM [ARGS]` | Selected agent | Start a task that keeps running while you use or detach the console. |
 | `jobs` | Either menu | List numbered tasks; inside an agent, list that agent's tasks. |
 | `jobs NUMBER` | Either menu | Show a task from the last `jobs` list. |
@@ -116,7 +118,8 @@ background
 | `route add CIDR` | Selected agent | Add a manual local route via that agent, even when it has not advertised the subnet. |
 | `route add CIDR AGENT_ID` | Main menu | Add a manual local route via a named agent. |
 | `route del CIDR` | Either menu | Remove a locally accepted or manual route. |
-| `internal on` / `internal off` | Either menu | Enable or disable use of server configured global pivot routes for new flows. Explicitly accepted client routes remain active. |
+| `internal on` / `internal off` / `internal status` | Either menu | Change or inspect use of server configured global pivot routes for new flows. Explicitly accepted client routes remain active. |
+| `vpn on` / `vpn off` / `vpn status` | Either menu | Change or inspect Internet egress through Undertow without stopping the client. Enabling verifies public egress and rolls back its two `/1` routes on failure. |
 | `upload LOCAL REMOTE` | Selected agent | Copy a client file to the agent. |
 | `download REMOTE LOCAL` | Selected agent | Copy an agent file to the client. |
 | `upload AGENT_ID LOCAL REMOTE` | Main menu | Upload to the named agent. |
@@ -125,6 +128,8 @@ background
 | `background` | Either menu | Detach the console while the VPN and its routes keep running. |
 
 Accepted and manual routes are saved locally in `client-routes.json` by default and reapplied after reconnect. Change the path with `client --routes-file PATH`. The client can add a routed subnet that is reachable from an agent even if it is absent from that agent's directly attached subnet list. Make sure the agent actually has a route to the target subnet.
+
+`vpn on|off` changes only Undertow's Internet routes; accepted agent routes stay installed. `internal on|off` changes server configured routes for new flows. Both settings survive carrier reconnects while the client worker runs. Restarting the client uses the startup flags again.
 
 After `background`, run `undertow client attach` to return. A VPN started with `client --background` can be attached the same way. Use the same `--pid-file PATH` on `attach` or `--stop` if startup used a custom PID file. `undertow client --stop` gracefully stops a detached client and removes its owned routes. `quit` in an attached VPN console does the same. A nonterminal invocation runs without a prompt unless `--interactive` is supplied.
 
@@ -155,6 +160,8 @@ For a command that should continue while you use the console, run `job start /us
 For a memory-backed script, select an agent and use `run-script bash ./check.sh` or `run-script powershell ./audit.ps1`. The file is read on the console machine and sent through Undertow to the interpreter's stdin on the agent; the agent creates no script file. Add `--background` before the language to create a job. Scripts require the independent `scripts` capability, have a 1 MiB source limit and a 10 minute runtime limit. Foreground output streams separately from stdout and stderr; background output is retained in the shared job manager.
 
 To run a WASI module, use `run-wasm ./tool.wasm option`, `run-wasm --stdin ./input.txt ./tool.wasm`, or `run-wasm --background ./long-task.wasm` in a selected-agent console. The module is instantiated from memory and receives explicit arguments and optional stdin. It has no preopened WASI filesystem or WASI network sockets, but the public `undertow_host_v1` imports let it read agent-side files and make bounded outbound network requests with the agent process's privileges. Agent limits are 4 MiB for module bytes, 64 KiB for stdin, 16 MiB guest linear memory, 4 MiB combined output, two minutes of execution and two simultaneous runs. The independent `wasm` capability controls both foreground and background runs; denying `hostops` does not disable these WASM imports. Background runs use the same job IDs, ownership, output retention and cancellation as other tasks. See the [WASM developer guide](wasm-development.md) for the host API and its limits.
+
+On a Windows amd64 agent, `run-native ./tool.module option` loads a native Windows DLL module. `run-native --data ./payload.bin ./tool.module` supplies opaque bytes, and `run-native --background ./tool.module` starts a standard job. Use `job stop NUMBER` to request cooperative cancellation. See the [native module guide](native-modules.md).
 
 Uploads and downloads pass through the server and verify SHA-256. The destination parent directory must exist and the destination file must not already exist. Relative local paths resolve from the console's working directory; relative remote paths resolve from the agent process's working directory. The client console shows bytes, total, percentage, and current rate while data moves, then reports size and SHA-256 on completion. Press Ctrl-] during a transfer to cancel it; partial temporary files are removed. An attached console receives progress over the local loopback control socket, so progress updates do not consume DNS control frames. Transfers have a 30 minute limit. Agents can reject these independently with `--deny=upload` or `--deny=download`.
 

@@ -44,6 +44,10 @@ func OpenClientWASM(ctx context.Context, client *mux.Mux, agentID string, module
 	return openClientMemory(ctx, client, agentID, "wasm", pivot.MemoryRequest{Args: args, Stdin: stdin, Size: len(module)}, module)
 }
 
+func OpenClientNative(ctx context.Context, client *mux.Mux, agentID string, module []byte, args []string, data []byte) (*pivot.InteractiveSession, error) {
+	return openClientMemory(ctx, client, agentID, "native", pivot.MemoryRequest{Args: args, Stdin: data, Size: len(module)}, module)
+}
+
 func openClientMemory(ctx context.Context, client *mux.Mux, agentID, kind string, request pivot.MemoryRequest, source []byte) (*pivot.InteractiveSession, error) {
 	if client == nil {
 		return nil, errors.New("VPN session is not connected")
@@ -69,6 +73,10 @@ func BridgeClientScript(ctx context.Context, client *mux.Mux, agentID string, lo
 
 func BridgeClientWASM(ctx context.Context, client *mux.Mux, agentID string, local net.Conn) error {
 	return bridgeClientInteractive(ctx, client, agentID, "wasm", local)
+}
+
+func BridgeClientNative(ctx context.Context, client *mux.Mux, agentID string, local net.Conn) error {
+	return bridgeClientInteractive(ctx, client, agentID, "native", local)
 }
 
 func bridgeClientInteractive(ctx context.Context, client *mux.Mux, agentID, kind string, local net.Conn) error {
@@ -138,6 +146,8 @@ func (m *Manager) ServeInteractiveRelay(ctx context.Context, client *mux.Stream)
 		destination = pivot.ScriptDestination
 	} else if request.Kind == "wasm" {
 		destination = pivot.WASMDestination
+	} else if request.Kind == "native" {
+		destination = pivot.NativeDestination
 	} else if request.Kind != "" {
 		pivot.RejectInteractive(client, errors.New("unknown task kind"))
 		return
@@ -182,6 +192,8 @@ func (m *Manager) interactiveHandler(w http.ResponseWriter, r *http.Request) {
 		destination = pivot.ScriptDestination
 	} else if r.URL.Path == "/v1/agents/"+r.PathValue("id")+"/wasm" {
 		destination = pivot.WASMDestination
+	} else if r.URL.Path == "/v1/agents/"+r.PathValue("id")+"/native" {
+		destination = pivot.NativeDestination
 	}
 	upstream, err := agent.Open(r.Context(), destination)
 	if err != nil {

@@ -6,47 +6,22 @@ import (
 	"strings"
 )
 
-func printConsoleHelp(output io.Writer, vpnClient, selected, serverAttached bool, topic string) error {
+func printConsoleHelp(output io.Writer, vpnClient, selected, serverAttached bool, topic string, options ...consoleHelpOptions) error {
 	topic = strings.ToLower(topic)
+	if topic != "" && len(options) > 0 && options[0].color {
+		var plain strings.Builder
+		if err := printConsoleHelp(&plain, vpnClient, selected, serverAttached, topic); err != nil {
+			return err
+		}
+		printColorConsoleTopic(output, plain.String())
+		return nil
+	}
 	if topic == "" {
-		role := "Server"
-		if vpnClient {
-			role = "VPN client"
+		var opt consoleHelpOptions
+		if len(options) > 0 {
+			opt = options[0]
 		}
-		if selected {
-			fmt.Fprintf(output, "%s / selected agent\n", role)
-		} else {
-			fmt.Fprintf(output, "%s console\n", role)
-		}
-		fmt.Fprint(output, `  Navigate    agents, use NUMBER, back, show, status
-  Agent work  shell, exec, run-script, run-wasm, jobs
-  Host info   pwd, ls, stat, whoami, ps, interfaces, dns, route-table
-`)
-		if vpnClient {
-			fmt.Fprint(output, `  Routes      routes, route add|accept|del
-  Client      internal on|off, upload, download, forward
-  Lifecycle   background, quit, exit
-`)
-		} else {
-			fmt.Fprint(output, `  Routes      routes, route add|del
-  Server      transports, topology, relay
-`)
-			if serverAttached {
-				fmt.Fprint(output, `  Logs        logs, logs follow
-  Lifecycle   background, quit, exit, stop
-`)
-			} else {
-				fmt.Fprint(output, "  Lifecycle   quit, exit\n")
-			}
-		}
-		fmt.Fprint(output, "Type help TOPIC for details: route, shell, exec, run-script,\nrun-wasm, jobs, host, lifecycle")
-		if vpnClient {
-			fmt.Fprint(output, ", files, forward, internal.\n")
-		} else if serverAttached {
-			fmt.Fprint(output, ", relay, transport, logs.\n")
-		} else {
-			fmt.Fprint(output, ", relay, transport.\n")
-		}
+		printConsoleOverview(output, vpnClient, selected, serverAttached, opt)
 		return nil
 	}
 	switch topic {
@@ -58,6 +33,13 @@ func printConsoleHelp(output io.Writer, vpnClient, selected, serverAttached bool
   back                      Return to the main menu.
   status [--json]           Show listeners, sessions, routes and counters.
   help [TOPIC]              Show categories or detailed command help.
+  clear / cls               Clear the interactive screen.
+`)
+	case "clear", "cls":
+		fmt.Fprint(output, `Console display:
+  clear                     Clear the screen in an interactive terminal.
+  cls                       Alias for clear.
+The worker and current agent selection continue unchanged.
 `)
 	case "route", "routes", "routing":
 		if vpnClient {
@@ -135,6 +117,13 @@ The module and optional stdin file are read from the console machine.
 Tab completes both local paths. At the main menu, put AGENT_ID after run-wasm.
 The agent must allow the wasm capability.
 `)
+	case "run-native", "native":
+		fmt.Fprint(output, `Run a Windows x64 native module on the selected agent:
+  run-native [--background] [--data LOCAL_FILE] MODULE_FILE [ARGS]
+MODULE_FILE is a .module container built with tools/nativepack. --data passes
+opaque binary bytes; ARGS are UTF-8. At the main menu, put AGENT_ID after
+run-native. The agent must allow the native capability.
+`)
 	case "job", "jobs":
 		fmt.Fprint(output, `Agent background tasks:
   job start PROGRAM [ARGS]  Start a task on the selected agent.
@@ -143,15 +132,25 @@ The agent must allow the wasm capability.
   job show NUMBER|ID        Show state, times and exit code.
   job output NUMBER|ID      Read retained output.
   job cancel NUMBER|ID      Stop a running task.
-jobs show|output|cancel NUMBER|ID also work. Job IDs remain valid if list
+  job stop NUMBER|ID        Alias for job cancel.
+jobs show|output|cancel|stop NUMBER|ID also work. Job IDs remain valid if list
 numbers change. At the main menu, jobs AGENT_ID filters the list.
-run-script and run-wasm also accept --background.
+run-script, run-wasm and run-native also accept --background.
 `)
 	case "host", "hostops", "pwd", "ls", "stat", "mkdir", "rm", "whoami", "ps", "privileges", "env", "interfaces", "dns", "route-table":
 		fmt.Fprint(output, `Built-in agent host operations (select an agent first):
-  pwd; ls [PATH]; stat PATH; mkdir PATH; rm PATH
-  whoami; ps; privileges; env [NAME]
-  interfaces; dns; route-table
+  pwd                       Show the agent working directory.
+  ls [PATH]                 List files.
+  stat PATH                 Show file details.
+  mkdir PATH                Create one directory.
+  rm PATH                   Remove one file or empty directory.
+  whoami                    Show the agent process identity.
+  ps                        List processes.
+  privileges                Show current privileges.
+  env [NAME]                Show the environment or one variable.
+  interfaces                List network interfaces and addresses.
+  dns                       Show DNS configuration.
+  route-table               Show the host route table.
 These run on the agent. At the main menu, put AGENT_ID after the command.
 rm removes one file or empty directory; it is not recursive.
 `)
@@ -181,10 +180,24 @@ forward add 0.0.0.0:8080 127.0.0.1:8080
 			return fmt.Errorf("internal mode is managed in the VPN client console")
 		}
 		fmt.Fprint(output, `Client internal routing:
+  internal status            Show the current internal routing mode.
   internal on               Use server configured agent routes for new flows.
   internal off              Stop using those routes for new flows.
 Routes explicitly accepted or added by this client remain active in either
-setting. Use routes to inspect them and route del CIDR to remove one.
+setting. The setting survives a carrier reconnect while this client runs.
+Use routes to inspect accepted routes and route del CIDR to remove one.
+`)
+	case "vpn":
+		if !vpnClient {
+			return fmt.Errorf("VPN Internet routing is managed in the client console")
+		}
+		fmt.Fprint(output, `Client Internet egress:
+  vpn status                Show whether Internet egress is enabled.
+  vpn on                    Install the two Undertow IPv4 Internet routes.
+  vpn off                   Remove only Undertow's Internet routes.
+This does not stop the client or change accepted internal routes. vpn on
+verifies public egress and rolls its routes back if verification fails.
+The chosen mode survives a carrier reconnect while this client runs.
 `)
 	case "logs":
 		if !serverAttached {

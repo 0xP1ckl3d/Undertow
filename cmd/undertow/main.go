@@ -221,9 +221,13 @@ func serve(args []string) error {
 	if !selectedSet["websocket"] && !selectedSet["quic"] && (*carrier.cert != "" || *carrier.selfSigned || *carrier.serverName != "" || *carrier.skipTLSVerify) {
 		return errors.New("TLS options require a WebSocket or QUIC server listener")
 	}
-	for _, option := range []struct { kind, address string }{{"dns", *dnsListen}, {"websocket", *websocketListen}, {"quic", *quicListen}} {
-		if option.address != "" && !selectedSet[option.kind] { return fmt.Errorf("--%s-listen requires %s in --transport", option.kind, option.kind) }
-		if *listen != "" && option.address != "" { return errors.New("choose --listen or a per-transport listen flag") }
+	for _, option := range []struct{ kind, address string }{{"dns", *dnsListen}, {"websocket", *websocketListen}, {"quic", *quicListen}} {
+		if option.address != "" && !selectedSet[option.kind] {
+			return fmt.Errorf("--%s-listen requires %s in --transport", option.kind, option.kind)
+		}
+		if *listen != "" && option.address != "" {
+			return errors.New("choose --listen or a per-transport listen flag")
+		}
 	}
 	if !*lifecycle.background && !*lifecycle.foreground && !*lifecycle.stop && os.Getenv(backgroundModeEnv) != "server" && isConsoleTerminal(os.Stdin) {
 		logPath, err := filepath.Abs(*lifecycle.logFile)
@@ -413,7 +417,7 @@ func agent(args []string) error {
 	interval := f.Duration("probe-interval", time.Second, "time between probes; 0 sends as fast as the window allows")
 	profileFlag := f.String("payload-profile", "auto", "DNS payload profile: auto, large, or small")
 	probe := f.Bool("probe", false, "run Phase 1 echo probes instead of TCP socket handling")
-	deny := f.String("deny", "", "comma-separated agent capabilities to disable: pivot,exec,hostops,interactive,scripts,wasm,upload,download,listeners")
+	deny := f.String("deny", "", "comma-separated agent capabilities to disable: pivot,exec,hostops,interactive,scripts,wasm,native,upload,download,listeners")
 	var advertise advertisedRoutes
 	f.Var(&advertise, "advertise-route", "IPv4 CIDR offered for client acceptance; repeatable")
 	if err := f.Parse(args); err != nil {

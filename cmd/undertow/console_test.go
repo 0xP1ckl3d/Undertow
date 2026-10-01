@@ -46,18 +46,39 @@ func TestConsoleHistoryAndTabCompletion(t *testing.T) {
 }
 
 func TestConsoleHelpTopics(t *testing.T) {
-	var summary, clientSummary, relay, clientRoute bytes.Buffer
+	var summary, clientSummary, agentSummary, relay, clientRoute bytes.Buffer
 	if err := printConsoleHelp(&summary, false, false, true, ""); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(summary.String(), "Agent work") || strings.Contains(summary.String(), "run-script [--background]") {
-		t.Fatalf("summary is not concise: %q", summary.String())
+	for _, want := range []string{"SERVER / MAIN MENU", "◆ NAVIGATION\n", "agents", "use NUMBER|ID|HOSTNAME", "◆ SERVER LISTENERS\n", "transports", "logs follow", "clear / cls"} {
+		if !strings.Contains(summary.String(), want) {
+			t.Fatalf("server main menu missing %q: %q", want, summary.String())
+		}
+	}
+	if strings.Contains(summary.String(), "run-wasm") || strings.Contains(summary.String(), "relay start") {
+		t.Fatalf("server main menu exposes agent commands: %q", summary.String())
 	}
 	if err := printConsoleHelp(&clientSummary, true, false, false, ""); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(clientSummary.String(), "relay") || !strings.Contains(clientSummary.String(), "internal") {
-		t.Fatalf("client help topics are not role-specific: %q", clientSummary.String())
+	for _, want := range []string{"VPN CLIENT / MAIN MENU", "internal on|off|status", "vpn on|off|status", "use NUMBER|ID|HOSTNAME", "quit / exit"} {
+		if !strings.Contains(clientSummary.String(), want) {
+			t.Fatalf("client main menu missing %q: %q", want, clientSummary.String())
+		}
+	}
+	if strings.Contains(clientSummary.String(), "upload") || strings.Contains(clientSummary.String(), "forward") || strings.Contains(clientSummary.String(), "shell") {
+		t.Fatalf("client main menu exposes agent commands: %q", clientSummary.String())
+	}
+	if err := printConsoleHelp(&agentSummary, true, true, false, "", consoleHelpOptions{agent: "TALON"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"VPN CLIENT / AGENT TALON", "AGENT SESSION", "AGENT HOST", "AGENT FILES AND SERVICES", "upload LOCAL REMOTE", "download REMOTE LOCAL", "forward add BIND TARGET", "route accept CIDR", "back"} {
+		if !strings.Contains(agentSummary.String(), want) {
+			t.Fatalf("selected agent menu missing %q: %q", want, agentSummary.String())
+		}
+	}
+	if !strings.Contains(agentSummary.String(), "\n  upload LOCAL REMOTE") {
+		t.Fatalf("selected agent layout is cramped: %q", agentSummary.String())
 	}
 	if err := printConsoleHelp(&relay, false, true, true, "relay"); err != nil {
 		t.Fatal(err)
@@ -72,6 +93,38 @@ func TestConsoleHelpTopics(t *testing.T) {
 	}
 	if !strings.Contains(clientRoute.String(), "route accept CIDR") || !strings.Contains(clientRoute.String(), "route add CIDR") {
 		t.Fatalf("client route help = %q", clientRoute.String())
+	}
+}
+
+func TestConsoleHelpColorAndClear(t *testing.T) {
+	var plain, colored bytes.Buffer
+	if err := printConsoleHelp(&plain, true, true, false, "", consoleHelpOptions{agent: "TALON"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := printConsoleHelp(&colored, true, true, false, "", consoleHelpOptions{agent: "TALON", color: true}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(plain.String(), "\x1b[") || !strings.Contains(colored.String(), "\x1b[1;91mUNDERTOW") || !strings.Contains(colored.String(), "\x1b[1;97m") {
+		t.Fatalf("plain=%q colored=%q", plain.String(), colored.String())
+	}
+	var output bytes.Buffer
+	if err := runConsole(context.Background(), strings.NewReader("clear\ncls\nhelp clear\nquit\n"), &output, nil, nil, nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(output.String(), "error:") || !strings.Contains(output.String(), "Clear the screen") {
+		t.Fatalf("clear/cls output=%q", output.String())
+	}
+}
+
+func TestConsoleCompletionMatchesMenuLevel(t *testing.T) {
+	if got := consoleCompletions(nil, "run", 0, false, true, false); len(got) != 0 {
+		t.Fatalf("main menu suggests agent commands: %+v", got)
+	}
+	if got := consoleCompletions(nil, "run", 0, true, true, false); len(got) < 3 {
+		t.Fatalf("selected-agent menu lacks run commands: %+v", got)
+	}
+	if got := consoleCompletions([]string{"vpn"}, "st", 0, false, true, false); len(got) != 1 || got[0].value != "status" {
+		t.Fatalf("VPN subcommand completion: %+v", got)
 	}
 }
 

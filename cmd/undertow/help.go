@@ -170,7 +170,7 @@ Usage: undertow agent --server HOST:PORT [--fingerprint HEX | --trust-on-first-u
   --password-file PATH    Read password from file instead.
   --agent-key PATH         Agent Ed25519 identity (default agent.key).
   --deny LIST              Disable agent capabilities independently. Names:
-                           pivot,exec,hostops,interactive,scripts,wasm,upload,download,listeners,relay.
+                           pivot,exec,hostops,interactive,scripts,wasm,native,upload,download,listeners,relay.
   --advertise-route CIDR    Offer an additional IPv4 route to VPN clients;
                            repeatable. Up IPv4 interfaces are also offered.
   --domain NAME            Match server --domain (DNS only).
@@ -279,12 +279,14 @@ Usage: undertow console [--control IP:PORT] [--control-token-file PATH]
 Connects to the running server's loopback API. Normal terminal use starts
 this console automatically with 'undertow server'; 'server attach' returns
 after detaching. Type 'agents', 'use 1', and 'show' to inspect an agent.
-'help' shows short categories. Type 'help relay', 'help route', 'help
+'help' shows the full menu for the current level. Type 'help relay', 'help route', 'help
 run-script', or another topic for detailed usage. Tab completes command
-names and local script, WASM, and transfer paths. Ctrl-] exits a live shell
+names and local script, WASM, and transfer paths. 'clear' or 'cls' clears the
+screen. The client console supports 'vpn on|off|status' and
+'internal on|off|status'. Ctrl-] exits a live shell
 without closing the Undertow console. See docs/console.md for the full guide.
 `
-	case "relay", "topology", "transport", "transports", "run-script", "run-wasm", "shell", "jobs", "host":
+	case "relay", "topology", "transport", "transports", "run-script", "run-wasm", "run-native", "shell", "jobs", "host":
 		return printConsoleHelp(w, false, true, false, topic)
 	case "forward", "upload", "download", "internal":
 		return printConsoleHelp(w, true, true, false, topic)

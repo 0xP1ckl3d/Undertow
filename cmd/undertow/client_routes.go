@@ -86,10 +86,11 @@ func saveClientRoutes(path string, routes []control.AcceptedRoute) error {
 	return os.Rename(temp.Name(), path)
 }
 
-func (c *liveClientConsole) set(session *mux.Mux, id uint64, device *tun.Device) {
+func (c *liveClientConsole) set(session *mux.Mux, id uint64, device *tun.Device, modeRoutes *clientModeRoutes) {
 	c.routeMu.Lock()
 	c.mu.Lock()
 	c.session, c.sessionID = session, id
+	c.modeRoutes = modeRoutes
 	if device == nil {
 		c.device = nil
 	} else {
@@ -264,6 +265,12 @@ func (c *liveClientConsole) activateRoute(ctx context.Context, route control.Acc
 func (c *liveClientConsole) routeCommand(ctx context.Context, args []string, output io.Writer) error {
 	c.routeMu.Lock()
 	defer c.routeMu.Unlock()
+	if len(args) > 0 && args[0] == "vpn" {
+		return c.vpnCommand(ctx, args, output)
+	}
+	if len(args) > 0 && args[0] == "internal" {
+		return c.internalCommand(ctx, args, output)
+	}
 	if (len(args) == 1 || len(args) == 2) && args[0] == "routes" {
 		data, err := c.call(ctx, http.MethodGet, "/v1/status", nil)
 		if err != nil {

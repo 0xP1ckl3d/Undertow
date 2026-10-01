@@ -306,6 +306,18 @@ VPN client console: job output JOB_ID
 Agent: undertow agent --transport quic --server SERVER_IP:443 --tls-insecure-skip-verify --fingerprint FINGERPRINT --token-file token.key --deny=wasm
 ```
 
+### Windows native modules
+
+`run-native` sends a `.module` container to a Windows amd64 agent and invokes its PE32+ DLL entry point through `undertow_native_v1`. The module uses ordinary Windows APIs and import libraries directly; Undertow supplies arguments, output, cancellation and run information. Foreground output and background jobs use the same console frames and job manager as WASM. `--data FILE` passes binary bytes alongside UTF-8 arguments. The independent `native` capability controls execution. The agent validates platform, architecture and ABI metadata, then uses the Windows loader to resolve System32 imports and relocations. See the [native module guide](docs/native-modules.md), [SDK](sdk/native/README.md), and [examples](examples/native/README.md).
+
+```text
+Server console: use 1
+Server console: run-native examples/native/wininfo/wininfo.module
+Server console: run-native --background examples/native/hello/hello.module --wait
+Server console: jobs
+Server console: job stop 1
+```
+
 ### Upload and download
 
 File transfer streams through the server to the selected agent, verifies SHA-256, and refuses to overwrite an existing destination. The client console shows bytes, total, percentage, and current rate; Ctrl-] cancels and removes partial temporary files. Upload and download permissions are separate capabilities.

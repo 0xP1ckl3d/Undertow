@@ -356,7 +356,13 @@ func (m *Manager) Register(peer transport.Peer, streamMux *mux.Mux) {
 			state := m.agents[ancestor]
 			if state == nil || ancestor == id || depth >= 8 {
 				m.mu.Unlock()
-				if state == nil { log.Printf("relay agent %s rejected: parent %s is offline", id, ancestor) } else if ancestor == id { log.Printf("relay agent %s rejected: parent loop", id) } else { log.Printf("relay agent %s rejected: maximum relay depth of 8 exceeded", id) }
+				if state == nil {
+					log.Printf("relay agent %s rejected: parent %s is offline", id, ancestor)
+				} else if ancestor == id {
+					log.Printf("relay agent %s rejected: parent loop", id)
+				} else {
+					log.Printf("relay agent %s rejected: maximum relay depth of 8 exceeded", id)
+				}
 				streamMux.Close()
 				return
 			}
@@ -590,10 +596,16 @@ func (m *Manager) Unregister(id string, streamMux *mux.Mux) {
 	}
 	delete(m.agents, id)
 	var closed []*mux.Stream
-	var descendants []struct { id string; streamMux *mux.Mux }
+	var descendants []struct {
+		id        string
+		streamMux *mux.Mux
+	}
 	for childID, state := range m.agents {
 		if state.inventory.Via == id {
-			descendants = append(descendants, struct { id string; streamMux *mux.Mux }{childID, state.mux})
+			descendants = append(descendants, struct {
+				id        string
+				streamMux *mux.Mux
+			}{childID, state.mux})
 		}
 	}
 	for _, stream := range m.relays[id] {
@@ -954,6 +966,7 @@ func (m *Manager) handler(token string) http.Handler {
 	muxer.HandleFunc("CONNECT /v1/agents/{id}/interactive", m.interactiveHandler)
 	muxer.HandleFunc("CONNECT /v1/agents/{id}/script", m.interactiveHandler)
 	muxer.HandleFunc("CONNECT /v1/agents/{id}/wasm", m.interactiveHandler)
+	muxer.HandleFunc("CONNECT /v1/agents/{id}/native", m.interactiveHandler)
 	muxer.HandleFunc("POST /v1/selection", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			AgentID string `json:"agent_id"`

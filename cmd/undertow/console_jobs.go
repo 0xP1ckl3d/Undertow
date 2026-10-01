@@ -39,13 +39,13 @@ func consoleJobs(ctx context.Context, call consoleCaller, agentID string) ([]con
 
 func runConsoleJobCommand(ctx context.Context, output io.Writer, call consoleCaller, args []string, selectedAgentID string, selection *consoleJobSelection) error {
 	if args[0] == "jobs" {
-		if len(args) >= 2 && (args[1] == "show" || args[1] == "output" || args[1] == "cancel") {
+		if len(args) >= 2 && (args[1] == "show" || args[1] == "output" || args[1] == "cancel" || args[1] == "stop") {
 			args = append([]string{"job"}, args[1:]...)
 		} else if len(args) == 2 && (selectedAgentID != "" || isJobNumber(args[1])) {
 			args = []string{"job", "show", args[1]}
 		} else {
 			if len(args) > 2 {
-				return errors.New("use jobs [AGENT_ID], jobs NUMBER, or jobs show|output|cancel NUMBER|ID")
+				return errors.New("use jobs [AGENT_ID], jobs NUMBER, or jobs show|output|cancel|stop NUMBER|ID")
 			}
 			filter := selectedAgentID
 			if len(args) == 2 {
@@ -68,6 +68,8 @@ func runConsoleJobCommand(ctx context.Context, output io.Writer, call consoleCal
 					label = job.Language + " script"
 				} else if job.Kind == "wasm" {
 					label = strings.TrimSpace("WASM module " + label)
+				} else if job.Kind == "native" {
+					label = strings.TrimSpace("native module " + label)
 				}
 				status := job.State
 				if job.ExitCode != nil {
@@ -85,7 +87,7 @@ func runConsoleJobCommand(ctx context.Context, output io.Writer, call consoleCal
 		args = []string{"job", "show", args[1]}
 	}
 	if len(args) < 3 {
-		return errors.New("use job start AGENT_ID PROGRAM [ARGS], job show ID, job output ID, or job cancel ID")
+		return errors.New("use job start AGENT_ID PROGRAM [ARGS], job show ID, job output ID, or job stop ID")
 	}
 	if args[1] == "start" {
 		if len(args) < 4 {
@@ -103,10 +105,10 @@ func runConsoleJobCommand(ctx context.Context, output io.Writer, call consoleCal
 		return nil
 	}
 	if len(args) != 3 {
-		return errors.New("use job show|output|cancel NUMBER|ID")
+		return errors.New("use job show|output|cancel|stop NUMBER|ID")
 	}
-	if args[1] != "show" && args[1] != "output" && args[1] != "cancel" {
-		return errors.New("use job show|output|cancel NUMBER|ID")
+	if args[1] != "show" && args[1] != "output" && args[1] != "cancel" && args[1] != "stop" {
+		return errors.New("use job show|output|cancel|stop NUMBER|ID")
 	}
 	jobID := args[2]
 	if isJobNumber(jobID) {
@@ -132,7 +134,7 @@ func runConsoleJobCommand(ctx context.Context, output io.Writer, call consoleCal
 		jobID = ids[number-1]
 	}
 	path := "/v1/jobs/" + url.PathEscape(jobID)
-	if args[1] == "cancel" {
+	if args[1] == "cancel" || args[1] == "stop" {
 		_, err := call(ctx, http.MethodPost, path+"/cancel", nil)
 		if err == nil {
 			fmt.Fprintf(output, "Job %s cancelled.\n", jobID)

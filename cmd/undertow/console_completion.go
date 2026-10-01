@@ -101,14 +101,20 @@ func completionWords(line []rune) (start int, before []string, partial string, o
 
 func consoleCompletions(before []string, partial string, quote rune, selected, vpn, attached bool) []consoleCompletion {
 	if len(before) == 0 {
-		commands := []string{"agents", "use", "agent", "status", "routes", "jobs", "job", "help", "quit", "exec", "shell", "run-script", "run-wasm", "pwd", "ls", "stat", "mkdir", "rm", "whoami", "ps", "privileges", "env", "interfaces", "dns", "route-table"}
+		commands := []string{"agents", "use", "status", "routes", "help", "clear", "cls", "quit", "exit"}
 		if selected {
-			commands = append(commands, "show", "back", "route")
+			commands = append(commands, "show", "back", "route", "jobs", "job", "exec", "shell", "run-script", "run-wasm", "run-native", "pwd", "ls", "stat", "mkdir", "rm", "whoami", "ps", "privileges", "env", "interfaces", "dns", "route-table")
 		}
 		if vpn {
-			commands = append(commands, "background", "internal", "forward", "upload", "download")
+			commands = append(commands, "background", "internal", "vpn")
+			if selected {
+				commands = append(commands, "forward", "upload", "download")
+			}
 		} else {
-			commands = append(commands, "transports", "topology", "start", "stop", "relay")
+			commands = append(commands, "transports", "topology", "start", "stop")
+			if selected {
+				commands = append(commands, "relay")
+			}
 			if attached {
 				commands = append(commands, "background", "logs")
 			}
@@ -116,11 +122,37 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 		return wordCompletions(commands, partial)
 	}
 	switch before[0] {
+	case "vpn", "internal":
+		if vpn && len(before) == 1 {
+			return wordCompletions([]string{"on", "off", "status"}, partial)
+		}
+	case "job":
+		if selected && len(before) == 1 {
+			return wordCompletions([]string{"start", "show", "output", "cancel", "stop"}, partial)
+		}
+	case "jobs":
+		if selected && len(before) == 1 {
+			return wordCompletions([]string{"show", "output", "cancel", "stop"}, partial)
+		}
+	case "forward":
+		if vpn && selected && len(before) == 1 {
+			return wordCompletions([]string{"add", "list", "del"}, partial)
+		}
+	case "logs":
+		if attached && len(before) == 1 {
+			return wordCompletions([]string{"follow"}, partial)
+		}
 	case "help":
 		if len(before) == 1 {
-			topics := []string{"agents", "route", "shell", "exec", "run-script", "run-wasm", "jobs", "host", "lifecycle"}
+			topics := []string{"agents", "status", "route", "lifecycle", "clear"}
+			if selected {
+				topics = append(topics, "shell", "exec", "run-script", "run-wasm", "run-native", "jobs", "host")
+			}
 			if vpn {
-				topics = append(topics, "files", "forward", "internal")
+				topics = append(topics, "internal", "vpn")
+				if selected {
+					topics = append(topics, "files", "forward")
+				}
 			} else {
 				topics = append(topics, "relay", "transport")
 				if attached {
@@ -158,7 +190,7 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 		if len(args) == 1 && (args[0] == "bash" || args[0] == "powershell") || len(args) == 2 && args[0] == "--background" && (args[1] == "bash" || args[1] == "powershell") {
 			return localPathCompletions(partial, quote, false)
 		}
-	case "run-wasm":
+	case "run-wasm", "run-native":
 		args := before[1:]
 		if !selected {
 			if len(args) == 0 {
@@ -167,13 +199,16 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 			args = args[1:]
 		}
 		if strings.HasPrefix(partial, "--") {
+			if before[0] == "run-native" {
+				return wordCompletions([]string{"--background", "--data"}, partial)
+			}
 			return wordCompletions([]string{"--background", "--stdin"}, partial)
 		}
 		for i := 0; i < len(args); i++ {
 			switch args[i] {
 			case "--background":
 				continue
-			case "--stdin":
+			case "--stdin", "--data":
 				if i == len(args)-1 {
 					return localPathCompletions(partial, quote, false)
 				}

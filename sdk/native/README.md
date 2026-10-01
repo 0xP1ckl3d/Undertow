@@ -1,0 +1,11 @@
+# Undertow native SDK v1
+
+`undertow_native.h` is the entire public C ABI. It has no dependency on Undertow's Go packages. A module is a Windows x64 DLL exporting the undecorated symbol `undertow_main` with the signature in the header. The host calls it synchronously. The return value is the module exit status; zero means success.
+
+The API table is borrowed for the duration of `undertow_main`. Its `context` is an opaque integer handle, not a pointer to Go memory. Pass it unchanged to `write`, `write_error`, `cancelled`, and `job_state`. The argument buffer and all spans returned by the helper functions are borrowed and read only. Do not retain any table address, function pointer, or argument span after returning. Join any module-created threads before return; Undertow unloads the DLL at that point. For memory owned by the module, use its C/C++ runtime or normal Windows allocation APIs. There is no cross-boundary allocation or free operation in v1.
+
+`write` and `write_error` take an explicit byte length and return zero on success, `-1` on failure. They stream through Undertow's existing output frames. A single call accepts at most 32 KiB; split larger output. `undertow_native_printf` formats into a bounded 8 KiB buffer and calls `write`. All text output should be UTF-8. `cancelled` and `job_state` return zero while running and one once cancellation is requested. Long loops should check them regularly and return promptly. `process_id`, `os`, and `arch` provide basic runtime information; the Windows API remains directly available for other information.
+
+Arguments use a little-endian binary buffer: `uint32 argc`, then `uint32 length` and UTF-8 bytes for each argument, followed by `uint32 length` and opaque bytes from `--data FILE`. Strings have no NUL terminator and may contain embedded NUL. The header's `undertow_native_arg` and `undertow_native_data` helpers validate lengths and return borrowed spans. C++ can include the header inside its normal build. Rust and Zig authors can declare this same `repr(C)`/extern ABI and parse the documented buffer.
+
+The reference build uses MSVC x64 with `/LD /MT`. See [the native module guide](../../docs/native-modules.md) and [example build script](../../examples/native/build.ps1).

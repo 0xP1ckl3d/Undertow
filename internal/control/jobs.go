@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"undertow/internal/mux"
+	"undertow/internal/nativemodule"
 	"undertow/internal/pivot"
 )
 
@@ -108,6 +109,32 @@ func (m *Manager) StartWASMJob(ctx context.Context, owner uint64, agentID string
 		return JobInfo{}, err
 	}
 	return m.registerJob(owner, agentID, state.mux, session, JobInfo{AgentID: agentID, Kind: "wasm", Argv: append([]string(nil), args...)})
+}
+
+func (m *Manager) StartNativeJob(ctx context.Context, owner uint64, agentID string, module []byte, args []string, data []byte) (JobInfo, error) {
+	if _, _, err := nativemodule.Parse(module); err != nil {
+		return JobInfo{}, err
+	}
+	if _, err := nativemodule.EncodeArgs(args, data); err != nil {
+		return JobInfo{}, err
+	}
+	m.mu.RLock()
+	state := m.agents[agentID]
+	count := len(m.jobs)
+	m.mu.RUnlock()
+	if state == nil {
+		return JobInfo{}, errors.New("agent is not connected")
+	}
+	if count >= 512 {
+		return JobInfo{}, errors.New("job limit reached")
+	}
+	startCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	session, err := pivot.OpenNative(startCtx, state.mux, module, args, data)
+	if err != nil {
+		return JobInfo{}, err
+	}
+	return m.registerJob(owner, agentID, state.mux, session, JobInfo{AgentID: agentID, Kind: "native", Argv: append([]string(nil), args...)})
 }
 
 func (m *Manager) registerJob(owner uint64, agentID string, agent *mux.Mux, session *pivot.InteractiveSession, info JobInfo) (JobInfo, error) {
@@ -290,6 +317,23 @@ func (m *Manager) jobHTTPHandlers(muxer *http.ServeMux) {
 			return
 		}
 		job, err := m.StartWASMJob(r.Context(), jobOwner(r.Context()), r.PathValue("id"), request.Source, request.Args, request.Stdin)
+		if err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		jsonReply(w, http.StatusCreated, job)
+	})
+	muxer.HandleFunc("POST /v1/agents/{id}/native/jobs", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Source []byte   `json:"source"`
+			Data   []byte   `json:"data,omitempty"`
+			Args   []string `json:"args,omitempty"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 12<<20)).Decode(&request); err != nil {
+			http.Error(w, "invalid native job request", 400)
+			return
+		}
+		job, err := m.StartNativeJob(r.Context(), jobOwner(r.Context()), r.PathValue("id"), request.Source, request.Args, request.Data)
 		if err != nil {
 			http.Error(w, err.Error(), 400)
 			return

@@ -14,6 +14,7 @@ type Capabilities struct {
 	Interactive bool
 	Scripts     bool
 	WASM        bool
+	Native      bool
 	Upload      bool
 	Download    bool
 	Listeners   bool
@@ -26,7 +27,7 @@ type CapabilityReport struct {
 }
 
 func DefaultCapabilities() Capabilities {
-	return Capabilities{Pivot: true, Exec: true, HostOps: true, Interactive: true, Scripts: true, WASM: true, Upload: true, Download: true, Listeners: true, Relay: true}
+	return Capabilities{Pivot: true, Exec: true, HostOps: true, Interactive: true, Scripts: true, WASM: true, Native: true, Upload: true, Download: true, Listeners: true, Relay: true}
 }
 
 func ParseDenied(raw string) (Capabilities, error) {
@@ -48,6 +49,8 @@ func ParseDenied(raw string) (Capabilities, error) {
 			caps.Scripts = false
 		case "wasm":
 			caps.WASM = false
+		case "native":
+			caps.Native = false
 		case "upload":
 			caps.Upload = false
 		case "download":
@@ -57,18 +60,18 @@ func ParseDenied(raw string) (Capabilities, error) {
 		case "relay":
 			caps.Relay = false
 		default:
-			return Capabilities{}, fmt.Errorf("unknown agent capability %q; supported: pivot,exec,hostops,interactive,scripts,wasm,upload,download,listeners,relay", strings.TrimSpace(item))
+			return Capabilities{}, fmt.Errorf("unknown agent capability %q; supported: pivot,exec,hostops,interactive,scripts,wasm,native,upload,download,listeners,relay", strings.TrimSpace(item))
 		}
 	}
 	return caps, nil
 }
 
 func (c Capabilities) Report() CapabilityReport {
-	report := CapabilityReport{Supported: []string{"pivot", "exec", "hostops", "interactive", "scripts", "wasm", "upload", "download", "listeners", "relay"}, Allowed: make([]string, 0, 10)}
+	report := CapabilityReport{Supported: []string{"pivot", "exec", "hostops", "interactive", "scripts", "wasm", "native", "upload", "download", "listeners", "relay"}, Allowed: make([]string, 0, 11)}
 	for _, item := range []struct {
 		name    string
 		allowed bool
-	}{{"pivot", c.Pivot}, {"exec", c.Exec}, {"hostops", c.HostOps}, {"interactive", c.Interactive}, {"scripts", c.Scripts}, {"wasm", c.WASM}, {"upload", c.Upload}, {"download", c.Download}, {"listeners", c.Listeners}, {"relay", c.Relay}} {
+	}{{"pivot", c.Pivot}, {"exec", c.Exec}, {"hostops", c.HostOps}, {"interactive", c.Interactive}, {"scripts", c.Scripts}, {"wasm", c.WASM}, {"native", c.Native}, {"upload", c.Upload}, {"download", c.Download}, {"listeners", c.Listeners}, {"relay", c.Relay}} {
 		if item.allowed {
 			report.Allowed = append(report.Allowed, item.name)
 		}

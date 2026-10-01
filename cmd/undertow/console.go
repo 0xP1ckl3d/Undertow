@@ -30,6 +30,7 @@ type consoleFeatures struct {
 	open           interactiveOpener
 	script         scriptOpener
 	wasm           wasmOpener
+	native         nativeOpener
 	transfer       clientTransferAction
 	serverLogPath  string
 	serverAttached bool
@@ -69,11 +70,21 @@ func consoleCommandWithOptions(options operatorOptions, lifecycle consoleFeature
 	wasm := func(ctx context.Context, agentID string, module []byte, args []string, stdin []byte) (*pivot.InteractiveSession, error) {
 		return openControlWASM(ctx, options, agentID, module, args, stdin)
 	}
-	lifecycle.open, lifecycle.script, lifecycle.wasm = opener, script, wasm
+	native := func(ctx context.Context, agentID string, module []byte, args []string, data []byte) (*pivot.InteractiveSession, error) {
+		return openControlNative(ctx, options, agentID, module, args, data)
+	}
+	lifecycle.open, lifecycle.script, lifecycle.wasm, lifecycle.native = opener, script, wasm, native
 	return runConsole(ctx, os.Stdin, os.Stdout, caller, nil, nil, nil, nil, lifecycle)
 }
 
 func runConsole(ctx context.Context, input io.Reader, output io.Writer, call consoleCaller, clientID func() uint64, quit func(), clientRoutes clientRouteAction, events <-chan string, features ...consoleFeatures) error {
+	terminalOutput := false
+	if file, ok := output.(*os.File); ok && isConsoleTerminal(file) {
+		if restore, enabled := enableConsoleOutput(file); enabled {
+			defer restore()
+			terminalOutput = true
+		}
+	}
 	fmt.Fprintln(output, "Interactive console. Type agents to list agents, help for commands.")
 	vpnClient := clientID != nil
 	var serverConsole consoleFeatures
@@ -225,6 +236,14 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 		if len(args) == 0 {
 			continue
 		}
+		if args[0] == "clear" || args[0] == "cls" {
+			if len(args) != 1 {
+				fmt.Fprintln(output, "error: use clear or cls")
+			} else if terminalOutput {
+				fmt.Fprint(output, "\x1b[2J\x1b[H")
+			}
+			continue
+		}
 		if args[0] == "quit" || args[0] == "exit" {
 			if quit != nil {
 				quit()
@@ -272,7 +291,7 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 			if len(args) == 2 {
 				topic = args[1]
 			}
-			if err := printConsoleHelp(output, vpnClient, selectedID != "", serverConsole.serverAttached, topic); err != nil {
+			if err := printConsoleHelp(output, vpnClient, selectedID != "", serverConsole.serverAttached, topic, consoleHelpOptions{agent: selectedLabel, color: terminalOutput && os.Getenv("NO_COLOR") == "" && os.Getenv("TERM") != "dumb"}); err != nil {
 				fmt.Fprintln(output, "error:", err)
 			}
 			continue
@@ -338,6 +357,8 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 				args = append([]string{"run-script", selectedID}, args[1:]...)
 			case "run-wasm":
 				args = append([]string{"run-wasm", selectedID}, args[1:]...)
+			case "run-native":
+				args = append([]string{"run-native", selectedID}, args[1:]...)
 			case "pwd", "ls", "stat", "mkdir", "rm", "whoami", "ps", "privileges", "env", "interfaces", "dns", "route-table":
 				args = append([]string{args[0], selectedID}, args[1:]...)
 			case "upload", "download":
@@ -384,6 +405,16 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 				open = features[0].wasm
 			}
 			if err := runConsoleWASM(ctx, output, editor, call, open, args); err != nil {
+				fmt.Fprintln(output, "error:", err)
+			}
+			continue
+		}
+		if args[0] == "run-native" {
+			var open nativeOpener
+			if len(features) != 0 {
+				open = features[0].native
+			}
+			if err := runConsoleNative(ctx, output, editor, call, open, args); err != nil {
 				fmt.Fprintln(output, "error:", err)
 			}
 			continue
@@ -558,6 +589,7 @@ func runConsoleCommand(ctx context.Context, output io.Writer, call consoleCaller
   exec AGENT_ID PROGRAM [ARGS]   Run one program on an agent
   run-script AGENT_ID [--background] bash|powershell LOCAL_FILE
   run-wasm AGENT_ID [--background] [--stdin FILE] MODULE [ARGS]
+  run-native AGENT_ID [--background] [--data FILE] MODULE [ARGS]
   job start AGENT_ID PROGRAM ... Start a background task
   jobs; job show|output|cancel ID Inspect or stop tasks
   HOST_OP AGENT_ID [ARGS]        Host operations; type use NUMBER then help
@@ -582,6 +614,7 @@ Quote arguments containing spaces.
   exec AGENT_ID PROGRAM [ARGS]   Run one program on an agent
   run-script AGENT_ID [--background] bash|powershell LOCAL_FILE
   run-wasm AGENT_ID [--background] [--stdin FILE] MODULE [ARGS]
+  run-native AGENT_ID [--background] [--data FILE] MODULE [ARGS]
   job start AGENT_ID PROGRAM ... Start a background task
   jobs; job show|output|cancel ID Inspect or stop tasks
   HOST_OP AGENT_ID [ARGS]        Host operations; type use NUMBER then help
@@ -732,17 +765,15 @@ Quote arguments containing spaces. Commands run only when submitted.
 		fmt.Fprintf(output, "%s complete: %d bytes, SHA-256 %s\n", strings.Title(request.Operation), result.Size, result.SHA256)
 		return nil
 	case "internal":
-		if ownClientID == 0 {
+		if !vpnClient || clientRoutes == nil {
 			return errors.New("internal mode can be changed in the VPN client console")
 		}
-		if len(args) != 2 || args[1] != "on" && args[1] != "off" {
-			return errors.New("use internal on or internal off")
+		return clientRoutes(ctx, args, output)
+	case "vpn":
+		if !vpnClient || clientRoutes == nil {
+			return errors.New("VPN mode can be changed in the VPN client console")
 		}
-		_, err := call(ctx, http.MethodPost, fmt.Sprintf("/v1/clients/%d/internal", ownClientID), map[string]bool{"enabled": args[1] == "on"})
-		if err == nil {
-			fmt.Fprintf(output, "Internal pivots %s for new flows.\n", args[1])
-		}
-		return err
+		return clientRoutes(ctx, args, output)
 	case "forward":
 		if !vpnClient || ownClientID == 0 {
 			return errors.New("agent TCP forwards are configured in the VPN client console")
