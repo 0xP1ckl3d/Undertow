@@ -162,12 +162,30 @@ func (m *Manager) DeleteClientForward(clientID uint64, agentID, bind string) err
 	return stream.Close()
 }
 
-func (m *Manager) serveAgentForwards(agentMux *mux.Mux) {
+func (m *Manager) serveAgentForwards(agentID string, agentMux *mux.Mux) {
 	ctx := context.Background()
 	for {
 		stream, err := agentMux.Accept(ctx)
 		if err != nil {
 			return
+		}
+		if stream.Destination() == pivot.RelayInboundDestination {
+			m.mu.RLock()
+			accept := m.relayAccept
+			active := len(m.relays[agentID]) > 0
+			m.mu.RUnlock()
+			if accept == nil || !active {
+				stream.Fail(errors.New("relay listener is not active"))
+				continue
+			}
+			go func() {
+				if err := stream.AcceptOpen(context.Background()); err != nil {
+					_ = stream.Close()
+					return
+				}
+				accept(context.Background(), agentID, stream)
+			}()
+			continue
 		}
 		id, valid := pivot.ForwardID(stream.Destination(), "forward")
 		if !valid {

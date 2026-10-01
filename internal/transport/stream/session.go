@@ -54,6 +54,8 @@ func (c *Connection) Close() error {
 
 type Peer struct {
 	*Connection
+	Carrier   string
+	Via       string
 	mu        sync.Mutex
 	agentID   string
 	remote    string
@@ -70,7 +72,7 @@ func (p *Peer) Snapshot() transport.PeerInfo {
 	return transport.PeerInfo{
 		ID: p.ID(), AgentID: p.agentID, Remote: p.remote,
 		Connected: p.connected, LastSeen: p.lastSeen, VirtualIP: p.virtualIP,
-		Authenticated: true, Transport: p.Session.Stats(),
+		Authenticated: true, Carrier: p.Carrier, Via: p.Via, Transport: p.Session.Stats(),
 	}
 }
 func (p *Peer) SetVirtualIP(value string) {

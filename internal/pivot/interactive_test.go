@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -39,7 +40,11 @@ func TestInteractiveSessionStreamsAndExits(t *testing.T) {
 	if err := session.Resize(100, 30); err != nil {
 		t.Fatal(err)
 	}
-	if err := session.Send([]byte("ping\n")); err != nil {
+	enter := "\n"
+	if runtime.GOOS == "windows" {
+		enter = "\r"
+	}
+	if err := session.Send([]byte("ping" + enter)); err != nil {
 		t.Fatal(err)
 	}
 	var output strings.Builder

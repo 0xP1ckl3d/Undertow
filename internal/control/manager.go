@@ -33,6 +33,9 @@ type RouteDevice interface {
 
 type AgentInfo struct {
 	ID                 string                  `json:"id"`
+	Transport          string                  `json:"transport,omitempty"`
+	Via                string                  `json:"via,omitempty"`
+	Depth              int                     `json:"depth,omitempty"`
 	SessionID          uint64                  `json:"session_id"`
 	VirtualIP          string                  `json:"virtual_ip"`
 	Remote             string                  `json:"remote"`
@@ -68,6 +71,7 @@ type AgentInfo struct {
 
 type ClientInfo struct {
 	ID             string          `json:"id"`
+	Transport      string          `json:"transport,omitempty"`
 	SessionID      uint64          `json:"session_id"`
 	Hostname       string          `json:"hostname,omitempty"`
 	Remote         string          `json:"remote"`
@@ -92,13 +96,37 @@ type AcceptedRoute struct {
 }
 
 type ServerInfo struct {
-	Transport     string `json:"transport"`
-	Network       string `json:"network"`
-	Listen        string `json:"listen"`
-	Domain        string `json:"domain,omitempty"`
-	WebSocketPath string `json:"websocket_path,omitempty"`
-	TLSMode       string `json:"tls_mode,omitempty"`
-	Fingerprint   string `json:"fingerprint,omitempty"`
+	Transport     string         `json:"transport"`
+	Network       string         `json:"network"`
+	Listen        string         `json:"listen"`
+	Domain        string         `json:"domain,omitempty"`
+	WebSocketPath string         `json:"websocket_path,omitempty"`
+	TLSMode       string         `json:"tls_mode,omitempty"`
+	Fingerprint   string         `json:"fingerprint,omitempty"`
+	Listeners     []ListenerInfo `json:"listeners,omitempty"`
+}
+
+type ListenerInfo struct {
+	Transport string `json:"transport"`
+	Network   string `json:"network"`
+	Listen    string `json:"listen"`
+	TLSMode   string `json:"tls_mode,omitempty"`
+	Sessions  int    `json:"sessions"`
+	Agents    int    `json:"agents"`
+	Clients   int    `json:"clients"`
+}
+
+type TransportStartRequest struct {
+	Listen  string `json:"listen,omitempty"`
+	TLSMode string `json:"tls_mode,omitempty"`
+	TLSCert string `json:"tls_cert,omitempty"`
+	TLSKey  string `json:"tls_key,omitempty"`
+}
+
+type TransportController interface {
+	List() []ListenerInfo
+	Start(string, TransportStartRequest) (ListenerInfo, error)
+	Stop(string, bool) error
 }
 
 type clientState struct {
@@ -123,6 +151,9 @@ type agentState struct {
 type Manager struct {
 	mu             sync.RWMutex
 	server         ServerInfo
+	transports     TransportController
+	relayAccept    func(context.Context, string, *mux.Stream)
+	relays         map[string]map[string]*mux.Stream
 	agents         map[string]*agentState
 	clients        map[uint64]*clientState
 	forwards       map[string]*forwardState
@@ -142,8 +173,20 @@ func (m *Manager) SetServerInfo(info ServerInfo) {
 	m.mu.Unlock()
 }
 
+func (m *Manager) SetTransportController(controller TransportController) {
+	m.mu.Lock()
+	m.transports = controller
+	m.mu.Unlock()
+}
+
+func (m *Manager) SetRelayAcceptor(accept func(context.Context, string, *mux.Stream)) {
+	m.mu.Lock()
+	m.relayAccept = accept
+	m.mu.Unlock()
+}
+
 func NewManager(routes *routing.Table, device RouteDevice, virtualNetwork netip.Prefix, proxyIP netip.Addr) *Manager {
-	return &Manager{agents: make(map[string]*agentState), clients: make(map[uint64]*clientState), forwards: make(map[string]*forwardState), jobs: make(map[string]*jobState), routes: routes, device: device, virtualNetwork: virtualNetwork.Masked(), proxyIP: proxyIP, virtualByAgent: make(map[string]netip.Addr), virtualUsed: make(map[netip.Addr]bool)}
+	return &Manager{agents: make(map[string]*agentState), clients: make(map[uint64]*clientState), forwards: make(map[string]*forwardState), jobs: make(map[string]*jobState), relays: make(map[string]map[string]*mux.Stream), routes: routes, device: device, virtualNetwork: virtualNetwork.Masked(), proxyIP: proxyIP, virtualByAgent: make(map[string]netip.Addr), virtualUsed: make(map[netip.Addr]bool)}
 }
 
 func (m *Manager) RegisterClient(peer transport.Peer, streamMux *mux.Mux, internal bool, hostname string) {
@@ -286,7 +329,7 @@ func (m *Manager) ClientList() []ClientInfo {
 		}
 		sort.Slice(accepted, func(i, j int) bool { return accepted[i].Prefix < accepted[j].Prefix })
 		out = append(out, ClientInfo{
-			ID: p.AgentID, SessionID: p.ID, Hostname: state.hostname, Remote: p.Remote, Internal: state.internal,
+			ID: p.AgentID, Transport: p.Carrier, SessionID: p.ID, Hostname: state.hostname, Remote: p.Remote, Internal: state.internal,
 			AcceptedRoutes: accepted,
 			Connected:      p.Connected, LastSeen: p.LastSeen, RTT: p.Transport.RTT,
 			RXBytes: p.Transport.RXBytes, TXBytes: p.Transport.TXBytes,
@@ -300,6 +343,27 @@ func (m *Manager) ClientList() []ClientInfo {
 func (m *Manager) Register(peer transport.Peer, streamMux *mux.Mux) {
 	id := peer.Snapshot().AgentID
 	m.mu.Lock()
+	if parent := peer.Snapshot().Via; parent != "" {
+		if parent == id {
+			m.mu.Unlock()
+			log.Printf("relay agent %s rejected: cannot relay through itself", id)
+			streamMux.Close()
+			return
+		}
+		ancestor := parent
+		depth := 0
+		for ancestor != "" {
+			state := m.agents[ancestor]
+			if state == nil || ancestor == id || depth >= 8 {
+				m.mu.Unlock()
+				if state == nil { log.Printf("relay agent %s rejected: parent %s is offline", id, ancestor) } else if ancestor == id { log.Printf("relay agent %s rejected: parent loop", id) } else { log.Printf("relay agent %s rejected: maximum relay depth of 8 exceeded", id) }
+				streamMux.Close()
+				return
+			}
+			depth++
+			ancestor = state.inventory.Via
+		}
+	}
 	virtual := m.virtualByAgent[id]
 	if !virtual.IsValid() {
 		for ip := m.virtualNetwork.Addr().Next(); m.virtualNetwork.Contains(ip); ip = ip.Next() {
@@ -334,13 +398,17 @@ func (m *Manager) Register(peer transport.Peer, streamMux *mux.Mux) {
 		}
 		m.routes.SetRouteActive(route.Prefix, false)
 	}
-	m.agents[id] = &agentState{peer: peer, mux: streamMux}
+	depth := 0
+	if parent := peer.Snapshot().Via; parent != "" {
+		depth = m.agents[parent].inventory.Depth + 1
+	}
+	m.agents[id] = &agentState{peer: peer, mux: streamMux, inventory: AgentInfo{Via: peer.Snapshot().Via, Depth: depth}}
 	m.mu.Unlock()
 	if old != nil {
 		old.mux.Close()
 	}
 	go m.receiveInventory(id, streamMux)
-	go m.serveAgentForwards(streamMux)
+	go m.serveAgentForwards(id, streamMux)
 	go func() { <-streamMux.Done(); m.Unregister(id, streamMux) }()
 }
 
@@ -522,6 +590,16 @@ func (m *Manager) Unregister(id string, streamMux *mux.Mux) {
 	}
 	delete(m.agents, id)
 	var closed []*mux.Stream
+	var descendants []struct { id string; streamMux *mux.Mux }
+	for childID, state := range m.agents {
+		if state.inventory.Via == id {
+			descendants = append(descendants, struct { id string; streamMux *mux.Mux }{childID, state.mux})
+		}
+	}
+	for _, stream := range m.relays[id] {
+		closed = append(closed, stream)
+	}
+	delete(m.relays, id)
 	for forwardID, forward := range m.forwards {
 		if forward.AgentID == id {
 			closed = append(closed, forward.control)
@@ -541,6 +619,10 @@ func (m *Manager) Unregister(id string, streamMux *mux.Mux) {
 	m.mu.Unlock()
 	for _, stream := range closed {
 		_ = stream.Close()
+	}
+	for _, descendant := range descendants {
+		_ = descendant.streamMux.Close()
+		m.Unregister(descendant.id, descendant.streamMux)
 	}
 }
 
@@ -592,6 +674,8 @@ func (m *Manager) AgentList() []AgentInfo {
 		p := state.peer.Snapshot()
 		info := state.inventory
 		info.ID = p.AgentID
+		info.Transport = p.Carrier
+		info.Via = p.Via
 		info.SessionID = p.ID
 		info.VirtualIP = p.VirtualIP
 		info.Remote = p.Remote
@@ -769,7 +853,75 @@ func (m *Manager) handler(token string) http.Handler {
 		selected := m.selected
 		server := m.server
 		m.mu.RUnlock()
+		if m.transports != nil {
+			server.Listeners = m.transports.List()
+			server.Transport, server.Network, server.Listen, server.TLSMode = "", "", "", ""
+			if len(server.Listeners) == 1 {
+				listener := server.Listeners[0]
+				server.Transport, server.Network, server.Listen, server.TLSMode = listener.Transport, listener.Network, listener.Listen, listener.TLSMode
+			}
+		}
 		jsonReply(w, http.StatusOK, map[string]any{"server": server, "agents": m.AgentList(), "clients": m.ClientList(), "routes": m.routes.List(), "selected_agent": selected})
+	})
+	muxer.HandleFunc("GET /v1/transports", func(w http.ResponseWriter, r *http.Request) {
+		if m.transports == nil {
+			http.Error(w, "transport management unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		jsonReply(w, http.StatusOK, m.transports.List())
+	})
+	muxer.HandleFunc("POST /v1/transports/{name}", func(w http.ResponseWriter, r *http.Request) {
+		if m.transports == nil {
+			http.Error(w, "transport management unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		var request TransportStartRequest
+		if err := json.NewDecoder(io.LimitReader(r.Body, 8192)).Decode(&request); err != nil {
+			http.Error(w, "invalid transport request", http.StatusBadRequest)
+			return
+		}
+		info, err := m.transports.Start(r.PathValue("name"), request)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		jsonReply(w, http.StatusCreated, info)
+	})
+	muxer.HandleFunc("DELETE /v1/transports/{name}", func(w http.ResponseWriter, r *http.Request) {
+		if m.transports == nil {
+			http.Error(w, "transport management unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if err := m.transports.Stop(r.PathValue("name"), r.URL.Query().Get("force") == "true"); err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	muxer.HandleFunc("GET /v1/relays", func(w http.ResponseWriter, r *http.Request) {
+		jsonReply(w, http.StatusOK, m.RelayList(r.URL.Query().Get("agent_id")))
+	})
+	muxer.HandleFunc("POST /v1/agents/{id}/relays", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Bind string `json:"bind"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&body); err != nil {
+			http.Error(w, "invalid relay request", http.StatusBadRequest)
+			return
+		}
+		info, err := m.StartRelay(r.Context(), r.PathValue("id"), body.Bind)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		jsonReply(w, http.StatusCreated, info)
+	})
+	muxer.HandleFunc("DELETE /v1/agents/{id}/relays", func(w http.ResponseWriter, r *http.Request) {
+		if err := m.StopRelay(r.PathValue("id"), r.URL.Query().Get("bind")); err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	})
 	muxer.HandleFunc("GET /v1/agents/{id}", func(w http.ResponseWriter, r *http.Request) {
 		for _, a := range m.AgentList() {

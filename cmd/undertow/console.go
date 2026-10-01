@@ -239,11 +239,7 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 			}
 			return nil
 		}
-		if args[0] == "stop" && serverConsole.stopServer != nil {
-			if len(args) != 1 {
-				fmt.Fprintln(output, "error: use stop without arguments")
-				continue
-			}
+		if args[0] == "stop" && len(args) == 1 && serverConsole.stopServer != nil {
 			if err := serverConsole.stopServer(); err != nil {
 				fmt.Fprintln(output, "error: stop server:", err)
 				continue
@@ -349,6 +345,8 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 				}
 			case "routes":
 				args = append(args, selectedID)
+			case "relay":
+				args = append([]string{"relay", selectedID}, args[1:]...)
 			}
 		}
 		ownClientID := uint64(0)
@@ -424,7 +422,11 @@ func consoleAgentName(agent control.AgentInfo) string {
 func printConsoleAgents(output io.Writer, agents []control.AgentInfo) {
 	fmt.Fprintf(output, "Agents (%d):\n", len(agents))
 	for i, agent := range agents {
-		fmt.Fprintf(output, "  %d  %-20s  %s  %s  routes=%d jobs=%d\n", i+1, consoleAgentName(agent), shortAgentID(agent.ID), agent.VirtualIP, len(agent.AdvertisedRoutes), agent.ActiveJobs)
+		path := "direct"
+		if agent.Via != "" {
+			path = "via " + shortAgentID(agent.Via)
+		}
+		fmt.Fprintf(output, "  %d  %-20s  %s  %s  %s  %s  routes=%d jobs=%d\n", i+1, consoleAgentName(agent), shortAgentID(agent.ID), agent.VirtualIP, agent.Transport, path, len(agent.AdvertisedRoutes), agent.ActiveJobs)
 	}
 	if len(agents) > 0 {
 		fmt.Fprintln(output, "Use an agent with: use NUMBER")
@@ -479,6 +481,9 @@ func printConsoleHelp(output io.Writer, vpnClient, selected bool) {
   route add CIDR         Add a route through this agent
   route del CIDR         Remove a route
   status                 Show full status
+  relay start [BIND]     Enable child-agent relay on this agent (server console)
+  relay list             Show this agent's relay listeners
+  relay stop [BIND]      Stop a relay listener
   show                   Show detailed telemetry for this agent
   back                   Return to the main menu
   help                   Show this menu
@@ -518,6 +523,10 @@ Host commands: pwd, ls, stat, mkdir, rm, whoami, ps, privileges, env, interfaces
   agents                 List connected agents by number
   use NUMBER             Enter an agent (ID prefix or hostname also works)
   status                 Show agents, VPN clients, and routes
+  transports             Show active transport listeners
+  topology               Show agent parent/child paths
+  start transport NAME [self-signed|tls-cert FILE tls-key FILE] [listen ADDR]
+  stop transport NAME [force] Stop one listener
   agent show ID          Show detailed agent telemetry
   routes                 Show global routes
   jobs                   List background tasks
@@ -564,6 +573,18 @@ func splitConsoleCommand(line string) ([]string, error) {
 }
 
 func runConsoleCommand(ctx context.Context, output io.Writer, call consoleCaller, vpnClient bool, ownClientID uint64, clientRoutes clientRouteAction, args []string) error {
+	if args[0] == "relay" || args[0] == "topology" {
+		if vpnClient {
+			return errors.New("relay management and topology require a server console")
+		}
+		return runConsoleRelayCommand(ctx, output, call, args)
+	}
+	if args[0] == "transports" || args[0] == "start" || args[0] == "stop" {
+		if vpnClient {
+			return errors.New("transport management requires a server console")
+		}
+		return runConsoleTransportCommand(ctx, output, call, args)
+	}
 	if args[0] == "agent" && len(args) == 3 && args[1] == "show" {
 		args = []string{"show", args[2]}
 	}
@@ -618,6 +639,10 @@ Quote arguments containing spaces.
 		}
 		fmt.Fprint(output, `Server operator commands:
   status [--json]                Show agents, VPN clients, and routes
+  transports                    Show active transport listeners
+  topology                      Show agent parent/child paths
+  start transport NAME [self-signed|tls-cert FILE tls-key FILE] [listen ADDR]
+  stop transport NAME [force]    Stop one listener
   routes                         List configured routes
   route add CIDR AGENT_ID        Add an internal route
   route del CIDR                 Remove an internal route

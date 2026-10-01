@@ -240,7 +240,11 @@ func TestVPNClientInteractiveRelay(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer live.Close()
-	if err := live.Send([]byte("ping\n")); err != nil {
+	enter := byte('\n')
+	if runtime.GOOS == "windows" {
+		enter = '\r'
+	}
+	if err := live.Send([]byte{'p', 'i', 'n', 'g', enter}); err != nil {
 		t.Fatal(err)
 	}
 	var output strings.Builder
@@ -287,8 +291,12 @@ func TestVPNClientInteractiveRelay(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer local.Close()
-	// Unix PTYs use canonical input by default, so terminate the command line.
-	if err := local.Send([]byte("again\n")); err != nil {
+	// PTYs use canonical input by default, so terminate the command line.
+	line := "again\n"
+	if runtime.GOOS == "windows" {
+		line = "again\r"
+	}
+	if err := local.Send([]byte(line)); err != nil {
 		t.Fatal(err)
 	}
 	output.Reset()

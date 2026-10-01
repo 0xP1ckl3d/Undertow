@@ -100,6 +100,27 @@ func TestWASMJobExitAndCancellation(t *testing.T) {
 	}
 }
 
+func TestPackagedWASMBackgroundJobOutput(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+	manager := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	server, agent := forwardAuditAgent(t, ctx, manager, "example-agent", 821, pivot.DefaultCapabilities())
+	defer server.Close()
+	defer agent.Close()
+	module, err := os.ReadFile(filepath.Join("..", "..", "examples", "wasm", "triage", "triage.wasm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := manager.StartWASMJob(ctx, 822, "example-agent", module, []string{"audit"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	finished := waitJob(t, manager, 822, job.ID, func(j JobInfo) bool { return j.State == "completed" })
+	if finished.Kind != "wasm" || finished.ExitCode == nil || *finished.ExitCode != 0 || !strings.Contains(finished.Output, "Host triage:") {
+		t.Fatalf("job output=%+v", finished)
+	}
+}
+
 func waitJob(t *testing.T, manager *Manager, owner uint64, id string, predicate func(JobInfo) bool) JobInfo {
 	t.Helper()
 	deadline := time.Now().Add(8 * time.Second)

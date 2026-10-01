@@ -10,6 +10,7 @@
 | Use Undertow Internet egress and reach an internal network | Server + agent + client | `client --vpn --internal` |
 | Reach one internal TCP service | Server + agent | `server --forward` |
 | Expose a service running on a client at an agent | Server + agent + client | Client console `forward add` |
+| Reach a deeper network through an agent | Server + parent agent + child agent + optional client | Parent console `relay start` |
 
 The three client modes do different jobs:
 
@@ -17,9 +18,9 @@ The three client modes do different jobs:
 - **`--internal`:** send only selected internal networks through agents. The client's normal Internet and default routes remain in place.
 - **`--vpn --internal`:** combine server Internet egress with selected agent networks.
 
-The commands below use Linux and the current direct DNS carrier on UDP/53. `undertow` means `./bin/undertow` if you built from source (`mkdir -p bin && go build -buildvcs=false -o bin/undertow ./cmd/undertow`, Go 1.25+). On Windows use `.\bin\undertow.exe` and an Administrator PowerShell for the client or a server with `--tun`; the agent needs no elevation. Allow inbound UDP/53 on **SERVER**. Run these examples in terminals so `server` and `client` open their consoles automatically.
+The commands below use Linux. The server starts DNS UDP/53, WebSocket TCP/443 and QUIC UDP/443 together; agents and clients in the first examples choose DNS. `undertow` means `./bin/undertow` if you built from source (`mkdir -p bin && go build -buildvcs=false -o bin/undertow ./cmd/undertow`, Go 1.25+). On Windows use `.\bin\undertow.exe` and an Administrator PowerShell for the client or a server with `--tun`; the agent needs no elevation. Open the server firewall for the carriers you intend to use. Use `--transport dns` on the server when only UDP/53 should listen. Run these examples in terminals so `server` and `client` open their consoles automatically.
 
-If you forget which carrier the running server uses, enter `status` in its console or run `sudo undertow status` on the server host. It shows DNS, WebSocket, or QUIC, the TCP/UDP listen address, and any TLS mode or WebSocket path needed to connect.
+Enter `transports` or `status` in the server console, or run `sudo undertow status` on the server host, to see every active listener and its address, TLS mode and session count. Each agent and client can choose a different active carrier; `status` shows the carrier used by each peer.
 
 Prepare enrollment once on **SERVER**:
 
@@ -39,7 +40,7 @@ In the server console, `background`, `quit`, or `exit` detaches without stopping
 
 ```sh
 # SERVER, terminal 1
-sudo undertow server --listen 0.0.0.0:53 --tun --identity identity.key --token-file token.key
+sudo undertow server --tun --identity identity.key --token-file token.key
 
 # AGENT, terminal 2
 undertow agent --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
@@ -65,7 +66,7 @@ route add 10.20.0.0/16
 
 ```sh
 # SERVER, terminal 1
-sudo undertow server --listen 0.0.0.0:53 --identity identity.key --token-file token.key
+sudo undertow server --identity identity.key --token-file token.key
 
 # AGENT, terminal 2
 undertow agent --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
@@ -94,7 +95,7 @@ If the agent can reach the network but has not advertised it, use `route add 10.
 
 ```sh
 # SERVER, terminal 1
-sudo undertow server --listen 0.0.0.0:53 --identity identity.key --token-file token.key
+sudo undertow server --identity identity.key --token-file token.key
 
 # CLIENT, terminal 2
 sudo undertow client --vpn --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
@@ -112,7 +113,7 @@ sudo undertow client --vpn --server SERVER_IP:53 --fingerprint FINGERPRINT --tok
 
 ```sh
 # SERVER, terminal 1
-sudo undertow server --listen 0.0.0.0:53 --identity identity.key --token-file token.key
+sudo undertow server --identity identity.key --token-file token.key
 
 # AGENT, terminal 2
 undertow agent --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
@@ -133,7 +134,7 @@ sudo undertow client --vpn --internal --server SERVER_IP:53 --fingerprint FINGER
 
 ```sh
 # SERVER, terminal 1; this example has one agent
-sudo undertow server --listen 0.0.0.0:53 --identity identity.key --token-file token.key --forward 127.0.0.1:18080=10.20.0.50:80
+sudo undertow server --identity identity.key --token-file token.key --forward 127.0.0.1:18080=10.20.0.50:80
 
 # AGENT, terminal 2
 undertow agent --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
@@ -151,7 +152,7 @@ undertow agent --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file toke
 
 ```sh
 # SERVER, terminal 1
-sudo undertow server --listen 0.0.0.0:53 --identity identity.key --token-file token.key
+sudo undertow server --identity identity.key --token-file token.key
 
 # AGENT, terminal 2
 undertow agent --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
@@ -183,7 +184,7 @@ The examples above use **DNS** (direct UDP/53). Keep it for the DNS VPN use case
 | General HTTPS compatibility, including HTTP CONNECT proxy environments | `websocket` | TCP/443 with TLS and a WebSocket upgrade |
 | Higher performance where UDP/443 is open | `quic` | QUIC over UDP/443 |
 
-For either alternative, use a domain and TLS certificate as below, or use a direct server IP and `--tls-self-signed` as shown afterward. Allow the named inbound port on **SERVER**.
+The default server already listens on both alternatives, with an ephemeral self-signed TLS certificate for each. Use `--tls-cert` and `--tls-key` on the server when you have a certificate; otherwise connect to its IP using `--tls-insecure-skip-verify --fingerprint FINGERPRINT`. The Undertow identity pin remains required. The examples below use `--transport` to run only one server carrier at a time.
 
 **WebSocket goal → SERVER + AGENT + optional CLIENT → start:**
 
@@ -215,7 +216,58 @@ sudo undertow client --transport quic --internal --server SERVER_IP:443 --tls-se
 
 **Use and verify:** follow the same client console and `curl` steps as WebSocket. **Background/stop:** use the same `background`, `attach`, `quit`, and server `stop` commands. A private or self-signed TLS certificate needs `--tls-insecure-skip-verify` on **AGENT** and **CLIENT**; keep `--fingerprint FINGERPRINT` to verify the separate Undertow identity. The TLS certificate and the Undertow identity key are distinct. See the [CLI reference](cli-reference.md) for `--websocket-path` and transport-specific flags.
 
-**No domain or certificate files:** on **SERVER**, run `sudo undertow server --transport websocket --tls-self-signed` (or `--transport quic`). On **AGENT** and **CLIENT**, connect to `--server SERVER_IP:443` with `--tls-insecure-skip-verify --fingerprint FINGERPRINT`. Obtain the Undertow fingerprint from `undertow init` on the server through a trusted channel. The generated TLS certificate changes on each server start, while the Undertow identity remains stable. Use the same console, connectivity checks, and background/stop steps above.
+**No domain or certificate files:** on **SERVER**, run `sudo undertow server` for all three listeners, or select one with `--transport websocket` or `--transport quic`. Self-signed TLS is automatic. On **AGENT** and **CLIENT**, connect to `--server SERVER_IP:443` with the chosen `--transport`, `--tls-insecure-skip-verify`, and `--fingerprint FINGERPRINT`. Obtain the Undertow fingerprint from `undertow init` on the server through a trusted channel. The generated TLS certificate changes on each server start, while the Undertow identity remains stable.
+
+## Mix carriers on one server
+
+**Goal:** reach an agent over DNS from a client using QUIC. **SERVER** runs both listeners; **AGENT** uses UDP/53; **CLIENT** uses UDP/443. The server uses one identity, route table and console for both sessions.
+
+**Start:**
+
+```sh
+# SERVER
+sudo undertow server
+
+# AGENT
+undertow agent --transport dns --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
+
+# CLIENT
+sudo undertow client --transport quic --internal --server SERVER_IP:443 --tls-insecure-skip-verify --fingerprint FINGERPRINT --token-file token.key
+```
+
+**Use the consoles:** on **SERVER**, type `transports` and `status` to see both carriers and their sessions. On **CLIENT**, type `agents`, `use 1`, `show`, `routes`, then `route accept 10.20.0.0/16` or `route add 10.20.0.0/16`.
+
+**Verify:** `curl http://10.20.0.50/` from **CLIENT**. **Background/stop:** `background` detaches either console. Reattach with `server attach` or `client attach`; `quit` stops the client and removes its routes, and `stop` in the server console shuts down the server. WebSocket agents and clients may join the same server at any time. `--transport dns,quic` restricts the server to those two listeners; `--dns-listen`, `--websocket-listen` and `--quic-listen` set their addresses independently.
+
+In the **SERVER** console, `start transport dns`, `start transport quic self-signed`, and `start transport websocket self-signed` open listeners without restarting the server. `stop transport NAME` refuses when that carrier has active sessions; `stop transport NAME force` deliberately disconnects them. Other carriers keep running. Use `transports` to inspect the current state.
+
+## Reach a deeper network through an agent relay
+
+**Goal:** **CHILD AGENT B** reaches the original **SERVER** through **PARENT AGENT A**, because B can reach A's internal address but cannot reach the public server. **CLIENT** uses QUIC and routes to B's deeper target. A uses DNS in this example. Neither agent changes host routes or adapters.
+
+**Start:**
+
+```sh
+# SERVER
+sudo undertow server
+
+# PARENT AGENT A, on a host reachable at AGENT_A_INTERNAL_IP
+undertow agent --transport dns --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
+```
+
+**Use the SERVER console:** type `agents`, `use 1`, then `relay start AGENT_A_INTERNAL_IP:8443`. This is the only relay listener opened; allow TCP/8443 between B and A. `relay start` without a bind uses loopback `127.0.0.1:8443`; `0.0.0.0:8443` is used only if you explicitly request it.
+
+```sh
+# CHILD AGENT B; its --server points to A, with a separate agent.key
+undertow agent --transport relay --server AGENT_A_INTERNAL_IP:8443 --fingerprint FINGERPRINT --token-file token.key
+
+# CLIENT
+sudo undertow client --transport quic --internal --server SERVER_IP:443 --tls-insecure-skip-verify --fingerprint FINGERPRINT --token-file token.key
+```
+
+**Use the consoles:** on **SERVER**, type `topology` to see B via A, then `agents`, `use 2`, `show`, and `routes` to inspect B independently. On **CLIENT**, type `agents`, select B's current number with `use NUMBER`, then `route accept DEEPER_CIDR` or `route add DEEPER_CIDR`. B has its own identity, inventory, capabilities, shell, jobs and routes. To add C, select B in the server console, explicitly run `relay start B_INTERNAL_IP:8444`, and point C's `--transport relay --server` at that address.
+
+**Verify:** run `curl http://DEEPER_TARGET/` on **CLIENT**, and `whoami` or `shell` after selecting B. **Background/stop:** `background` detaches the client and server consoles. On **SERVER**, select A and use `relay list` then `relay stop AGENT_A_INTERNAL_IP:8443`; stop the child and parent agents, type `quit` on **CLIENT**, then `stop` on **SERVER**. A disconnect closes B and its descendants from the server's active topology. See [topology and relay guidance](topology-and-relays.md) for limits and capability controls.
 
 ## For scripts and automation
 

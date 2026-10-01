@@ -36,19 +36,26 @@ func doctorCommand(args []string, output io.Writer) error {
 	role := args[0]
 	f := flag.NewFlagSet("doctor "+role, flag.ContinueOnError)
 	f.SetOutput(io.Discard)
-	carrier := addCarrierFlags(f)
+	defaultCarrier := "dns"
+	if role == "server" {
+		defaultCarrier = "dns,websocket,quic"
+	}
+	carrier := addCarrierFlags(f, defaultCarrier)
 	auth := f.String("auth", "token", "enrollment mode")
 	tokenFile := f.String("token-file", "token.key", "enrollment token")
 	token := f.String("token", "", "enrollment token value")
 	passwordFile := f.String("password-file", "", "enrollment password")
 	password := f.String("password", "", "enrollment password value")
 	pidFile := f.String("pid-file", "undertow-"+role+".pid", "background state")
-	var listen, controlListen, identity, server, fingerprint, fingerprintFile, tunnelAddress *string
+	var listen, dnsListen, websocketListen, quicListen, controlListen, identity, server, fingerprint, fingerprintFile, tunnelAddress *string
 	var tunEnabled, trustFirstUse *bool
 	var routes advertisedRoutes
 	var forwardValues forwards
 	if role == "server" {
 		listen = f.String("listen", "", "carrier listener")
+		dnsListen = f.String("dns-listen", "", "DNS UDP listener")
+		websocketListen = f.String("websocket-listen", "", "WebSocket TCP listener")
+		quicListen = f.String("quic-listen", "", "QUIC UDP listener")
 		controlListen = f.String("control-listen", "127.0.0.1:47889", "operator API")
 		identity = f.String("identity", "identity.key", "server key")
 		tunEnabled = f.Bool("tun", false, "server proxy TUN")
@@ -72,8 +79,10 @@ func doctorCommand(args []string, output io.Writer) error {
 	if f.NArg() > 0 {
 		return fmt.Errorf("doctor %s: unexpected argument %q", role, f.Arg(0))
 	}
-	if err := carrier.validate(); err != nil {
-		return err
+	if role != "server" {
+		if err := carrier.validate(); err != nil {
+			return err
+		}
 	}
 	if role != "server" && *carrier.selfSigned {
 		return errors.New("--tls-self-signed is a server-only flag")
@@ -81,7 +90,7 @@ func doctorCommand(args []string, output io.Writer) error {
 	r := &doctorReport{w: output}
 	fmt.Fprintf(output, "Undertow doctor: %s (read-only)\n", role)
 	r.pass("transport", *carrier.kind)
-	if *carrier.kind == "websocket" && (*carrier.path == "" || (*carrier.path)[0] != '/' || strings.ContainsAny(*carrier.path, "?#")) {
+	if strings.Contains(*carrier.kind, "websocket") && (*carrier.path == "" || (*carrier.path)[0] != '/' || strings.ContainsAny(*carrier.path, "?#")) {
 		r.fail("WebSocket path", "--websocket-path must start with / and contain no query or fragment")
 	}
 	if *carrier.kind != "dns" && *carrier.skipTLSVerify {
@@ -100,22 +109,65 @@ func doctorCommand(args []string, output io.Writer) error {
 	}
 	checkDoctorCredential(r, *auth, *tokenFile, *token, *passwordFile, *password)
 	if role == "server" {
-		if *listen == "" {
-			if *carrier.kind == "dns" {
-				*listen = "0.0.0.0:53"
-			} else {
-				*listen = "0.0.0.0:443"
+		if (*carrier.cert == "") != (*carrier.key == "") {
+			return errors.New("--tls-cert and --tls-key must be supplied together")
+		}
+		if *carrier.selfSigned && *carrier.cert != "" {
+			return errors.New("--tls-self-signed cannot be combined with certificate files")
+		}
+		var kinds []string
+		seen := make(map[string]bool)
+		for _, item := range strings.Split(*carrier.kind, ",") {
+			kind, err := canonicalTransport(item)
+			if err != nil {
+				return err
+			}
+			if !seen[kind] {
+				kinds = append(kinds, kind)
+				seen[kind] = true
 			}
 		}
+		if *listen != "" && len(kinds) != 1 {
+			return errors.New("--listen requires one transport; use per-transport listen flags")
+		}
+		if !seen["websocket"] && !seen["quic"] && (*carrier.cert != "" || *carrier.selfSigned) { return errors.New("TLS options require a WebSocket or QUIC server listener") }
+		for _, option := range []struct{ kind, address string }{{"dns", *dnsListen}, {"websocket", *websocketListen}, {"quic", *quicListen}} {
+			if option.address != "" && !seen[option.kind] { return fmt.Errorf("--%s-listen requires %s in --transport", option.kind, option.kind) }
+			if *listen != "" && option.address != "" { return errors.New("choose --listen or a per-transport listen flag") }
+		}
 		checkDoctorFile(r, "identity", *identity, false, "run 'undertow init' to create the server identity")
-		if *carrier.kind != "dns" && !*carrier.selfSigned {
+		if *carrier.cert != "" || *carrier.key != "" {
 			checkDoctorFile(r, "TLS certificate", *carrier.cert, true, "provide --tls-cert PEM")
 			checkDoctorFile(r, "TLS key", *carrier.key, true, "provide --tls-key PEM")
+		} else if seen["websocket"] || seen["quic"] {
+			r.pass("TLS", "ephemeral self-signed certificate for WebSocket and QUIC")
 		}
-		if *carrier.kind == "websocket" {
-			checkDoctorBind(r, "TCP listener", "tcp4", *listen)
-		} else {
-			checkDoctorBind(r, "UDP listener", "udp4", *listen)
+		for _, kind := range kinds {
+			address := *listen
+			if address == "" {
+				switch kind {
+				case "dns":
+					address = *dnsListen
+					if address == "" {
+						address = "0.0.0.0:53"
+					}
+				case "websocket":
+					address = *websocketListen
+					if address == "" {
+						address = "0.0.0.0:443"
+					}
+				case "quic":
+					address = *quicListen
+					if address == "" {
+						address = "0.0.0.0:443"
+					}
+				}
+			}
+			network := "udp4"
+			if kind == "websocket" {
+				network = "tcp4"
+			}
+			checkDoctorBind(r, kind+" listener", network, address)
 		}
 		checkDoctorBind(r, "operator API", "tcp4", *controlListen)
 		for _, value := range forwardValues {

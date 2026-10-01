@@ -144,6 +144,9 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	_ = conn.SetDeadline(time.Now().Add(15 * time.Second))
 	framed := &messageConn{conn: conn, reader: buffered.Reader}
 	peer, err := stream.Accept(s.ctx, framed, s.identity, s.token)
+	if err == nil {
+		peer.Carrier = "websocket"
+	}
 	_ = conn.SetDeadline(time.Time{})
 	if err != nil {
 		_ = conn.Close()

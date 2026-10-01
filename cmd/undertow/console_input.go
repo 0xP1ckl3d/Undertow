@@ -91,9 +91,6 @@ func (e *consoleEditor) read(ctx context.Context, input io.Reader, lines chan<- 
 				}
 				continue
 			}
-			if char == '\r' {
-				char = '\n'
-			}
 			for _, b := range []byte(string(char)) {
 				select {
 				case inputChannel <- b:

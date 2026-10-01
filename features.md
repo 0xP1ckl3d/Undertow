@@ -12,7 +12,7 @@ The server accepts DNS, HTTPS/WebSocket, or QUIC sessions, authenticates agents 
 
 ```text
 Server: undertow init
-Server: sudo undertow server --listen 0.0.0.0:53 --identity identity.key --token-file token.key
+Server: sudo undertow server --identity identity.key --token-file token.key
 Server: sudo undertow status
 ```
 
@@ -36,7 +36,7 @@ VPN client console: agents
 
 ### Transport choices and encrypted multiplexing
 
-Choose `--transport dns` (default) when direct UDP/53 is available, including some restrictive or captive portal networks; `--transport websocket` for HTTPS compatibility over TCP/443 and HTTP CONNECT proxies; or `--transport quic` for UDP/443. The server and connecting agent/client select the same carrier. WebSocket and QUIC need server `--tls-cert` and `--tls-key`; peers verify TLS and independently pin the Undertow Ed25519 fingerprint. See [Quickstart transport examples](docs/quickstart.md#choose-a-transport) and the [CLI reference](docs/cli-reference.md#transport-selection).
+The server starts DNS UDP/53, WebSocket TCP/443 and QUIC UDP/443 together by default. `--transport dns,quic` selects a subset and `--transport quic` keeps single-carrier startup. Each agent and client independently chooses one active carrier; mixed carriers share one server identity, enrollment policy, route table, job manager and console. DNS remains the peer default when direct UDP/53 is available, including some restrictive or captive portal networks. WebSocket suits HTTPS and HTTP CONNECT proxy paths; QUIC uses UDP/443. WebSocket and QUIC use ephemeral self-signed TLS by default or explicit `--tls-cert`/`--tls-key` files. Peers verify TLS and independently pin the Undertow Ed25519 fingerprint. The server console can start and stop listeners with `transports`, `start transport NAME`, and `stop transport NAME [force]`. See [Quickstart transport examples](docs/quickstart.md#choose-a-transport) and the [CLI reference](docs/cli-reference.md#transport-selection).
 
 The same authenticated session, mux, routing, jobs, file transfer, and console operations run over all three carriers. WebSocket uses a persistent TLS connection; QUIC uses a bidirectional stream over UDP/443. DNS keeps its own adaptive wire behavior.
 
@@ -45,7 +45,7 @@ The same authenticated session, mux, routing, jobs, file transfer, and console o
 The carrier is direct DNS over UDP to the configured numeric server address and domain. It does not depend on a recursive resolver or iodine. An authenticated encrypted session carries mux streams for network flows, commands, files, and control traffic. DNS polling, outstanding queries, fragment size, send window, and receive window adapt to path conditions.
 
 ```text
-Server: sudo undertow server --listen 0.0.0.0:53 --domain t.example.invalid --identity identity.key --token-file token.key
+Server: sudo undertow server --domain t.example.invalid --identity identity.key --token-file token.key
 Agent: undertow agent --server SERVER_IP:53 --domain t.example.invalid --fingerprint FINGERPRINT --token-file token.key --payload-profile auto
 ```
 
@@ -72,7 +72,7 @@ Agent: undertow agent --server SERVER_IP:53 --auth password --password-file enro
 For an intentionally open test listener:
 
 ```text
-Server: undertow server --listen 127.0.0.1:5353 --auth none
+Server: undertow server --transport dns --listen 127.0.0.1:5353 --auth none
 Agent: undertow agent --server 127.0.0.1:5353 --auth none --trust-on-first-use
 ```
 
@@ -225,6 +225,10 @@ Other internal host: curl http://AGENT_IP:8080/
 VPN client console: forward del 0.0.0.0:8080
 ```
 
+### Explicit multi-hop agent relays
+
+An operator can select an agent and type `relay start INTERNAL_IP:PORT`. That agent then accepts child-agent TCP connections on the requested interface only and carries them over its own Undertow session to the original server. A child uses `agent --transport relay --server INTERNAL_IP:PORT` with the original server fingerprint and token and its own private key. It appears independently in `agents`, `show`, `topology`, routes, shell/exec, files, scripts, WASM, jobs and forwards. Children can host their own explicitly requested relays to a maximum of eight links. Parent loss closes descendants and deactivates their routes. `relay list` and `relay stop [BIND]` manage the selected agent's listener; `--deny=relay` refuses one. A client on QUIC can therefore reach a child behind a DNS-connected parent without changing the parent or client carrier. See [topology and relays](docs/topology-and-relays.md).
+
 ## Agent operations
 
 ### One-shot arbitrary execution
@@ -291,7 +295,7 @@ Server console: run-script powershell ./audit.ps1
 
 ### In-process WebAssembly execution
 
-`run-wasm` sends a WASI module through Undertow and instantiates it directly from memory in the agent's pure-Go runtime. It needs no temporary module file. The console can supply arguments and optional stdin; stdout and stderr stream separately. Background WASM runs use the same job manager, including bounded retained output and cancellation. The independent `wasm` capability controls this operation. Agent limits are a 4 MiB module, 64 KiB stdin, 16 MiB guest linear memory, 4 MiB combined output, a two-minute runtime and two simultaneous runs. No filesystem is preopened and no host network socket is supplied to the guest.
+`run-wasm` sends a WASI module through Undertow and instantiates it directly from memory in the agent's pure-Go runtime. It needs no temporary module file. The console can supply arguments and optional stdin; stdout and stderr stream separately. Background WASM runs use the same job manager, including bounded retained output and cancellation. The independent `wasm` capability controls this operation. Agent limits are a 4 MiB module, 64 KiB stdin, 16 MiB guest linear memory, 4 MiB combined output, a two-minute runtime and two simultaneous runs. No filesystem is preopened and no WASI network socket is supplied to the guest. Any module can call the versioned `undertow_host_v1` imports for agent-side system, identity, process, filesystem, network and startup assessment. See the [WASM developer guide](docs/wasm-development.md) and [packaged examples](examples/wasm/README.md).
 
 ```text
 VPN client console: use 1
@@ -315,7 +319,7 @@ VPN client keyboard during a transfer: Ctrl-] to cancel
 
 ### Granular agent capabilities
 
-All capabilities are enabled by default: `pivot`, `exec`, `hostops`, `interactive`, `scripts`, `wasm`, `upload`, `download`, and `listeners`. Deny any combination at agent startup; the server and agent enforce the operation at the relevant stream.
+All capabilities are enabled by default: `pivot`, `exec`, `hostops`, `interactive`, `scripts`, `wasm`, `upload`, `download`, `listeners`, and `relay`. Deny any combination at agent startup; the server and agent enforce the operation at the relevant stream. `relay` allows an operator-requested child-agent listener; zero relay listeners exist until explicitly started on a selected agent. It is independent of `listeners`, which controls client-service TCP forwards.
 
 ```text
 Agent: undertow agent --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key --deny=exec,upload
@@ -331,7 +335,7 @@ With this example, built-in host operations and interactive sessions still work.
 The server console opens automatically in a terminal and uses the authenticated local loopback API. The client console also opens automatically and manages its own route acceptance, forwards, commands, jobs, and files. `agents`, `use NUMBER`, `help`, and `back` provide an agent-focused workflow.
 
 ```text
-Server: sudo undertow server --listen 0.0.0.0:53
+Server: sudo undertow server
 Server console: agents
 Server console: use 1
 Server console: show
@@ -377,7 +381,7 @@ VPN client console: show
 `server --probe-echo` runs a controlled encrypted echo endpoint instead of ordinary socket service. An agent can run `--probe` with count, size, and interval for latency and transport checks. The on-demand `route-table`, `interfaces`, and `dns` built-ins inspect an agent host.
 
 ```text
-Server: undertow server --listen 0.0.0.0:5353 --probe-echo --identity identity.key --token-file token.key
+Server: undertow server --transport dns --listen 0.0.0.0:5353 --probe-echo --identity identity.key --token-file token.key
 Agent: undertow agent --server SERVER_IP:5353 --fingerprint FINGERPRINT --token-file token.key --probe --probe-count 25 --probe-size 512 --probe-interval 1s
 VPN client console: use 1
 VPN client console: route-table

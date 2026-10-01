@@ -29,6 +29,8 @@ type Connection interface {
 type PeerInfo struct {
 	ID                         uint64
 	AgentID, Remote, VirtualIP string
+	Carrier                    string
+	Via                        string
 	Connected, LastSeen        time.Time
 	Authenticated              bool
 	Transport                  session.Stats

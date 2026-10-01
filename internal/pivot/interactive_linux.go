@@ -13,7 +13,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func startInteractiveProcess(ctx context.Context, request InteractiveRequest) (*exec.Cmd, io.ReadWriteCloser, func(uint16, uint16) error, error) {
+func startInteractiveProcess(ctx context.Context, request InteractiveRequest) (interactiveProcess, io.ReadWriteCloser, func(uint16, uint16) error, error) {
 	argv := request.Argv
 	if len(argv) == 0 {
 		argv = []string{"/bin/sh"}
@@ -22,7 +22,7 @@ func startInteractiveProcess(ctx context.Context, request InteractiveRequest) (*
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("open terminal: %w", err)
 	}
-	closeMaster := func(err error) (*exec.Cmd, io.ReadWriteCloser, func(uint16, uint16) error, error) {
+	closeMaster := func(err error) (interactiveProcess, io.ReadWriteCloser, func(uint16, uint16) error, error) {
 		master.Close()
 		return nil, nil, nil, err
 	}

@@ -16,15 +16,19 @@ func TestParseDeniedCapabilities(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if caps.Exec || caps.Upload || !caps.Pivot || !caps.HostOps || !caps.Scripts || !caps.WASM || !caps.Download || !caps.Listeners {
+	if caps.Exec || caps.Upload || !caps.Pivot || !caps.HostOps || !caps.Scripts || !caps.WASM || !caps.Download || !caps.Listeners || !caps.Relay {
 		t.Fatalf("capabilities not independent: %+v", caps)
 	}
 	report := caps.Report()
-	if !reflect.DeepEqual(report.Supported, []string{"pivot", "exec", "hostops", "interactive", "scripts", "wasm", "upload", "download", "listeners"}) || !reflect.DeepEqual(report.Allowed, []string{"pivot", "hostops", "interactive", "scripts", "wasm", "download", "listeners"}) {
+	if !reflect.DeepEqual(report.Supported, []string{"pivot", "exec", "hostops", "interactive", "scripts", "wasm", "upload", "download", "listeners", "relay"}) || !reflect.DeepEqual(report.Allowed, []string{"pivot", "hostops", "interactive", "scripts", "wasm", "download", "listeners", "relay"}) {
 		t.Fatalf("report=%+v", report)
 	}
 	if _, err := ParseDenied("shell"); err == nil || !strings.Contains(err.Error(), "unknown agent capability") {
 		t.Fatalf("unsupported capability was accepted: %v", err)
+	}
+	deniedRelay, err := ParseDenied("relay")
+	if err != nil || deniedRelay.Relay || !deniedRelay.Listeners {
+		t.Fatalf("relay capability not independent: %+v, %v", deniedRelay, err)
 	}
 	deniedListeners, err := ParseDenied("listeners")
 	if err != nil || deniedListeners.Listeners || !deniedListeners.Exec {

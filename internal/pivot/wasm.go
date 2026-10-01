@@ -141,6 +141,12 @@ func serveWASM(ctx context.Context, stream *mux.Stream) {
 		writeWASMResult(stream, -1, err)
 		return
 	}
+	closeHost, err := instantiateWASMHost(runCtx, wazeroRuntime)
+	if err != nil {
+		writeWASMResult(stream, -1, err)
+		return
+	}
+	defer closeHost()
 	var writeMu sync.Mutex
 	var remaining atomic.Int64
 	var exceeded atomic.Bool

@@ -187,7 +187,21 @@ func renderStatus(w io.Writer, data []byte) error {
 	if err := json.Unmarshal(data, &status); err != nil {
 		return err
 	}
-	if status.Server.Transport != "" {
+	if len(status.Server.Listeners) != 0 {
+		fmt.Fprintln(w, "Server listeners:")
+		fmt.Fprintf(w, "  %-12s %-8s %-22s %-14s %8s\n", "Transport", "Network", "Listen", "TLS", "Sessions")
+		for _, listener := range status.Server.Listeners {
+			tlsMode := listener.TLSMode
+			if tlsMode == "" {
+				tlsMode = "-"
+			}
+			fmt.Fprintf(w, "  %-12s %-8s %-22s %-14s %8d\n", strings.ToUpper(listener.Transport), strings.ToUpper(listener.Network), listener.Listen, tlsMode, listener.Sessions)
+		}
+		if status.Server.Fingerprint != "" {
+			fmt.Fprintf(w, "Fingerprint: %s\n", status.Server.Fingerprint)
+		}
+		fmt.Fprintln(w)
+	} else if status.Server.Transport != "" {
 		fmt.Fprintf(w, "Server: %s (%s) listening on %s\n", status.Server.Transport, status.Server.Network, status.Server.Listen)
 		if status.Server.Domain != "" {
 			fmt.Fprintf(w, "DNS domain: %s\n", status.Server.Domain)
@@ -204,13 +218,13 @@ func renderStatus(w io.Writer, data []byte) error {
 		fmt.Fprintln(w)
 	}
 	fmt.Fprintf(w, "Agents (%d)\n", len(status.Agents))
-	fmt.Fprintf(w, "%-18s %-16s %-24s %-18s %8s %8s %7s %4s %4s\n", "ID", "Virtual IP", "Host", "Remote", "RX", "TX", "Streams", "Jobs", "Fwd")
+	fmt.Fprintf(w, "%-18s %-16s %-12s %-24s %-18s %8s %8s %7s %4s %4s\n", "ID", "Virtual IP", "Transport", "Host", "Remote", "RX", "TX", "Streams", "Jobs", "Fwd")
 	for _, a := range status.Agents {
 		id := a.ID
 		if len(id) > 18 {
 			id = id[:18]
 		}
-		fmt.Fprintf(w, "%-18s %-16s %-24s %-18s %8d %8d %7d %4d %4d\n", id, a.VirtualIP, a.Hostname, a.Remote, a.RXBytes, a.TXBytes, a.Streams, a.ActiveJobs, a.ActiveForwards)
+		fmt.Fprintf(w, "%-18s %-16s %-12s %-24s %-18s %8d %8d %7d %4d %4d\n", id, a.VirtualIP, a.Transport, a.Hostname, a.Remote, a.RXBytes, a.TXBytes, a.Streams, a.ActiveJobs, a.ActiveForwards)
 		if a.Capabilities != nil {
 			fmt.Fprintf(w, "  capabilities supported=%s allowed=%s\n", strings.Join(a.Capabilities.Supported, ","), strings.Join(a.Capabilities.Allowed, ","))
 		} else {
@@ -218,9 +232,9 @@ func renderStatus(w io.Writer, data []byte) error {
 		}
 	}
 	fmt.Fprintf(w, "\nVPN clients (%d)\n", len(status.Clients))
-	fmt.Fprintf(w, "%-20s %-24s %-18s %-8s %8s %8s %7s %6s %6s %6s %8s\n", "Session", "Host", "Remote", "Internal", "RX", "TX", "Streams", "Queued", "Flight", "CWND", "Retrans")
+	fmt.Fprintf(w, "%-20s %-24s %-12s %-18s %-8s %8s %8s %7s %6s %6s %6s %8s\n", "Session", "Host", "Transport", "Remote", "Internal", "RX", "TX", "Streams", "Queued", "Flight", "CWND", "Retrans")
 	for _, c := range status.Clients {
-		fmt.Fprintf(w, "%-20d %-24s %-18s %-8t %8d %8d %7d %6d %6d %6d %8d\n", c.SessionID, c.Hostname, c.Remote, c.Internal, c.RXBytes, c.TXBytes, c.Streams, c.Queued, c.InFlight, c.Window, c.Retransmits)
+		fmt.Fprintf(w, "%-20d %-24s %-12s %-18s %-8t %8d %8d %7d %6d %6d %6d %8d\n", c.SessionID, c.Hostname, c.Transport, c.Remote, c.Internal, c.RXBytes, c.TXBytes, c.Streams, c.Queued, c.InFlight, c.Window, c.Retransmits)
 		for _, route := range c.AcceptedRoutes {
 			fmt.Fprintf(w, "  accepted %s via %s\n", route.Prefix, route.AgentID)
 		}
@@ -237,7 +251,7 @@ func renderStatus(w io.Writer, data []byte) error {
 
 func renderAgentShow(w io.Writer, a control.AgentInfo) error {
 	fmt.Fprintf(w, "Agent %s\n", a.ID)
-	fmt.Fprintf(w, "Host: %s  OS: %s/%s  Virtual IP: %s  Remote: %s\n", a.Hostname, a.OS, a.Arch, a.VirtualIP, a.Remote)
+	fmt.Fprintf(w, "Host: %s  OS: %s/%s  Virtual IP: %s  Remote: %s  Transport: %s\n", a.Hostname, a.OS, a.Arch, a.VirtualIP, a.Remote, a.Transport)
 	if !a.Connected.IsZero() {
 		fmt.Fprintf(w, "Connected: %s  Duration: %s\n", a.Connected.Local().Format(time.RFC3339), time.Since(a.Connected).Round(time.Second))
 	}

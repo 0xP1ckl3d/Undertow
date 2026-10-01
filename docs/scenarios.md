@@ -1,10 +1,10 @@
 # Deployment scenarios
 
-These examples use the default DNS carrier. For WebSocket or QUIC, use [Quickstart transport choices](quickstart.md#choose-a-transport). These commands use `undertow` as shorthand for `./bin/undertow` on Linux or `.\bin\undertow.exe` on Windows. Replace all uppercase placeholders. Use the same enrollment and fingerprint settings on both ends; [getting started](getting-started.md) explains token, password, open enrollment, and trust on first use. On Linux, prefix operator commands with `sudo` when an elevated server owns `control.key`.
+These examples use DNS on agents and clients; the server starts DNS, WebSocket and QUIC listeners together by default. A different agent or client can choose another active carrier independently. For transport choices and mixed paths, see the [Quickstart](quickstart.md#choose-a-transport); for child agents behind another agent, see [topology and relays](topology-and-relays.md). These commands use `undertow` as shorthand for `./bin/undertow` on Linux or `.\bin\undertow.exe` on Windows. Replace all uppercase placeholders. Use the same enrollment and fingerprint settings on both ends; [getting started](getting-started.md) explains token, password, open enrollment, and trust on first use. On Linux, prefix operator commands with `sudo` when an elevated server owns `control.key`.
 
 ## 1. Confirm an unprivileged agent
 
-On the server, run `undertow init`, then `sudo undertow server --listen 0.0.0.0:53`. On an internal network host:
+On the server, run `undertow init`, then `sudo undertow server`. On an internal network host:
 
 ```sh
 undertow agent --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
@@ -25,7 +25,7 @@ The full agent ID, not its shortened display in the table, is in `undertow statu
 Start the server with `--tun` and choose a tunnel prefix that does not overlap any server or agent network:
 
 ```sh
-sudo undertow server --listen 0.0.0.0:53 --tun --tun-name undertow0 --tunnel-address 172.16.254.1/24
+sudo undertow server --tun --tun-name undertow0 --tunnel-address 172.16.254.1/24
 ```
 
 Start the unprivileged agent as in scenario 1. On the server, choose the agent ID and add the internal prefix:
@@ -45,7 +45,7 @@ Use real destinations that the agent can reach. The server's OS route for that p
 Start an agent as in scenario 1, then start the server with a repeatable local forward:
 
 ```sh
-undertow server --listen 0.0.0.0:53 --forward 127.0.0.1:18080=10.20.0.50:80 --via-agent AGENT_ID
+undertow server --forward 127.0.0.1:18080=10.20.0.50:80 --via-agent AGENT_ID
 curl http://127.0.0.1:18080/
 ```
 
@@ -53,7 +53,7 @@ The left address is the server listener, the right address is reached from the a
 
 ## 4. Route a separate client's Internet traffic through the server
 
-The server can run without `--tun`; Internet egress uses server sockets. Start it with `undertow server --listen 0.0.0.0:53`. On a different Linux host, with root privilege:
+The server can run without `--tun`; Internet egress uses server sockets. Start it with `undertow server`. On a different Linux host, with root privilege:
 
 ```sh
 sudo undertow client --vpn --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
@@ -113,7 +113,7 @@ Selection chooses the default agent for operations that permit it; an explicit `
 In a terminal, `server` and `client` open their consoles while a separate worker stays running. Type `background` to detach and use `undertow server attach` or `undertow client attach` to return. The agent runs in the foreground by default. For deliberately detached startup, use `--background`; for a foreground server or client worker without a console, use `--foreground`. Detached workers write a log and protected PID/control state file in the current directory. Stop one gracefully with its console command (`stop` on the server, `quit` on the client) or with `--stop` from that directory, supplying the original `--pid-file` when customized:
 
 ```sh
-sudo undertow server --listen 0.0.0.0:53 --tun --background
+sudo undertow server --tun --background
 sudo undertow server --stop
 undertow agent --server SERVER_IP:53 --fingerprint FINGERPRINT --background
 undertow agent --stop
@@ -126,7 +126,7 @@ Use `--log-file PATH --pid-file PATH` on start to separate multiple instances, a
 To test the encrypted transport without target sockets, start a dedicated server with `--probe-echo` and an unused UDP port, then run an agent with `--probe` against that port:
 
 ```sh
-undertow server --listen 127.0.0.1:1053 --control-listen 127.0.0.1:47890 --probe-echo
+undertow server --transport dns --listen 127.0.0.1:1053 --control-listen 127.0.0.1:47890 --probe-echo
 undertow agent --server 127.0.0.1:1053 --fingerprint FINGERPRINT --probe --probe-count 5 --probe-size 64
 ```
 

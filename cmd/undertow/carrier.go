@@ -10,6 +10,7 @@ import (
 	"undertow/internal/transport"
 	"undertow/internal/transport/dns"
 	"undertow/internal/transport/quic"
+	"undertow/internal/transport/relay"
 	"undertow/internal/transport/websocket"
 )
 
@@ -18,9 +19,13 @@ type carrierFlags struct {
 	skipTLSVerify, selfSigned         *bool
 }
 
-func addCarrierFlags(f *flag.FlagSet) carrierFlags {
+func addCarrierFlags(f *flag.FlagSet, defaultKind ...string) carrierFlags {
+	kind := "dns"
+	if len(defaultKind) != 0 {
+		kind = defaultKind[0]
+	}
 	return carrierFlags{
-		kind:          f.String("transport", "dns", "carrier: dns, websocket, or quic"),
+		kind:          f.String("transport", kind, "carrier: dns, websocket, or quic (server accepts comma-separated subsets)"),
 		path:          f.String("websocket-path", "/undertow", "WebSocket HTTP path"),
 		cert:          f.String("tls-cert", "", "server TLS certificate PEM for WebSocket or QUIC"),
 		key:           f.String("tls-key", "", "server TLS private key PEM for WebSocket or QUIC"),
@@ -31,11 +36,14 @@ func addCarrierFlags(f *flag.FlagSet) carrierFlags {
 }
 
 func (f carrierFlags) validate() error {
-	if *f.kind != "dns" && *f.kind != "websocket" && *f.kind != "quic" {
-		return errors.New("--transport must be dns, websocket, or quic")
+	if *f.kind != "dns" && *f.kind != "websocket" && *f.kind != "quic" && *f.kind != "relay" {
+		return errors.New("--transport must be dns, websocket, quic, or relay")
 	}
 	if *f.kind == "dns" && (*f.cert != "" || *f.key != "" || *f.serverName != "" || *f.skipTLSVerify || *f.selfSigned) {
 		return errors.New("TLS flags require --transport websocket or quic")
+	}
+	if *f.kind == "relay" && (*f.cert != "" || *f.key != "" || *f.serverName != "" || *f.skipTLSVerify || *f.selfSigned) {
+		return errors.New("TLS flags do not apply to the end-to-end authenticated relay carrier")
 	}
 	if *f.selfSigned && (*f.cert != "" || *f.key != "") {
 		return errors.New("--tls-self-signed cannot be combined with --tls-cert or --tls-key")
@@ -81,6 +89,9 @@ func (f carrierFlags) dial(ctx context.Context, server, domain, fingerprint stri
 	if *f.kind == "websocket" {
 		return websocket.Dial(ctx, f.webOptions(server), fingerprint, token, key)
 	}
+	if *f.kind == "relay" {
+		return relay.Dial(ctx, server, fingerprint, token, key)
+	}
 	if *f.kind == "quic" {
 		return quic.Dial(ctx, f.quicOptions(server), fingerprint, token, key)
 	}
@@ -103,6 +114,11 @@ func (f carrierFlags) fingerprint(ctx context.Context, server, domain, explicit,
 	}
 	if *f.kind == "dns" {
 		return resolveServerFingerprint(ctx, server, domain, explicit, path, trustFirstUse)
+	}
+	if *f.kind == "relay" {
+		return resolveFingerprint(ctx, explicit, path, trustFirstUse, func(context.Context) (string, error) {
+			return "", errors.New("relay requires a pinned server fingerprint; use --fingerprint or --fingerprint-file")
+		})
 	}
 	if *f.kind == "quic" {
 		return resolveFingerprint(ctx, explicit, path, trustFirstUse, func(ctx context.Context) (string, error) {

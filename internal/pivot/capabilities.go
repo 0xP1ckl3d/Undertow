@@ -17,6 +17,7 @@ type Capabilities struct {
 	Upload      bool
 	Download    bool
 	Listeners   bool
+	Relay       bool
 }
 
 type CapabilityReport struct {
@@ -25,7 +26,7 @@ type CapabilityReport struct {
 }
 
 func DefaultCapabilities() Capabilities {
-	return Capabilities{Pivot: true, Exec: true, HostOps: true, Interactive: true, Scripts: true, WASM: true, Upload: true, Download: true, Listeners: true}
+	return Capabilities{Pivot: true, Exec: true, HostOps: true, Interactive: true, Scripts: true, WASM: true, Upload: true, Download: true, Listeners: true, Relay: true}
 }
 
 func ParseDenied(raw string) (Capabilities, error) {
@@ -53,19 +54,21 @@ func ParseDenied(raw string) (Capabilities, error) {
 			caps.Download = false
 		case "listeners":
 			caps.Listeners = false
+		case "relay":
+			caps.Relay = false
 		default:
-			return Capabilities{}, fmt.Errorf("unknown agent capability %q; supported: pivot,exec,hostops,interactive,scripts,wasm,upload,download,listeners", strings.TrimSpace(item))
+			return Capabilities{}, fmt.Errorf("unknown agent capability %q; supported: pivot,exec,hostops,interactive,scripts,wasm,upload,download,listeners,relay", strings.TrimSpace(item))
 		}
 	}
 	return caps, nil
 }
 
 func (c Capabilities) Report() CapabilityReport {
-	report := CapabilityReport{Supported: []string{"pivot", "exec", "hostops", "interactive", "scripts", "wasm", "upload", "download", "listeners"}, Allowed: make([]string, 0, 9)}
+	report := CapabilityReport{Supported: []string{"pivot", "exec", "hostops", "interactive", "scripts", "wasm", "upload", "download", "listeners", "relay"}, Allowed: make([]string, 0, 10)}
 	for _, item := range []struct {
 		name    string
 		allowed bool
-	}{{"pivot", c.Pivot}, {"exec", c.Exec}, {"hostops", c.HostOps}, {"interactive", c.Interactive}, {"scripts", c.Scripts}, {"wasm", c.WASM}, {"upload", c.Upload}, {"download", c.Download}, {"listeners", c.Listeners}} {
+	}{{"pivot", c.Pivot}, {"exec", c.Exec}, {"hostops", c.HostOps}, {"interactive", c.Interactive}, {"scripts", c.Scripts}, {"wasm", c.WASM}, {"upload", c.Upload}, {"download", c.Download}, {"listeners", c.Listeners}, {"relay", c.Relay}} {
 		if item.allowed {
 			report.Allowed = append(report.Allowed, item.name)
 		}

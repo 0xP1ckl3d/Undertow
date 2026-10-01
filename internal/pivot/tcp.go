@@ -89,6 +89,14 @@ func ServeAgentWithCapabilities(ctx context.Context, m *mux.Mux, caps Capabiliti
 			go ServeAgentListener(ctx, m, s)
 			continue
 		}
+		if s.Destination() == RelayListenerDestination {
+			if !caps.Relay {
+				s.Fail(errors.New("agent relay capability is disabled"))
+				continue
+			}
+			go ServeAgentRelayListener(ctx, m, s)
+			continue
+		}
 		if !caps.Pivot {
 			s.Fail(errors.New("agent pivot is disabled"))
 			continue

@@ -4,11 +4,11 @@ Run `undertow help` or `undertow help COMMAND` for terminal help. Linux binary: 
 
 Run `undertow examples` (or `undertow help examples`) for short commands by host covering server pivots, internal-only clients, VPN egress, combined routing, and a single TCP forward. For verification and cleanup, see the [quickstart](quickstart.md).
 
-Run `undertow doctor server|agent|client [FLAGS]` before starting a role to check local credentials, addresses, bind ports, background state, privilege, TUN/Wintun availability, and route overlaps. Pass the relevant startup options, such as `--server`, `--tun`, `--tunnel-address`, `--route CIDR`, or `--forward LOCAL=REMOTE`. Doctor reports `PASS`, `WARN`, or `FAIL` with a remedy and changes no configuration. `FAIL` exits nonzero. For example:
+Run `undertow doctor server|agent|client [FLAGS]` before starting a role to check local credentials, addresses, bind ports, background state, privilege, TUN/Wintun availability, and route overlaps. Server doctor checks **all selected listeners** independently, including TCP/443 and UDP/443 together by default, and reports the automatic self-signed TLS mode. Pass the relevant startup options, such as `--transport dns,quic`, per-transport listen flags, `--server`, `--tun`, `--tunnel-address`, `--route CIDR`, or `--forward LOCAL=REMOTE`. Doctor reports `PASS`, `WARN`, or `FAIL` with a remedy and changes no configuration. `FAIL` exits nonzero. For example:
 
 ```sh
 # SERVER
-undertow doctor server --listen 0.0.0.0:53 --tun --forward 127.0.0.1:18080=10.20.0.50:80
+undertow doctor server --tun --forward 127.0.0.1:18080=10.20.0.50:80
 
 # AGENT
 undertow doctor agent --server SERVER_IP:53 --fingerprint FINGERPRINT
@@ -30,7 +30,7 @@ undertow doctor client --server SERVER_IP:53 --fingerprint FINGERPRINT --interna
 
 ## Transport selection
 
-All roles default to `--transport dns`. Select the same carrier on the server and each connecting agent or client. Session identity, enrollment, mux, routing, console commands, jobs, and file transfer use the same upper layer on all three carriers.
+The **server** defaults to all three listeners: DNS UDP/53, WebSocket TCP/443 and QUIC UDP/443. Agents and clients default to DNS and select one active server carrier per connection. They can use different carriers at the same time; identity, enrollment, mux, routing, console commands, jobs and files share one server control plane. On the server, `--transport dns,quic` selects a subset and `--transport quic` keeps the single-carrier form.
 
 | Carrier | Server endpoint | Use when |
 | --- | --- | --- |
@@ -38,7 +38,7 @@ All roles default to `--transport dns`. Select the same carrier on the server an
 | `websocket` | HTTPS WebSocket on TCP/443 | Ordinary enterprise HTTPS egress or an HTTP CONNECT proxy is available. The client reads standard proxy environment variables. |
 | `quic` | QUIC on UDP/443 | UDP/443 is allowed and lower transport overhead is desired. |
 
-For WebSocket or QUIC, the server requires `--tls-cert PATH --tls-key PATH` or `--tls-self-signed`. The latter generates a temporary certificate in memory on each start, so a direct IP connection needs no domain or certificate files. Agents and clients verify the TLS certificate by default. Use `--tls-server-name NAME` when connecting to a numeric IP whose certificate has a DNS name; for a private or self-signed certificate, `--tls-insecure-skip-verify` permits the TLS connection while the separate Undertow `--fingerprint` pin still verifies the server identity. Obtain that fingerprint from a trusted server operator; do not use first-use discovery on an untrusted network. A WebSocket VPN client keeps its carrier peer outside the VPN routes. When its HTTP CONNECT proxy runs on the same client machine, use a numeric IPv4 `--server` address so Undertow can also preserve the proxy's upstream route. `--websocket-path` defaults to `/undertow` and must match at both endpoints. DNS `--domain` and `--payload-profile` do not apply to WebSocket or QUIC.
+WebSocket and QUIC server listeners use ephemeral self-signed TLS by default. Supply `--tls-cert PATH --tls-key PATH` to use certificate files; `--tls-self-signed` remains an explicit spelling. Agents and clients verify TLS certificates by default. Use `--tls-server-name NAME` when connecting to a numeric IP whose certificate has a DNS name; for a private or self-signed certificate, `--tls-insecure-skip-verify` permits the TLS connection while the separate Undertow `--fingerprint` pin still verifies the server identity. Obtain that fingerprint from a trusted server operator; do not use first-use discovery on an untrusted network. A WebSocket VPN client keeps its carrier peer outside the VPN routes. When its HTTP CONNECT proxy runs on the same client machine, use a numeric IPv4 `--server` address so Undertow can also preserve the proxy's upstream route. `--websocket-path` defaults to `/undertow` and must match at both endpoints. DNS `--domain` and `--payload-profile` do not apply to WebSocket or QUIC.
 
 ```sh
 # SERVER (TCP/443)
@@ -66,10 +66,13 @@ Creates or reuses an Ed25519 server key at `identity.key`, creates or reuses a r
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `--transport dns\|websocket\|quic` | `dns` | Carrier to listen on. |
-| `--listen IP:PORT` | DNS `0.0.0.0:53`; other carriers `0.0.0.0:443` | UDP for DNS/QUIC, TCP for WebSocket. |
-| `--tls-cert PATH`, `--tls-key PATH` | None | TLS PEM files for WebSocket/QUIC when `--tls-self-signed` is not used. |
-| `--tls-self-signed` | Off | Generate a temporary self-signed TLS certificate in memory; mutually exclusive with TLS files. |
+| `--transport LIST` | `dns,websocket,quic` | Comma-separated enabled listeners; a single name remains valid. |
+| `--listen IP:PORT` | Carrier default | Generic listener address only when one transport is explicitly selected. |
+| `--dns-listen IP:PORT` | `0.0.0.0:53` | DNS UDP listener address in multi-carrier mode. |
+| `--websocket-listen IP:PORT` | `0.0.0.0:443` | WebSocket TCP listener address in multi-carrier mode. |
+| `--quic-listen IP:PORT` | `0.0.0.0:443` | QUIC UDP listener address in multi-carrier mode. |
+| `--tls-cert PATH`, `--tls-key PATH` | None | TLS PEM pair shared by enabled WebSocket/QUIC listeners. |
+| `--tls-self-signed` | Automatic without TLS files | Explicitly request an ephemeral self-signed TLS certificate; mutually exclusive with TLS files. |
 | `--websocket-path PATH` | `/undertow` | HTTPS upgrade path for WebSocket. |
 | `--identity PATH` | `identity.key` | Server Ed25519 identity key. |
 | `--domain NAME` | `t.undertow.invalid` | DNS question domain. |
@@ -83,9 +86,9 @@ Creates or reuses an Ed25519 server key at `identity.key`, creates or reuses a r
 | `--control-token-file PATH` | `control.key` | API credential, distinct from enrollment token. |
 | `--probe-echo` | Off | Echo diagnostic probes; normal streams are disabled. |
 
-The server may require privilege to bind UDP/53 or create a proxy interface. A second positional `server` is an error; write `undertow server --listen ...`. For real deployments, use token or password enrollment. `--auth none` lets any reachable peer enroll, access network paths, and execute programs on agents that allow it; the server prints a warning at startup.
+The server may require privilege to bind UDP/53 or create a proxy interface. TCP/443 and UDP/443 coexist. `--listen` with several selected transports is ambiguous and rejected; use the per-transport flags. If any requested listener cannot start, the server exits instead of silently omitting it. A second positional `server` is an error. For real deployments, use token or password enrollment. `--auth none` lets any reachable peer enroll, access network paths, and execute programs on agents that allow it; the server prints a warning at startup.
 
-In a terminal, `server` starts a separate worker and opens its operator console. `background`, `quit`, and `exit` detach without stopping the worker. `undertow server attach` returns; `logs` shows recent worker logs, `logs follow` streams them until Enter, and `stop` shuts the worker down gracefully. `server --background` skips the console. `server --foreground` runs the worker directly for service managers or debugging. If startup used custom `--pid-file`, `--control-listen`, `--control-token-file`, or `--log-file`, provide the matching `--pid-file`, `--control`, `--control-token-file`, or `--log-file` on `server attach`.
+In a terminal, `server` starts a separate worker and opens its operator console. `transports` lists active listeners; `start transport NAME [self-signed|tls-cert FILE tls-key FILE] [listen ADDR]` adds one, and `stop transport NAME` removes one only when it has no sessions. `stop transport NAME force` disconnects that carrier's sessions. `background`, `quit`, and `exit` detach without stopping the worker. `undertow server attach` returns; `logs` shows recent worker logs, `logs follow` streams them until Enter, and bare `stop` shuts the worker down gracefully. `server --background` skips the console. `server --foreground` runs the worker directly for service managers or debugging. If startup used custom `--pid-file`, `--control-listen`, `--control-token-file`, or `--log-file`, provide the matching `--pid-file`, `--control`, `--control-token-file`, or `--log-file` on `server attach`.
 
 ## `agent`
 
@@ -94,7 +97,7 @@ In a terminal, `server` starts a separate worker and opens its operator console.
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--server HOST:PORT` | Required | Server host and carrier port; DNS needs numeric IPv4. |
-| `--transport dns\|websocket\|quic` | `dns` | Match the server carrier. |
+| `--transport dns\|websocket\|quic\|relay` | `dns` | Choose one active server listener, or an explicitly enabled parent-agent relay. |
 | `--websocket-path PATH` | `/undertow` | Match the server WebSocket path. |
 | `--tls-server-name NAME` | Server IP | Name checked against the TLS certificate. |
 | `--tls-insecure-skip-verify` | Off | Allow private/self-signed TLS certificate; keep the Undertow identity pin. |
@@ -102,7 +105,7 @@ In a terminal, `server` starts a separate worker and opens its operator console.
 | `--fingerprint-file PATH` | `server.fingerprint` | Read saved pin or save a trust-on-first-use pin. |
 | `--trust-on-first-use` | Off | Discover the server pin for first connection. |
 | `--agent-key PATH` | `agent.key` | Stable agent Ed25519 identity. |
-| `--deny LIST` | None | Disable agent capabilities independently: `pivot`, `exec`, `hostops`, `interactive`, `scripts`, `wasm`, `upload`, `download`, `listeners`. For example, `--deny=exec,upload` still allows built-in host operations, interactive sessions, memory-backed scripts and WASM. All are allowed by default. `listeners` controls agent-side TCP forwards. |
+| `--deny LIST` | None | Disable agent capabilities independently: `pivot`, `exec`, `hostops`, `interactive`, `scripts`, `wasm`, `upload`, `download`, `listeners`, `relay`. All are allowed by default. `listeners` controls client-service TCP forwards; `relay` controls child-agent relay listeners. Neither opens a listener automatically. |
 | `--advertise-route CIDR` | None | Offer an additional IPv4 subnet to VPN clients; repeatable. Up IPv4 interface subnets are offered automatically. |
 | `--domain NAME` | `t.undertow.invalid` | DNS only; must match the server. |
 | `--auth`, `--token`, `--token-file`, `--password`, `--password-file` | See above | Enrollment. |
@@ -113,6 +116,8 @@ In a terminal, `server` starts a separate worker and opens its operator console.
 | `--probe-interval DURATION` | `1s` | Time between probes; zero sends as fast as the window allows. |
 
 The agent makes no interface or host route changes. Its local key must differ for each independently managed agent.
+
+For a child agent, explicitly start a relay listener on its selected parent in the **server** console with `relay start INTERNAL_IP:PORT`, then run `undertow agent --transport relay --server INTERNAL_IP:PORT --fingerprint FINGERPRINT --token-file token.key --agent-key child.key`. The fingerprint is the original server's; the child authenticates to that server, not to the parent. Relay requires an explicit trusted pin or existing fingerprint file. See [topology and relays](topology-and-relays.md).
 
 ## `client`
 
@@ -131,7 +136,7 @@ sudo undertow client --vpn --internal --server SERVER_IP:53 --fingerprint FINGER
 | `--vpn` | Off | Install two IPv4 `/1` routes for Internet egress through server sockets. |
 | `--internal` | Off | Use internal agent routes. Accept or add routes from the client console; global server routes are optional. |
 | `--server HOST:PORT` | Required | Server host and carrier port; DNS needs numeric IPv4. |
-| `--transport dns\|websocket\|quic` | `dns` | Match the server carrier. |
+| `--transport dns\|websocket\|quic\|relay` | `dns` | Choose one active server listener; relay is available through an explicitly enabled agent listener. |
 | `--websocket-path PATH` | `/undertow` | Match the server WebSocket path. |
 | `--tls-server-name NAME` | Server IP | Name checked against the TLS certificate. |
 | `--tls-insecure-skip-verify` | Off | Allow private/self-signed TLS certificate; keep the Undertow identity pin. |
@@ -188,7 +193,7 @@ Agent IDs in the human table can be shortened for display; use `status --json` f
 
 In `status`, **Agents** are hosts exposing reachable networks; **VPN clients** are hosts sending their own traffic through the server. A VPN client appears after its session is ready. DNS uses an idle timeout of roughly 60–75 seconds; persistent WebSocket and QUIC sessions close when their carrier connection closes. `last_seen` in JSON shows the last received packet. Each new agent reports `capabilities.supported` and `capabilities.allowed`; older agents show unknown. `Internal` shows whether the client requested configured agent routes. `RX` and `TX` are encrypted session bytes at the server. `Streams` counts open tunneled flows; `Jobs` and `Fwd` count active background tasks and TCP forwards. `Queued`, `Flight`, and `CWND` show waiting fragments, unacknowledged packets, and the current congestion window. Rising `Retrans` indicates packet loss or delayed acknowledgement; compare repeated status snapshots to see whether traffic is still making progress.
 
-Use `undertow agent show AGENT_ID` for the detailed agent view, or select an agent in either console and type `show`. It includes OS/architecture, virtual IP, connection age, last seen, RTT, encrypted bytes and current rate, retransmits and duplicates, transport windows, mux streams, jobs, forwards, advertised networks, discovered routes and gateways, and effective capabilities. `undertow agent show AGENT_ID --json` returns the same fields as JSON. Current rate is measured between status snapshots, so the first sample after connection can be zero.
+`undertow status` lists every active server listener with network, address, TLS mode and session count, plus the actual carrier for each agent and client. Use `undertow agent show AGENT_ID` for the detailed agent view, or select an agent in either console and type `show`. It includes carrier and relay parent, OS/architecture, virtual IP, connection age, last seen, RTT, encrypted bytes and current rate, retransmits and duplicates, transport windows, mux streams, jobs, forwards, advertised networks, discovered routes and gateways, and effective capabilities. `undertow agent show AGENT_ID --json` returns the same fields as JSON. Current rate is measured between status snapshots, so the first sample after connection can be zero.
 
 For command tables, menu examples, key bindings, agent selection, route acceptance, client-to-agent TCP forwards, built-in host operations, execution, file transfers, and detach/reattach, see the [interactive console guide](console.md). Built-in host operations use `hostops`; `agent --deny=exec` still allows them, while `agent --deny=hostops` blocks them. `agent --deny=pivot` rejects agent socket traffic and stops advertising its routes. `agent --deny=listeners` blocks agent-side TCP forward listeners.
 

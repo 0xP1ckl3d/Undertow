@@ -42,12 +42,12 @@ Setup:
   1. On the server: undertow init
   2. Choose enrollment: token (default), password, or open (--auth none).
      Pin the server fingerprint or opt in to --trust-on-first-use.
-  3. Start: undertow server --listen 0.0.0.0:53
+  3. Start: undertow server (DNS UDP/53, WebSocket TCP/443, QUIC UDP/443)
   4. Start an agent or client using --server and matching --auth options.
 
 Commands:
   init       Create server identity and enrollment token.
-  server     Run a carrier listener and operator console; 'server attach' returns.
+  server     Run shared carrier listeners and operator console; 'server attach' returns.
   agent      Connect an internal host without changing its routes.
   client     Run a privileged IPv4 tunnel; 'client attach' opens its console.
   console    Open an interactive server operator console.
@@ -84,13 +84,16 @@ Usage: undertow server [FLAGS]
        undertow server attach [--pid-file PATH] [--control IP:PORT]
 
 Connection and identity:
-  --transport MODE          dns (default), websocket, or quic.
-  --listen IP:PORT          Listener (DNS UDP/53; WebSocket TCP/443; QUIC UDP/443).
+  --transport LIST          dns,websocket,quic (default); comma-separated subset.
+  --listen IP:PORT          Generic address for one explicitly selected carrier.
+  --dns-listen IP:PORT      DNS UDP address (default 0.0.0.0:53).
+  --websocket-listen IP:PORT WebSocket TCP address (default 0.0.0.0:443).
+  --quic-listen IP:PORT     QUIC UDP address (default 0.0.0.0:443).
   --domain NAME             Synthetic DNS name (DNS only; default t.undertow.invalid).
   --websocket-path PATH     WebSocket URL path (default /undertow).
   --tls-cert PATH           TLS certificate PEM (WebSocket and QUIC).
   --tls-key PATH            TLS private key PEM (WebSocket and QUIC).
-  --tls-self-signed         Generate a temporary TLS certificate in memory.
+  --tls-self-signed         Explicitly request temporary TLS (automatic without files).
   --identity PATH           Server Ed25519 key (default identity.key).
   --auth MODE               token (default), password, or none/open enrollment.
   --token-file PATH         Enrollment token for token mode (default token.key).
@@ -122,9 +125,9 @@ Lifecycle:
   --pid-file PATH           Background state (default undertow-server.pid).
 
 Examples:
-  sudo undertow server --listen 0.0.0.0:53
+  sudo undertow server
   sudo undertow server attach
-  sudo undertow server --listen 0.0.0.0:53 --tun --background
+  sudo undertow server --tun --background
   sudo undertow server --transport websocket --tls-cert server.crt --tls-key server.key
   sudo undertow server --transport quic --tls-cert server.crt --tls-key server.key
   sudo undertow server --transport websocket --tls-self-signed
@@ -135,6 +138,9 @@ In a terminal, server starts a worker and opens the operator console.
 Type 'agents', 'use 1', and 'routes'. 'background', 'quit', and 'exit'
 detach while the server continues. 'logs' shows recent worker output;
 'logs follow' streams it until Enter. Type 'stop' to shut down gracefully.
+Use 'transports' for listener state, 'start transport NAME' to add one,
+and 'stop transport NAME [force]' to remove one. Active sessions require
+the explicit force form. 'topology' shows direct and relayed agents.
 Use 'server attach' to return after detaching. Custom --pid-file,
 --control, --control-token-file, and --log-file values must be passed again
 to attach. Use --foreground for a service manager or direct debugging.
@@ -148,7 +154,7 @@ server sockets and does not require --tun. Use one 'server' subcommand only.
 Usage: undertow agent --server HOST:PORT [--fingerprint HEX | --trust-on-first-use] [FLAGS]
 
   --server HOST:PORT       Server host and carrier port; DNS needs numeric IPv4.
-  --transport MODE         dns (default), websocket, or quic; match server.
+  --transport MODE         dns (default), websocket, quic, or relay.
   --websocket-path PATH    Match server path for WebSocket (default /undertow).
   --tls-server-name NAME   Verify a DNS name in the TLS certificate.
   --tls-insecure-skip-verify  Allow a private/self-signed TLS certificate;
@@ -164,7 +170,7 @@ Usage: undertow agent --server HOST:PORT [--fingerprint HEX | --trust-on-first-u
   --password-file PATH    Read password from file instead.
   --agent-key PATH         Agent Ed25519 identity (default agent.key).
   --deny LIST              Disable agent capabilities independently. Names:
-                           pivot,exec,hostops,interactive,scripts,wasm,upload,download,listeners.
+                           pivot,exec,hostops,interactive,scripts,wasm,upload,download,listeners,relay.
   --advertise-route CIDR    Offer an additional IPv4 route to VPN clients;
                            repeatable. Up IPv4 interfaces are also offered.
   --domain NAME            Match server --domain (DNS only).
@@ -181,6 +187,12 @@ Usage: undertow agent --server HOST:PORT [--fingerprint HEX | --trust-on-first-u
   --pid-file PATH          Default undertow-agent.pid.
 
 Example: undertow agent --server 203.0.113.10:53 --fingerprint HEX --token-file token.key --background
+
+For a child agent, select its parent in the SERVER console, run
+'relay start INTERNAL_IP:8443', then start the child with
+'--transport relay --server INTERNAL_IP:8443 --fingerprint HEX'.
+Use a separate --agent-key. No relay listener opens by default;
+--deny=relay rejects the operator request independently of listeners.
 
 The agent changes no interface or host route. After it connects, run
 'undertow status' on the server and add an internal route through its ID.
@@ -201,7 +213,7 @@ Usage: undertow client (--vpn | --internal | --vpn --internal) --server HOST:POR
                            console; server global routes are optional. Alone,
                            this leaves Internet/default routes unchanged.
   --server HOST:PORT       Server host and carrier port; DNS needs numeric IPv4.
-  --transport MODE         dns (default), websocket, or quic; match server.
+  --transport MODE         dns (default), websocket, quic, or relay.
   --websocket-path PATH    Match server path for WebSocket (default /undertow).
   --tls-server-name NAME   Verify a DNS name in the TLS certificate.
   --tls-insecure-skip-verify  Allow a private/self-signed TLS certificate;
@@ -264,8 +276,11 @@ events appear in the console; routine logs go to --log-file.
 
 Usage: undertow console [--control IP:PORT] [--control-token-file PATH]
 
-Connects to the running server's loopback API. Use status, routes, route add,
-route del, select, exec, help, and quit inside the console. Agent execution
+Connects to the running server's loopback API. Use status, transports,
+start transport NAME, stop transport NAME [force], topology, routes,
+route add, route del, select, exec, help, and quit. Select an agent and
+use relay start [BIND], relay list, or relay stop [BIND] to manage an
+explicit child-agent listener. Agent execution
 is enabled on agents by default and runs a named program with arguments,
 without an implicit shell. Use 'undertow console' on the server host;
 'undertow client --internal --interactive ...' opens a client console.
@@ -295,7 +310,7 @@ The VPN client console also supports per-agent TCP 'forward add/list/del'.
 For example, after 'use 1': forward add 0.0.0.0:8080 127.0.0.1:8080.
 `
 	case "status":
-		body = `undertow status — inspect the active server carrier, agents, VPN clients, and routes
+		body = `undertow status — inspect all active server listeners, agents, VPN clients, and routes
 
 Usage: undertow status [--json] [--control IP:PORT] [--control-token-file PATH]
 
@@ -345,11 +360,14 @@ Common:
   --pid-file PATH          Background state file for this role.
 
 Server:
-  --transport MODE         dns (default), websocket, or quic.
-  --listen IP:PORT         Carrier listener (DNS :53, WebSocket/QUIC :443).
+  --transport LIST         dns,websocket,quic (default); comma-separated subset.
+  --listen IP:PORT         Address for one selected carrier only.
+  --dns-listen IP:PORT     DNS UDP address (default 0.0.0.0:53).
+  --websocket-listen IP:PORT WebSocket TCP address (default 0.0.0.0:443).
+  --quic-listen IP:PORT    QUIC UDP address (default 0.0.0.0:443).
   --tls-cert PATH          TLS certificate for WebSocket or QUIC server.
   --tls-key PATH           TLS private key for WebSocket or QUIC server.
-  --tls-self-signed        Generate a temporary TLS certificate in memory.
+  --tls-self-signed        Explicit temporary TLS (automatic without files).
   --control-listen IP:PORT Local operator API (default 127.0.0.1:47889).
   --identity PATH          Server key (default identity.key).
   --tun                    Check TUN/Wintun and tunnel network.
@@ -389,7 +407,7 @@ Replace SERVER_IP, FINGERPRINT, and example addresses.
 SERVER usually needs sudo for UDP/53; --tun and CLIENT need root/Admin.
 
 pivot — reach an internal subnet from SERVER through AGENT:
-  SERVER  sudo undertow server --tun --listen 0.0.0.0:53
+  SERVER  sudo undertow server --tun
   AGENT  undertow agent --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
   SERVER console  agents
   SERVER console  use 1
@@ -397,7 +415,7 @@ pivot — reach an internal subnet from SERVER through AGENT:
   SERVER console  route add 10.20.0.0/16
 
 internal — reach an agent network from CLIENT, keeping normal Internet:
-  SERVER  sudo undertow server --listen 0.0.0.0:53
+  SERVER  sudo undertow server
   AGENT  undertow agent --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
   CLIENT  sudo undertow client --internal --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
   CLIENT console  agents
@@ -406,11 +424,11 @@ internal — reach an agent network from CLIENT, keeping normal Internet:
   CLIENT console  route accept 10.20.0.0/16
 
 vpn — route CLIENT IPv4 Internet traffic through SERVER:
-  SERVER  sudo undertow server --listen 0.0.0.0:53
+  SERVER  sudo undertow server
   CLIENT  sudo undertow client --vpn --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
 
 vpn-internal — Internet through SERVER, internal subnet through AGENT:
-  SERVER  sudo undertow server --listen 0.0.0.0:53
+  SERVER  sudo undertow server
   AGENT  undertow agent --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
   CLIENT  sudo undertow client --vpn --internal --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
   CLIENT console  agents
@@ -419,7 +437,7 @@ vpn-internal — Internet through SERVER, internal subnet through AGENT:
   CLIENT console  route accept 10.20.0.0/16
 
 forward — reach one internal TCP service without a TUN:
-  SERVER  sudo undertow server --listen 0.0.0.0:53 --forward 127.0.0.1:18080=10.20.0.50:80
+  SERVER  sudo undertow server --forward 127.0.0.1:18080=10.20.0.50:80
   AGENT  undertow agent --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
   SERVER  curl http://127.0.0.1:18080/
 

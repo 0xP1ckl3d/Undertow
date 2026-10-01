@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os/exec"
 	"sync"
 	"time"
 
@@ -34,6 +33,10 @@ type InteractiveRequest struct {
 	Argv []string `json:"argv,omitempty"`
 	Cols uint16   `json:"cols,omitempty"`
 	Rows uint16   `json:"rows,omitempty"`
+}
+
+type interactiveProcess interface {
+	Wait() error
 }
 
 type InteractiveSession struct {
@@ -217,14 +220,16 @@ func serveInteractive(ctx context.Context, stream *mux.Stream) {
 	go func() {
 		defer close(outputDone)
 		buffer := make([]byte, 8<<10)
+		forward := true
 		for {
 			n, err := terminal.Read(buffer)
-			if n > 0 {
+			if n > 0 && forward {
 				writeMu.Lock()
 				writeErr := writeInteractiveFrame(stream, InteractiveOutput, buffer[:n])
 				writeMu.Unlock()
 				if writeErr != nil {
-					return
+					// Keep draining ConPTY while disconnect teardown closes it.
+					forward = false
 				}
 			}
 			if err != nil {
@@ -269,7 +274,7 @@ func serveInteractive(ctx context.Context, stream *mux.Stream) {
 	<-outputDone
 	code := 0
 	if err != nil {
-		var exit *exec.ExitError
+		var exit interface{ ExitCode() int }
 		if errors.As(err, &exit) {
 			code = exit.ExitCode()
 		} else {

@@ -44,6 +44,28 @@ func TestConsoleHistoryAndTabCompletion(t *testing.T) {
 	}
 }
 
+func TestInteractiveInputPreservesEnterAndDetachesLocally(t *testing.T) {
+	var output bytes.Buffer
+	editor := newConsoleEditor(&output, true)
+	input, detach := editor.beginInteractive()
+	defer editor.endInteractive()
+	if err := editor.read(context.Background(), strings.NewReader("whoami\r\x1d"), make(chan string, 1)); err != io.EOF {
+		t.Fatalf("read = %v", err)
+	}
+	var forwarded []byte
+	for len(input) > 0 {
+		forwarded = append(forwarded, <-input)
+	}
+	if string(forwarded) != "whoami\r" {
+		t.Fatalf("forwarded input = %q", forwarded)
+	}
+	select {
+	case <-detach:
+	default:
+		t.Fatal("Ctrl-] did not detach the shell")
+	}
+}
+
 func TestInteractiveCtrlCNeedsConfirmation(t *testing.T) {
 	var output bytes.Buffer
 	editor := newConsoleEditor(&output, true)

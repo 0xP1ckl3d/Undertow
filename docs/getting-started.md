@@ -21,7 +21,7 @@ sudo undertow client --vpn --internal --server SERVER_IP:53 --fingerprint FINGER
 
 `--vpn` installs two IPv4 `/1` routes and verifies public egress. `--internal` alone pins the carrier server route and creates the TUN without changing the Internet/default route or requiring a public egress check. Once connected, type `agents`, `use 1`, and `routes` in the client console; use `route accept CIDR` for an advertised subnet or `route add CIDR` for another network reachable from that agent. This setup needs no server route command. Server configured routes are also supported when an operator wants global route management. Both flags provide VPN Internet egress and agent routes. At least one flag is required. See [deployment scenarios](scenarios.md) for tests.
 
-The examples on this page use **direct UDP DNS**, addressed to a numeric server IP and port. Undertow also supports HTTPS/WebSocket on TCP/443 and QUIC on UDP/443; see [Quickstart transport choices](quickstart.md#choose-a-transport). The default synthetic domain is `t.undertow.invalid`; it must match on both ends. Public DNS delegation is not required. Allow the chosen UDP port through the server firewall. UDP/53 and virtual interfaces commonly need elevated privileges.
+The agents and clients in these examples use **direct UDP DNS**, addressed to a numeric server IP and port. The server also starts HTTPS/WebSocket on TCP/443 and QUIC on UDP/443 by default; peers choose any active carrier independently. See [Quickstart transport choices](quickstart.md#choose-a-transport). The default synthetic domain is `t.undertow.invalid`; it must match for DNS peers. Public DNS delegation is not required. Allow the desired listener ports through the server firewall. UDP/53 and virtual interfaces commonly need elevated privileges.
 
 ## Build and first session
 
@@ -40,7 +40,7 @@ On the server:
 
 ```sh
 undertow init --identity identity.key --token-file token.key
-sudo undertow server --listen 0.0.0.0:53 --identity identity.key --token-file token.key
+sudo undertow server --identity identity.key --token-file token.key
 ```
 
 The server prints a fingerprint. Copy `token.key` securely to the agent host, then run there:

@@ -35,7 +35,7 @@ type Peer struct {
 func (p *Peer) Snapshot() PeerInfo {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return PeerInfo{ID: p.Session.ID(), AgentID: p.AgentID, Remote: p.Remote, Connected: p.Connected, LastSeen: p.LastSeen, VirtualIP: p.VirtualIP, Authenticated: p.authenticated, Transport: p.Session.Stats()}
+	return PeerInfo{ID: p.Session.ID(), AgentID: p.AgentID, Remote: p.Remote, VirtualIP: p.VirtualIP, Carrier: "dns", Connected: p.Connected, LastSeen: p.LastSeen, Authenticated: p.authenticated, Transport: p.Session.Stats()}
 }
 
 func (p *Peer) SetVirtualIP(address string) {

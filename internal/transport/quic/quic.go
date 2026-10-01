@@ -139,6 +139,9 @@ func (s *Server) handle(connection *quicgo.Conn) {
 	_ = channel.SetDeadline(time.Now().Add(15 * time.Second))
 	framed := &messageConn{connection: connection, stream: channel}
 	peer, err := stream.Accept(s.ctx, framed, s.identity, s.token)
+	if err == nil {
+		peer.Carrier = "quic"
+	}
 	_ = channel.SetDeadline(time.Time{})
 	if err != nil {
 		_ = framed.Close()

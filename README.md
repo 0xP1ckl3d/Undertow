@@ -22,12 +22,13 @@ Undertow carries encrypted sessions over direct DNS, HTTPS/WebSocket, or QUIC. A
 | Use server Internet egress and reach an internal network | Server + agent + client | `client --vpn --internal` |
 | Reach one internal TCP service | Server + agent | `server --forward` |
 | Expose a client service on an agent host | Server + agent + client | Client console `forward add` |
+| Reach a deeper network through another agent | Server + parent agent + child agent | Parent console `relay start` |
 
 On **SERVER**, run `undertow init` once to create `identity.key` and `token.key` and print the server fingerprint. Keep `identity.key` on the server; securely copy `token.key` to each **AGENT** or **CLIENT**. Replace `SERVER_IP` and `FINGERPRINT` below. Run `undertow` as `./bin/undertow` when built from this repository.
 
 ```sh
 # SERVER (root is usually needed for UDP/53)
-sudo undertow server --listen 0.0.0.0:53 --identity identity.key --token-file token.key
+sudo undertow server --identity identity.key --token-file token.key
 
 # AGENT (unprivileged, on a host that can reach internal targets)
 undertow agent --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
@@ -36,11 +37,11 @@ undertow agent --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file toke
 sudo undertow client --internal --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
 ```
 
-These commands use the default DNS carrier on separate hosts. For HTTPS/WebSocket on TCP/443 or QUIC on UDP/443, see [transport choices](docs/quickstart.md#choose-a-transport). Without a domain or certificate files, start either server carrier with `--tls-self-signed` and connect to its IP with `--tls-insecure-skip-verify --fingerprint FINGERPRINT` on agents and clients. In a terminal, `server` and `client` each open a console. Type `agents`, `use 1`, `show`, and `routes`; on a client, use `route accept CIDR` for an advertised network or `route add CIDR` for another reachable network. `background` detaches either console without stopping its worker. Return with `undertow server attach` or `undertow client attach`. The server needs `--tun` only when the server host itself will route to an internal network; Internet egress from a client uses server sockets. See [quickstart](docs/quickstart.md) for verification and cleanup by goal.
+The server starts DNS on UDP/53, HTTPS/WebSocket on TCP/443, and QUIC on UDP/443 by default. The agent and client commands above choose DNS; each peer can choose a different available carrier. WebSocket and QUIC use ephemeral self-signed TLS certificates unless server certificate files are supplied. For a direct IP connection to either, use `--tls-insecure-skip-verify --fingerprint FINGERPRINT` on the peer. In a terminal, `server` and `client` each open a console. Type `agents`, `use 1`, `show`, and `routes`; on a client, use `route accept CIDR` for an advertised network or `route add CIDR` for another reachable network. `background` detaches either console without stopping its worker. Return with `undertow server attach` or `undertow client attach`. The server needs `--tun` only when the server host itself will route to an internal network; Internet egress from a client uses server sockets. See [quickstart](docs/quickstart.md) for verification and cleanup by goal.
 
 ## How the pieces connect
 
-Each server process listens on one selected carrier: DNS, HTTPS/WebSocket, or QUIC. The session, console, and pivot behavior is shared.
+One server process shares its identity, console, routing and jobs across all enabled listeners. Agents can be direct or connect through an explicitly enabled relay on another agent.
 
 ```mermaid
 flowchart LR
@@ -49,7 +50,7 @@ flowchart LR
     Route --> ProxyTUN["Optional TUN / Wintun"]
     ProxyTUN --> Stack["Userland network stack"]
     Stack --> Selector["Agent route selector"]
-    Carrier["Undertow carrier<br/>DNS · WebSocket · QUIC"]
+    Carrier["Shared Undertow server<br/>DNS UDP/53 · WebSocket TCP/443 · QUIC UDP/443"]
     Control["Loopback status / route API"]
     Selector --> Carrier
   end
@@ -67,6 +68,8 @@ flowchart LR
   end
 
   Carrier <-->|"Authenticated session"| Agent
+  Agent <-->|"Explicit relay listener; child authenticates to server"| Child["Independent child agent"]
+  Child --> Deep["Deeper internal targets"]
   VPN <-->|"Authenticated session"| Carrier
   Carrier -->|"VPN Internet egress"| ServerSockets["Server-side Internet sockets"]
   ServerSockets --> Internet["Public Internet"]
@@ -101,7 +104,7 @@ For a task that should run while you use the console, select an agent and enter 
 
 Use `run-script bash ./check.sh` or `run-script powershell ./audit.ps1` in a selected-agent console to stream local source into that interpreter on the agent without creating a script file there. Add `--background` before the interpreter to create a job. The independent `scripts` capability can be disabled with `agent --deny=scripts`.
 
-Use `run-wasm ./tool.wasm` or `run-wasm --background ./long-task.wasm` to run a WASI module directly from memory on the selected agent. `--stdin FILE` provides bounded input and words after the module path become module arguments. The independent `wasm` capability controls this operation; the agent caps module size, execution time, guest memory, output and concurrent runs.
+Use `run-wasm ./tool.wasm` or `run-wasm --background ./long-task.wasm` to run a WASI module directly from memory on the selected agent. `--stdin FILE` provides bounded input and words after the module path become module arguments. The independent `wasm` capability controls this operation; the agent caps module size, execution time, guest memory, output and concurrent runs. Modules can use the public `undertow_host_v1` imports for agent-side host and network assessment. See the [WASM developer guide](docs/wasm-development.md) and [six packaged examples](examples/wasm/README.md).
 
 Agent inventory includes IPv4 routes with gateways, interfaces, route sources, and a separate default route. In the client console, `routes` shows candidates; after `use 1`, enter `route accept 10.20.0.0/16` for a reported network or `route add 10.20.0.0/16` for a manually known path. No server route command is required for this client-owned setup.
 

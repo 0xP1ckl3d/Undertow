@@ -9,12 +9,39 @@ See [getting started](getting-started.md) for enrollment, fingerprint, and privi
 | Command | Action |
 | --- | --- |
 | `help` | Show the commands available at the current menu. |
-| `status` or `status --json` | Show agents, VPN clients, routes, and connection counters. |
-| `agents` | List connected agents by current number, hostname, short ID, and virtual IP. |
+| `status` or `status --json` | Show active server listeners, each peer's carrier, agents, VPN clients, routes, and counters. |
+| `agents` | List connected agents by current number, hostname, short ID, virtual IP, carrier and relay parent. |
 | `use NUMBER` | Enter the numbered agent's menu. An unambiguous hostname or ID prefix also works. `select NUMBER` is an alias within the console. |
 | `back` | Return from an agent menu to the main menu. |
 | `routes` | Show routes; from an agent menu, filter to that agent. |
 | `quit` or `exit` | Detach the server console without stopping its worker. In the VPN client console, stop the VPN and remove its owned routes. |
+
+## Server listeners and agent topology
+
+The default server opens DNS UDP/53, WebSocket TCP/443 and QUIC UDP/443. Use these commands in the **server** console:
+
+```text
+transports
+stop transport quic
+start transport quic self-signed
+start transport websocket tls-cert ./server.crt tls-key ./server.key
+topology
+```
+
+`transports` shows network, listen address, TLS mode and active session count. An active carrier cannot be stopped normally; the error shows agent and client counts. `stop transport NAME force` deliberately closes its sessions, while other carriers continue. A stopped listener can be restarted. `start transport NAME listen IP:PORT` chooses a nondefault address; transport names ignore case. Certificate paths are resolved on the server worker host. `status` and `undertow status` also show the listener table and each peer's carrier.
+
+Select a parent agent to open a child-agent relay:
+
+```text
+agents
+use 1
+relay start 10.20.1.15:8443
+relay list
+topology
+relay stop 10.20.1.15:8443
+```
+
+No agent listens for children until `relay start` succeeds. The omitted bind defaults to loopback `127.0.0.1:8443`; specify an internal interface for another host. The child runs `undertow agent --transport relay --server 10.20.1.15:8443 --fingerprint FINGERPRINT --token-file token.key` with its own agent key. `topology` shows it under the selected parent; it can be selected and controlled as an independent agent. `--deny=relay` on a parent rejects the listener command. See [topology and relay guidance](topology-and-relays.md).
 
 Agent numbers can change after connections change. Run `agents` again before selecting by number. Type `help` after `use` to see that agent's menu. Quote a path or argument containing spaces with single or double quotes. The console parses quotes; it does not expand shell variables or run shell syntax.
 
@@ -25,7 +52,7 @@ When input is an interactive terminal, Up and Down recall commands and Tab compl
 Start the server on the server host; its console opens automatically. After an agent joins, use:
 
 ```text
-sudo undertow server --listen 0.0.0.0:53 --tun
+sudo undertow server --tun
 agents
 use 1
 show
@@ -120,7 +147,7 @@ From the main VPN menu, use `forward add AGENT_ID AGENT_BIND CLIENT_TARGET`, `fo
 
 In an agent menu, `exec whoami` starts that executable directly. To run PowerShell explicitly on a Windows agent, use `exec powershell.exe -NoProfile -Command whoami`. `exec` has no implicit operating system shell, so shell operators are not interpreted unless you explicitly start a shell program. One-shot execution has a 30 second limit and captures up to 32 KiB each of standard output and standard error. The agent's `--deny=exec` setting rejects it.
 
-Use `shell` in the selected-agent menu for a long-lived session. On a Linux agent this opens `/bin/sh` with a PTY; on Windows it opens `cmd.exe` through interactive pipes. Use `shell /bin/bash` or `shell powershell.exe -NoProfile` to choose another program. Input and output stream in both directions until the program exits or you press Ctrl-]. The console remains connected to Undertow and other agent sessions continue. An attached client console can open a new shell after detaching and reattaching. The separate `--deny=interactive` agent setting blocks live sessions without changing one-shot `exec` or host operations.
+Use `shell` in the selected-agent menu for a long-lived session. On a Linux agent this opens `/bin/sh` with a PTY; on Windows it opens `cmd.exe` with ConPTY, which provides terminal echo, line editing, resize handling, and VT output. Use `shell /bin/bash` or `shell powershell.exe -NoProfile` to choose another program. Input and output stream in both directions until the program exits or you press Ctrl-]. The console remains connected to Undertow and other agent sessions continue. An attached client console can open a new shell after detaching and reattaching. The separate `--deny=interactive` agent setting blocks live sessions without changing one-shot `exec` or host operations.
 
 For a command that should continue while you use the console, run `job start /usr/bin/find /srv -type f` on a selected Linux agent or `job start powershell.exe -NoProfile -File C:\\Scripts\\audit.ps1` on a Windows agent. The server assigns a job ID. `jobs` lists running and finished tasks; `job output ID` reads output accumulated so far; `job show ID` reports start/end times and exit code; `job cancel ID` stops one task. Jobs continue through client console detach/reattach while the agent remains connected. They use the agent's `interactive` capability. The server retains up to 256 KiB of the latest output per job and marks truncated output. A VPN client sees only its own jobs; the server operator sees all jobs. The server holds up to 512 job records for its lifetime.
 

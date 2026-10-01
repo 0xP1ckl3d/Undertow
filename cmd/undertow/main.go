@@ -26,6 +26,7 @@ import (
 	"undertow/internal/security"
 	"undertow/internal/transport"
 	"undertow/internal/transport/dns"
+	"undertow/internal/transport/relay"
 	"undertow/internal/tun"
 )
 
@@ -169,8 +170,11 @@ func serve(args []string) error {
 	}
 	f := flag.NewFlagSet("server", flag.ContinueOnError)
 	lifecycle := addLifecycleFlags(f, "server")
-	carrier := addCarrierFlags(f)
+	carrier := addCarrierFlags(f, "dns,websocket,quic")
 	listen := f.String("listen", "", "carrier listen address (default DNS UDP :53, WebSocket TCP :443, QUIC UDP :443)")
+	dnsListen := f.String("dns-listen", "", "DNS UDP listen address for multi-transport server")
+	websocketListen := f.String("websocket-listen", "", "WebSocket TCP listen address for multi-transport server")
+	quicListen := f.String("quic-listen", "", "QUIC UDP listen address for multi-transport server")
 	domain := f.String("domain", "t.undertow.invalid", "synthetic DNS domain")
 	identityPath := f.String("identity", "identity.key", "server identity key file")
 	tokenPath := f.String("token-file", "", "enrolment token file (default token.key)")
@@ -192,6 +196,34 @@ func serve(args []string) error {
 	}
 	if f.NArg() != 0 {
 		return fmt.Errorf("unexpected server argument %q; use 'undertow server --listen ...'", f.Arg(0))
+	}
+	var selectedTransports []string
+	selectedSet := make(map[string]bool)
+	for _, name := range strings.Split(*carrier.kind, ",") {
+		kind, err := canonicalTransport(name)
+		if err != nil {
+			return err
+		}
+		if !selectedSet[kind] {
+			selectedTransports = append(selectedTransports, kind)
+			selectedSet[kind] = true
+		}
+	}
+	if *listen != "" && len(selectedTransports) != 1 {
+		return errors.New("--listen requires one selected transport; use --dns-listen, --websocket-listen, or --quic-listen")
+	}
+	if (*carrier.cert == "") != (*carrier.key == "") {
+		return errors.New("--tls-cert and --tls-key must be supplied together")
+	}
+	if *carrier.selfSigned && *carrier.cert != "" {
+		return errors.New("--tls-self-signed cannot be combined with certificate files")
+	}
+	if !selectedSet["websocket"] && !selectedSet["quic"] && (*carrier.cert != "" || *carrier.selfSigned || *carrier.serverName != "" || *carrier.skipTLSVerify) {
+		return errors.New("TLS options require a WebSocket or QUIC server listener")
+	}
+	for _, option := range []struct { kind, address string }{{"dns", *dnsListen}, {"websocket", *websocketListen}, {"quic", *quicListen}} {
+		if option.address != "" && !selectedSet[option.kind] { return fmt.Errorf("--%s-listen requires %s in --transport", option.kind, option.kind) }
+		if *listen != "" && option.address != "" { return errors.New("choose --listen or a per-transport listen flag") }
 	}
 	if !*lifecycle.background && !*lifecycle.foreground && !*lifecycle.stop && os.Getenv(backgroundModeEnv) != "server" && isConsoleTerminal(os.Stdin) {
 		logPath, err := filepath.Abs(*lifecycle.logFile)
@@ -262,29 +294,24 @@ func serve(args []string) error {
 	if err != nil {
 		return err
 	}
-	srv, err := carrier.listen(*listen, *domain, identity, token)
-	if err != nil {
-		return err
-	}
-	serverInfo := control.ServerInfo{Transport: *carrier.kind, Listen: srv.Addr().String(), Fingerprint: security.Fingerprint(identity)}
-	if *carrier.kind == "dns" {
-		serverInfo.Network = "udp"
-		serverInfo.Domain = *domain
-	} else {
-		serverInfo.TLSMode = "certificate"
-		if *carrier.selfSigned {
-			serverInfo.TLSMode = "self-signed"
-		}
-		if *carrier.kind == "websocket" {
-			serverInfo.Network = "tcp"
-			serverInfo.WebSocketPath = *carrier.path
-		} else {
-			serverInfo.Network = "udp"
-		}
-	}
-	manager.SetServerInfo(serverInfo)
 	ctx, stop := commandContext()
 	defer stop()
+	serverInfo := control.ServerInfo{Transport: *carrier.kind, Domain: *domain, WebSocketPath: *carrier.path, Fingerprint: security.Fingerprint(identity)}
+	manager.SetServerInfo(serverInfo)
+	transportManager := newServerTransports(ctx, manager, identity, token, *domain, *carrier.path, func(peer transport.Peer) {
+		handleServerPeer(ctx, manager, controlToken, *probeEcho, peer)
+	})
+	manager.SetTransportController(transportManager)
+	manager.SetRelayAcceptor(func(_ context.Context, parentID string, stream *mux.Stream) {
+		peer, err := relay.Accept(ctx, stream, parentID, identity, token)
+		if err != nil {
+			log.Printf("relay via %s rejected: %v", parentID, err)
+			_ = stream.Close()
+			return
+		}
+		handleServerPeer(ctx, manager, controlToken, *probeEcho, peer)
+	})
+	defer transportManager.Close()
 	go func() {
 		if err := manager.ServeHTTP(ctx, *controlListen, controlToken); err != nil && ctx.Err() == nil {
 			log.Printf("control API: %v", err)
@@ -315,82 +342,43 @@ func serve(args []string) error {
 		parts := strings.SplitN(value, "=", 2)
 		l, err := net.Listen("tcp", parts[0])
 		if err != nil {
-			srv.Close()
+			transportManager.Close()
 			return err
 		}
 		listeners = append(listeners, l)
 		log.Printf("local forward %s -> %s", l.Addr(), parts[1])
 		go pivot.ServeForward(ctx, l, parts[1], choose)
 	}
-	log.Printf("%s listening on %s; fingerprint %s", carrier.describe(), srv.Addr(), security.Fingerprint(identity))
+	for _, kind := range selectedTransports {
+		request := control.TransportStartRequest{TLSCert: *carrier.cert, TLSKey: *carrier.key}
+		switch kind {
+		case "dns":
+			request.Listen = *dnsListen
+			request.TLSCert, request.TLSKey = "", ""
+		case "websocket":
+			request.Listen = *websocketListen
+		case "quic":
+			request.Listen = *quicListen
+		}
+		if *listen != "" {
+			request.Listen = *listen
+		}
+		info, err := transportManager.Start(kind, request)
+		if err != nil {
+			return err
+		}
+		if len(selectedTransports) == 1 {
+			serverInfo.Transport, serverInfo.Network, serverInfo.Listen, serverInfo.TLSMode = info.Transport, info.Network, info.Listen, info.TLSMode
+		}
+	}
+	serverInfo.Listeners = transportManager.List()
+	manager.SetServerInfo(serverInfo)
+	log.Printf("server fingerprint %s", security.Fingerprint(identity))
 	if err := markBackgroundReady(); err != nil {
 		return err
 	}
-	go func() {
-		for {
-			p, err := srv.Accept(ctx)
-			if err != nil {
-				return
-			}
-			log.Printf("session connected: %s from %s", p.Snapshot().AgentID, p.Snapshot().Remote)
-			if *probeEcho {
-				go echo(ctx, p)
-				continue
-			}
-			go func() {
-				streamMux := mux.New(ctx, p.Channel(), true)
-				helloCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-				hello, err := streamMux.RecvControl(helloCtx)
-				cancel()
-				if err != nil {
-					log.Printf("session %d control handshake failed: %v", p.Snapshot().ID, err)
-					streamMux.Close()
-					return
-				}
-				if control.IsVPNHello(hello) {
-					internal := control.VPNInternal(hello)
-					log.Printf("VPN client ready: session=%d remote=%s internal=%t", p.Snapshot().ID, p.Snapshot().Remote, internal)
-					if err := streamMux.SendControl(ctx, []byte(`{"mode":"vpn","ready":true}`)); err != nil {
-						streamMux.Close()
-						return
-					}
-					manager.RegisterClient(p, streamMux, internal, control.VPNHostname(hello))
-					pivot.ServeVPNInteractive(ctx, streamMux, func(destination netip.Addr) (*mux.Mux, bool) {
-						return manager.ResolveClientEgress(p.Snapshot().ID, destination)
-					}, func() bool { return true }, func(ctx context.Context, stream *mux.Stream) {
-						if stream.Destination() == pivot.FileDestination {
-							manager.ServeFileRelay(ctx, stream)
-						} else if stream.Destination() == pivot.InteractiveRelayDestination {
-							manager.ServeInteractiveRelay(ctx, stream)
-						} else {
-							manager.ServeRemote(ctx, controlToken, p.Snapshot().ID, stream)
-						}
-					})
-					manager.UnregisterClient(p.Snapshot().ID, streamMux)
-					log.Printf("VPN client disconnected: session=%d", p.Snapshot().ID)
-					streamMux.Close()
-					return
-				}
-				manager.Register(p, streamMux)
-				manager.UpdateInventory(p.Snapshot().AgentID, streamMux, hello)
-			}()
-		}
-	}()
-	go func() {
-		t := time.NewTicker(10 * time.Second)
-		defer t.Stop()
-		for {
-			select {
-			case <-t.C:
-				for _, p := range srv.Peers() {
-					log.Printf("session %d agent=%s remote=%s rtt=%s tx=%d rx=%d retransmits=%d", p.ID, p.AgentID, p.Remote, p.Transport.RTT, p.Transport.TXBytes, p.Transport.RXBytes, p.Transport.Retransmits)
-				}
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-	return srv.Serve(ctx)
+	<-ctx.Done()
+	return nil
 }
 
 func echo(ctx context.Context, p transport.Peer) {
