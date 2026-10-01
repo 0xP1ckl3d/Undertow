@@ -49,6 +49,20 @@ func TestArgumentBytes(t *testing.T) {
 		t.Fatal("implicit binary format accepted")
 	}
 }
+
+func TestManifestCompatibilityAndOptionalArguments(t *testing.T) {
+	legacy, format, err := ParseManifest([]byte(`{"name":"legacy","arguments":[{"name":"target","type":"string"}]}`))
+	if err != nil || format != "z" || !legacy.Arguments[0].IsRequired() {
+		t.Fatalf("legacy manifest: %+v %q %v", legacy, format, err)
+	}
+	modern, format, err := ParseManifest([]byte(`{"description":"example","arguments":[{"name":"target","type":"string","required":true},{"name":"count","type":"int","required":false}]}`))
+	if err != nil || format != "zi" || modern.Arguments[1].IsRequired() {
+		t.Fatalf("optional manifest: %+v %q %v", modern, format, err)
+	}
+	if _, _, err := ParseManifest([]byte(`{"arguments":[{"type":"string","required":false},{"type":"int","required":true}]}`)); err == nil {
+		t.Fatal("required argument accepted after an optional argument")
+	}
+}
 func TestMalformedCOFF(t *testing.T) {
 	base := fixture(t, "hello")
 	mutate := func(edit func([]byte), want string) {

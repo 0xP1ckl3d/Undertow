@@ -28,20 +28,47 @@ At the main console level, use `run-bof AGENT_ID OBJECT.o`. `bof inspect FILE.o`
 
 `--format` accepts one character per argument: `i` signed 32-bit integer, `s` signed 16-bit integer, `z` NUL-terminated ANSI byte string, `Z` NUL-terminated UTF-16LE wide string, `b` binary bytes. Integer values use decimal or `0x` notation. A binary value is `@LOCAL_FILE` or `base64:DATA`. `z` passes UTF-8 bytes without a locale conversion; BOFs expecting a legacy Windows code page should use suitable input. The argument packet has a big-endian 32-bit payload length, followed by values in format order. Strings and binary values each have a big-endian 32-bit byte length; integers are big-endian. The BOF receives the packet pointer and byte length in `go(char *args, int len)` and can parse it through `BeaconData*`. An empty format passes a four-byte zero length header. Argument input is limited to 1 MiB.
 
-For frequently used objects, `OBJECT.o.json` or `OBJECT.json` may supply convenience metadata:
+For frequently used objects, `OBJECT.o.json` or `OBJECT.json` may supply command metadata:
 
 ```json
 {
   "name": "example",
+  "description": "Example BOF",
+  "usage": "example <pid> <target>",
+  "help": "Longer operator help is optional.",
   "entrypoint": "go",
   "arguments": [
-    {"name": "pid", "type": "int"},
-    {"name": "target", "type": "wstring"}
+    {"name": "pid", "type": "int", "required": true},
+    {"name": "target", "type": "wstring", "required": true}
   ]
 }
 ```
 
 Use `run-bof example.o 123 "C:\Program Files"` when the sidecar exists, or select another file with `--manifest FILE`. Accepted types are `int`/`int32`, `short`/`int16`, `string`/`ansi`, `wstring`/`wide`, and `binary`. An explicit `--format` overrides the manifest's argument list. The `.o` file itself never needs a sidecar.
+
+## Loaded console commands
+
+Load a BOF once to use it as a command in the current operator or client console:
+
+```text
+undertow> load bof /path/to/example.o example
+Loaded BOF: example
+undertow> help example
+undertow> bofs
+undertow> use 1
+undertow[TALON]> example 123 "C:\Program Files"
+undertow[TALON]> example 123 "C:\Program Files" --background
+undertow[TALON]> back
+undertow> use 2
+undertow[OTHERHOST]> example 456 "C:\Windows"
+undertow> unload bof example
+```
+
+`load bof FILE [NAME]` validates the COFF object immediately and stores its bytes locally in the console process. If NAME is omitted, the command name comes from the filename; `example.x64.o` becomes `example`. A loaded alias cannot shadow a built-in command or another loaded BOF. `bofs` lists the aliases, paths and argument types. General `help` includes a Loaded BOFs section, and `help NAME` displays the manifest's description, usage, arguments, longer help, source and architecture. Tab completes loaded aliases, help topics and unload targets.
+
+The sidecar supplies argument types, so invocations do not need `--format`. Existing sidecars remain valid; `description`, `usage`, `help` and `required` are optional fields. Omitted `required` means true; optional arguments must come after required ones. With no sidecar, register a schema once with `load bof example.o example --format "zi"`. With neither a sidecar nor `--format`, the alias accepts zero arguments and reports an unknown schema if arguments are supplied. Undertow never guesses argument types from COFF code. Argument counts and types are checked locally before transfer.
+
+The registration is local to one console process. It is independent of agent selection and survives switching agents, reconnects and background jobs. The object is transferred only when invoked, and execution still uses the `run-bof` runtime and normal job system. The registration is removed by `unload bof NAME` or when that console process exits; there is no server-side BOF library or restart persistence. `run-bof` remains available for one-off runs and troubleshooting.
 
 ## Build and runtime behavior
 

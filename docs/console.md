@@ -75,6 +75,8 @@ background
 | `run-wasm [--background] [--stdin LOCAL_FILE] MODULE_FILE [ARGS]` | Selected agent | Instantiate a WASI module in agent memory. Output streams live or enters `jobs`. |
 | `run-native [--background] [--data LOCAL_FILE] MODULE_FILE [ARGS]` | Selected Windows amd64 agent | Load a native `.module` DLL with direct Windows API access. Output streams live or enters `jobs`. |
 | `run-bof [--background] [--format FORMAT] OBJECT.o [ARGS]` | Selected Windows amd64 agent | Load a compatible BOF COFF object with Beacon API imports. Output streams live or enters `jobs`. |
+| `load bof FILE [NAME] [--format FORMAT]` | Any console menu | Register a BOF as a local command for this console session. |
+| `bofs`; `unload bof NAME` | Any console menu | List or remove local BOF commands. |
 | `job start PROGRAM [ARGS]` | Selected agent | Start a task that keeps running while you use or detach the console. |
 | `jobs` | Either menu | List numbered tasks; inside an agent, list that agent's tasks. |
 | `jobs NUMBER` | Either menu | Show a task from the last `jobs` list. |
@@ -167,6 +169,8 @@ To run a WASI module, use `run-wasm ./tool.wasm option`, `run-wasm --stdin ./inp
 On a Windows amd64 agent, `run-native ./tool.module option` loads a native Windows DLL module. `run-native --data ./payload.bin ./tool.module` supplies opaque bytes, and `run-native --background ./tool.module` starts a standard job. Use `job stop NUMBER` to request cooperative cancellation. See the [native module guide](native-modules.md).
 
 To reuse a compatible BOF, inspect it locally with `undertow bof inspect ./tool.o`, then run `run-bof ./tool.o` on a selected Windows amd64 agent. Use `--format` or a sidecar manifest for Beacon arguments. `run-bof --background ./tool.o` uses the same jobs and `native` capability; `job stop NUMBER` terminates its isolated worker. See the [BOF compatibility guide](bof-compatibility.md).
+
+For frequent use, `load bof ./tool.o tool` registers `tool` locally. Then `help tool` shows its sidecar metadata and `tool ARG... --background` runs it on the selected agent. Switch agents without reloading. `bofs` lists registrations, `unload bof tool` removes one, and closing the console process clears them all. If the object has no sidecar, supply its format once while loading, for example `load bof ./tool.o tool --format "zi"`.
 
 Uploads and downloads pass through the server and verify SHA-256. The destination parent directory must exist and the destination file must not already exist. Relative local paths resolve from the console's working directory; relative remote paths resolve from the agent process's working directory. The client console shows bytes, total, percentage, and current rate while data moves, then reports size and SHA-256 on completion. Press Ctrl-] during a transfer to cancel it; partial temporary files are removed. An attached console receives progress over the local loopback control socket, so progress updates do not consume DNS control frames. Transfers have a 30 minute limit. Agents can reject these independently with `--deny=upload` or `--deny=download`.
 

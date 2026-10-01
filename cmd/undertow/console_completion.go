@@ -23,7 +23,7 @@ func (e *consoleEditor) complete() {
 		return
 	}
 	start, before, partial, quote := completionWords(e.line)
-	matches := consoleCompletions(before, partial, quote, e.selected, e.vpn, e.serverAttached)
+	matches := consoleCompletions(before, partial, quote, e.selected, e.vpn, e.serverAttached, e.loadedBOFs)
 	if len(matches) == 0 {
 		return
 	}
@@ -99,9 +99,17 @@ func completionWords(line []rune) (start int, before []string, partial string, o
 	return start, before, string(word), openingQuote
 }
 
-func consoleCompletions(before []string, partial string, quote rune, selected, vpn, attached bool) []consoleCompletion {
+func consoleCompletions(before []string, partial string, quote rune, selected, vpn, attached bool, registries ...*loadedBOFRegistry) []consoleCompletion {
+	var registry *loadedBOFRegistry
+	if len(registries) > 0 {
+		registry = registries[0]
+	}
 	if len(before) == 0 {
-		commands := []string{"agents", "use", "status", "routes", "help", "clear", "cls", "quit", "exit"}
+		if matches := wordCompletions(registry.names(), partial); len(matches) == 1 && partial != "" {
+			return matches
+		}
+		commands := []string{"agents", "use", "status", "routes", "help", "clear", "cls", "quit", "exit", "load", "unload", "bofs"}
+		commands = append(commands, registry.names()...)
 		if selected {
 			commands = append(commands, "show", "back", "route", "jobs", "job", "exec", "shell", "run-script", "run-wasm", "run-native", "run-bof", "pwd", "ls", "stat", "mkdir", "rm", "whoami", "ps", "privileges", "env", "interfaces", "dns", "route-table")
 		}
@@ -122,6 +130,23 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 		return wordCompletions(commands, partial)
 	}
 	switch before[0] {
+	case "load":
+		if len(before) == 1 {
+			return wordCompletions([]string{"bof"}, partial)
+		}
+		if len(before) == 2 && before[1] == "bof" {
+			return localPathCompletions(partial, quote, false)
+		}
+		if strings.HasPrefix(partial, "--") {
+			return wordCompletions([]string{"--format"}, partial)
+		}
+	case "unload":
+		if len(before) == 1 {
+			return wordCompletions([]string{"bof"}, partial)
+		}
+		if len(before) == 2 && before[1] == "bof" {
+			return wordCompletions(registry.names(), partial)
+		}
 	case "vpn", "internal":
 		if vpn && len(before) == 1 {
 			return wordCompletions([]string{"on", "off", "status"}, partial)
@@ -144,7 +169,8 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 		}
 	case "help":
 		if len(before) == 1 {
-			topics := []string{"agents", "status", "route", "lifecycle", "clear"}
+			topics := []string{"agents", "status", "route", "lifecycle", "clear", "load", "unload", "bofs"}
+			topics = append(topics, registry.names()...)
 			if selected {
 				topics = append(topics, "shell", "exec", "run-script", "run-wasm", "run-native", "run-bof", "jobs", "host")
 			}

@@ -96,6 +96,7 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 		serverConsole = features[0]
 	}
 	selectedID, selectedLabel := "", ""
+	loadedBOFs := newLoadedBOFRegistry()
 	var jobSelection consoleJobSelection
 	known := make(map[string]control.AgentInfo)
 	type agentRefresh struct {
@@ -130,6 +131,7 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 		defer restore()
 		editor = newConsoleEditor(output, vpnClient)
 		editor.serverAttached = serverConsole.serverAttached
+		editor.loadedBOFs = loadedBOFs
 		go func() { scanDone <- editor.read(ctx, input, lines) }()
 	} else {
 		scanner := bufio.NewScanner(input)
@@ -295,7 +297,13 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 			if len(args) == 2 {
 				topic = args[1]
 			}
-			if err := printConsoleHelp(output, vpnClient, selectedID != "", serverConsole.serverAttached, topic, consoleHelpOptions{agent: selectedLabel, color: terminalOutput && os.Getenv("NO_COLOR") == "" && os.Getenv("TERM") != "dumb"}); err != nil {
+			if err := printConsoleHelp(output, vpnClient, selectedID != "", serverConsole.serverAttached, topic, consoleHelpOptions{agent: selectedLabel, color: terminalOutput && os.Getenv("NO_COLOR") == "" && os.Getenv("TERM") != "dumb", loadedBOFs: loadedBOFs}); err != nil {
+				fmt.Fprintln(output, "error:", err)
+			}
+			continue
+		}
+		if args[0] == "load" || args[0] == "unload" || args[0] == "bofs" {
+			if err := runLoadedBOFManagement(output, loadedBOFs, args); err != nil {
 				fmt.Fprintln(output, "error:", err)
 			}
 			continue
@@ -343,6 +351,12 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 				continue
 			}
 			if err := runInteractiveConsole(ctx, output, editor, features[0].open, selectedID, args[1:]); err != nil {
+				fmt.Fprintln(output, "error:", err)
+			}
+			continue
+		}
+		if entry := loadedBOFs.get(args[0]); entry != nil {
+			if err := runLoadedBOF(ctx, output, editor, call, serverConsole.bof, entry, selectedID, selectedLabel, args[1:]); err != nil {
 				fmt.Fprintln(output, "error:", err)
 			}
 			continue

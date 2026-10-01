@@ -4,6 +4,8 @@ The interactive console supports `run-native [--background] [--data LOCAL_FILE] 
 
 The console also supports `run-bof [--background] [--format FORMAT] [--manifest FILE] OBJECT.o [--format FORMAT] [ARGS]` for compatible Windows AMD64 BOFs. At the main menu, put `AGENT_ID` immediately after `run-bof`. Use `undertow bof inspect FILE.o` to inspect compatibility locally. BOFs use the same `native` capability and normal job commands; they remain separate from UTN1 `.module` DLLs and portable WASM. See [BOF compatibility](bof-compatibility.md) for arguments, imports and the supported COFF subset.
 
+`load bof FILE [NAME] [--format FORMAT]` registers a BOF as a command in the current interactive console process; `bofs` lists registrations and `unload bof NAME` removes one. A sidecar `FILE.o.json` or `FILE.json` supplies argument types and help automatically. After `use NUMBER`, invoke the loaded alias directly, with optional trailing `--background`. `help` and Tab completion include loaded commands. The same registration works with any selected agent and disappears when the console process exits.
+
 Run `undertow help` or `undertow help COMMAND` for terminal help. Linux binary: `./bin/undertow`; Windows binary: `.\bin\undertow.exe`. This page describes the current command line. Paths are relative to the process working directory unless absolute.
 
 Run `undertow examples` (or `undertow help examples`) for short commands by host covering server pivots, internal-only clients, VPN egress, combined routing, and a single TCP forward. For verification and cleanup, see the [quickstart](quickstart.md).

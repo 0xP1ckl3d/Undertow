@@ -106,6 +106,10 @@ objectPath:
 	if err != nil {
 		return err
 	}
+	return executeConsoleBOF(ctx, output, editor, call, open, agentID, "", object, packed, background)
+}
+
+func executeConsoleBOF(ctx context.Context, output io.Writer, editor *consoleEditor, call consoleCaller, open bofOpener, agentID, agentLabel string, object, packed []byte, background bool) error {
 	if background {
 		response, err := call(ctx, http.MethodPost, "/v1/agents/"+url.PathEscape(agentID)+"/bof/jobs", map[string]any{"source": object, "arguments": packed})
 		if err != nil {
@@ -115,7 +119,10 @@ objectPath:
 		if err := json.Unmarshal(response, &job); err != nil {
 			return err
 		}
-		fmt.Fprintf(output, "BOF job %s started on %s. Use job output %s, or run jobs for a numbered list.\n", job.ID, shortAgentID(job.AgentID), job.ID)
+		if agentLabel == "" {
+			agentLabel = shortAgentID(job.AgentID)
+		}
+		fmt.Fprintf(output, "BOF job %s started on %s. Use job output %s, or run jobs for a numbered list.\n", job.ID, agentLabel, job.ID)
 		return nil
 	}
 	if open == nil {

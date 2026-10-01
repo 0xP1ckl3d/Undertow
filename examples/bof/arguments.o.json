@@ -1,11 +1,14 @@
 {
   "name": "arguments",
+  "description": "Demonstrate Beacon argument parsing and formatting",
+  "usage": "arguments <number> <small> <text> <wide> <blob>",
+  "help": "Pass the blob as @FILE or base64:DATA.",
   "entrypoint": "go",
   "arguments": [
-    {"name": "number", "type": "int"},
-    {"name": "small", "type": "short"},
-    {"name": "text", "type": "string"},
-    {"name": "wide", "type": "wstring"},
-    {"name": "blob", "type": "binary"}
+    {"name": "number", "type": "int", "required": true},
+    {"name": "small", "type": "short", "required": true},
+    {"name": "text", "type": "string", "required": true},
+    {"name": "wide", "type": "wstring", "required": true},
+    {"name": "blob", "type": "binary", "required": true}
   ]
 }

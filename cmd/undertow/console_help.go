@@ -10,7 +10,9 @@ func printConsoleHelp(output io.Writer, vpnClient, selected, serverAttached bool
 	topic = strings.ToLower(topic)
 	if topic != "" && len(options) > 0 && options[0].color {
 		var plain strings.Builder
-		if err := printConsoleHelp(&plain, vpnClient, selected, serverAttached, topic); err != nil {
+		plainOptions := options[0]
+		plainOptions.color = false
+		if err := printConsoleHelp(&plain, vpnClient, selected, serverAttached, topic, plainOptions); err != nil {
 			return err
 		}
 		printColorConsoleTopic(output, plain.String())
@@ -24,7 +26,22 @@ func printConsoleHelp(output io.Writer, vpnClient, selected, serverAttached bool
 		printConsoleOverview(output, vpnClient, selected, serverAttached, opt)
 		return nil
 	}
+	if len(options) > 0 {
+		if entry := options[0].loadedBOFs.get(topic); entry != nil {
+			printLoadedBOFHelp(output, entry)
+			return nil
+		}
+	}
 	switch topic {
+	case "load", "unload", "bofs":
+		fmt.Fprint(output, `Loaded BOF commands (local to this console session):
+  load bof FILE [NAME] [--format FORMAT]
+  unload bof NAME
+  bofs
+Load validates the object and an optional FILE.o.json or FILE.json sidecar.
+Without a sidecar, --format records argument types for later invocations.
+Select an agent and type the loaded command name to execute it.
+`)
 	case "help", "navigation", "agents", "use", "back", "show", "status":
 		fmt.Fprint(output, `Navigation and inspection:
   agents                    List connected agents with current numbers.

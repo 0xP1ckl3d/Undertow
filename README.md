@@ -104,6 +104,8 @@ On Windows amd64 agents, `run-native examples/native/wininfo/wininfo.module` run
 
 Existing Windows AMD64 BOFs can run directly as COFF `.o` files with `run-bof examples/bof/hello.o`, or be inspected locally with `undertow bof inspect examples/bof/hello.o`. `run-bof --background` uses the same jobs and `native` capability. Use `--format` or an optional sidecar manifest for Beacon arguments. See the [BOF compatibility guide](docs/bof-compatibility.md) and [examples](examples/bof/README.md). WASM, Undertow native modules, and BOFs are separate extension formats with shared agent transport and job output.
 
+For repeated use, `load bof examples/bof/arguments.o` registers `arguments` as a command in the current console session. Its sidecar supplies argument types and help, so after selecting an agent you can type `arguments 123 7 hello world base64:AAEC` or add `--background`. Use `bofs` to list loaded commands and `unload bof arguments` to remove one. With no sidecar, give `--format` once when loading. Registrations stay local to that console process and are not persisted.
+
 Agent inventory includes IPv4 routes with gateways, interfaces, route sources, and a separate default route. In the client console, `routes` shows candidates; after `use 1`, enter `route accept 10.20.0.0/16` for a reported network or `route add 10.20.0.0/16` for a manually known path. No server route command is required for this client-owned setup.
 
 `status` gives a short multi-agent view. Select an agent and type `show`, or run `undertow agent show AGENT_ID` on the server, for connection, transport, route, capability, job, and forwarding details. Add `--json` to the CLI command for structured output.

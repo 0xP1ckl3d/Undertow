@@ -17,6 +17,7 @@ type consoleEditor struct {
 	selected       bool
 	vpn            bool
 	serverAttached bool
+	loadedBOFs     *loadedBOFRegistry
 	line           []rune
 	cursor         int
 	history        []string

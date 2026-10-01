@@ -16,13 +16,31 @@ import (
 const MaxArguments = 1 << 20
 
 type ArgumentSpec struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
+	Name     string `json:"name"`
+	Type     string `json:"type"`
+	Required *bool  `json:"required,omitempty"`
 }
 type Manifest struct {
-	Name       string         `json:"name"`
-	Entrypoint string         `json:"entrypoint"`
-	Arguments  []ArgumentSpec `json:"arguments"`
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Usage       string         `json:"usage,omitempty"`
+	Help        string         `json:"help,omitempty"`
+	Entrypoint  string         `json:"entrypoint"`
+	Arguments   []ArgumentSpec `json:"arguments"`
+}
+
+func (a ArgumentSpec) IsRequired() bool { return a.Required == nil || *a.Required }
+
+func ValidateFormat(format string) error {
+	if len(format) > 128 {
+		return errors.New("BOF argument format exceeds 128 characters")
+	}
+	for i := range format {
+		if !strings.ContainsRune("iszZb", rune(format[i])) {
+			return fmt.Errorf("invalid BOF argument format %q at position %d", format[i], i+1)
+		}
+	}
+	return nil
 }
 
 func ParseManifest(src []byte) (Manifest, string, error) {
@@ -37,7 +55,14 @@ func ParseManifest(src []byte) (Manifest, string, error) {
 		return m, "", errors.New("BOF manifest entrypoint must be go")
 	}
 	var format strings.Builder
+	optional := false
 	for _, a := range m.Arguments {
+		if a.IsRequired() && optional {
+			return m, "", errors.New("required BOF arguments must precede optional arguments")
+		}
+		if !a.IsRequired() {
+			optional = true
+		}
 		switch a.Type {
 		case "int", "int32":
 			format.WriteByte('i')
@@ -53,10 +78,16 @@ func ParseManifest(src []byte) (Manifest, string, error) {
 			return m, "", fmt.Errorf("unsupported BOF manifest argument type %q", a.Type)
 		}
 	}
+	if err := ValidateFormat(format.String()); err != nil {
+		return m, "", err
+	}
 	return m, format.String(), nil
 }
 
 func EncodeArguments(format string, values []string, readBinary func(string) ([]byte, error)) ([]byte, error) {
+	if err := ValidateFormat(format); err != nil {
+		return nil, err
+	}
 	if len(format) != len(values) || len(format) > 128 {
 		return nil, errors.New("BOF argument count does not match --format")
 	}

@@ -7,8 +7,9 @@ import (
 )
 
 type consoleHelpOptions struct {
-	agent string
-	color bool
+	agent      string
+	color      bool
+	loadedBOFs *loadedBOFRegistry
 }
 
 type consoleMenu struct {
@@ -65,6 +66,9 @@ func printConsoleOverview(output io.Writer, vpnClient, selected, serverAttached 
 	m.row("status [--json]", "Show listeners, peers, routes and counters")
 	m.row("help [TOPIC]", "Show detailed command help")
 	m.row("clear / cls", "Clear the screen")
+	m.row("load bof FILE [NAME]", "Register a local BOF command for this session")
+	m.row("unload bof NAME", "Remove a loaded BOF command")
+	m.row("bofs", "List loaded BOF commands")
 
 	if selected {
 		m.section("AGENT SESSION")
@@ -151,6 +155,19 @@ func printConsoleOverview(output io.Writer, vpnClient, selected, serverAttached 
 		}
 	}
 	m.hint("Type help TOPIC for details. Tab completes commands and local paths.")
+	if opt.loadedBOFs != nil {
+		if names := opt.loadedBOFs.names(); len(names) > 0 {
+			m.section("Loaded BOFs")
+			for _, name := range names {
+				entry := opt.loadedBOFs.get(name)
+				description := strings.SplitN(entry.Manifest.Description, "\n", 2)[0]
+				if description == "" {
+					description = "Windows AMD64 BOF"
+				}
+				m.row(name, description)
+			}
+		}
+	}
 	fmt.Fprintln(output)
 }
 

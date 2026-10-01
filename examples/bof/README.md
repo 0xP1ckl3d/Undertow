@@ -3,7 +3,7 @@
 Run `./examples/bof/build.ps1` in an x64 MSVC Developer PowerShell. It builds raw AMD64 COFF `.o` files with `cl.exe /c /GS- /Zl /O1 /W4`; no wrapping or post-processing is needed. The compiled objects are included for inspection and tests. `beacon.h` contains the minimal conventional Beacon declarations used by these examples.
 
 - `hello.c` exercises `BeaconPrintf`, `BeaconOutput`, a `KERNEL32$` import, and multiple sections.
-- `arguments.c` exercises integer, short, ANSI, wide and binary argument parsing plus the `BeaconFormat*` helpers. Its optional `arguments.o.json` sidecar supplies the format. Try `run-bof examples/bof/arguments.o 123 7 hello world base64:AAEC`.
+- `arguments.c` exercises integer, short, ANSI, wide and binary argument parsing plus the `BeaconFormat*` helpers. Its optional `arguments.o.json` sidecar supplies the format and console help. Try `load bof examples/bof/arguments.o`, then `arguments 123 7 hello world base64:AAEC` on a selected agent.
 - `imports.c` exercises imports from kernel32, advapi32, netapi32 and iphlpapi.
 - `loop.c` is a long-running object for cancellation and job tests.
 
