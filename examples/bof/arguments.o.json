@@ -1,0 +1,11 @@
+{
+  "name": "arguments",
+  "entrypoint": "go",
+  "arguments": [
+    {"name": "number", "type": "int"},
+    {"name": "small", "type": "short"},
+    {"name": "text", "type": "string"},
+    {"name": "wide", "type": "wstring"},
+    {"name": "blob", "type": "binary"}
+  ]
+}

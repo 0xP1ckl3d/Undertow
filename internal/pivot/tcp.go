@@ -81,6 +81,14 @@ func ServeAgentWithCapabilities(ctx context.Context, m *mux.Mux, caps Capabiliti
 			go serveNative(ctx, s)
 			continue
 		}
+		if s.Destination() == BOFDestination {
+			if !caps.Native {
+				s.Fail(errors.New("agent native execution is disabled"))
+				continue
+			}
+			go serveBOF(ctx, s)
+			continue
+		}
 		if s.Destination() == FileDestination {
 			if !caps.Upload && !caps.Download {
 				s.Fail(errors.New("agent file transfer is disabled"))

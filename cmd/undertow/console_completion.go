@@ -103,7 +103,7 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 	if len(before) == 0 {
 		commands := []string{"agents", "use", "status", "routes", "help", "clear", "cls", "quit", "exit"}
 		if selected {
-			commands = append(commands, "show", "back", "route", "jobs", "job", "exec", "shell", "run-script", "run-wasm", "run-native", "pwd", "ls", "stat", "mkdir", "rm", "whoami", "ps", "privileges", "env", "interfaces", "dns", "route-table")
+			commands = append(commands, "show", "back", "route", "jobs", "job", "exec", "shell", "run-script", "run-wasm", "run-native", "run-bof", "pwd", "ls", "stat", "mkdir", "rm", "whoami", "ps", "privileges", "env", "interfaces", "dns", "route-table")
 		}
 		if vpn {
 			commands = append(commands, "background", "internal", "vpn")
@@ -146,7 +146,7 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 		if len(before) == 1 {
 			topics := []string{"agents", "status", "route", "lifecycle", "clear"}
 			if selected {
-				topics = append(topics, "shell", "exec", "run-script", "run-wasm", "run-native", "jobs", "host")
+				topics = append(topics, "shell", "exec", "run-script", "run-wasm", "run-native", "run-bof", "jobs", "host")
 			}
 			if vpn {
 				topics = append(topics, "internal", "vpn")
@@ -190,7 +190,7 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 		if len(args) == 1 && (args[0] == "bash" || args[0] == "powershell") || len(args) == 2 && args[0] == "--background" && (args[1] == "bash" || args[1] == "powershell") {
 			return localPathCompletions(partial, quote, false)
 		}
-	case "run-wasm", "run-native":
+	case "run-wasm", "run-native", "run-bof":
 		args := before[1:]
 		if !selected {
 			if len(args) == 0 {
@@ -199,6 +199,9 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 			args = args[1:]
 		}
 		if strings.HasPrefix(partial, "--") {
+			if before[0] == "run-bof" {
+				return wordCompletions([]string{"--background", "--format", "--manifest"}, partial)
+			}
 			if before[0] == "run-native" {
 				return wordCompletions([]string{"--background", "--data"}, partial)
 			}
@@ -208,11 +211,16 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 			switch args[i] {
 			case "--background":
 				continue
-			case "--stdin", "--data":
+			case "--stdin", "--data", "--manifest":
 				if i == len(args)-1 {
 					return localPathCompletions(partial, quote, false)
 				}
 				i++ // stdin path already supplied
+			case "--format":
+				if i == len(args)-1 {
+					return nil
+				}
+				i++
 			default:
 				return nil // module already supplied; remaining words are its arguments
 			}

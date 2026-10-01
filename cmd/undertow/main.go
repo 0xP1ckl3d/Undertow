@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"undertow/internal/bof"
 	"undertow/internal/control"
 	"undertow/internal/mux"
 	"undertow/internal/netstack"
@@ -35,6 +36,13 @@ var commit = "none"
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+	if len(os.Args) >= 2 && os.Args[1] == "_bof-worker" {
+		if err := bof.WorkerMain(os.Stdin, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) < 2 || os.Getenv(backgroundModeEnv) != os.Args[1] {
 		writeBanner(os.Stderr)
 	}
@@ -92,6 +100,8 @@ func main() {
 		}
 	case "doctor":
 		err = doctorCommand(os.Args[2:], os.Stdout)
+	case "bof":
+		err = bofCommand(os.Args[2:], os.Stdout)
 	default:
 		_ = writeHelp(os.Stderr, "")
 		os.Exit(2)

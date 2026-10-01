@@ -31,6 +31,7 @@ type consoleFeatures struct {
 	script         scriptOpener
 	wasm           wasmOpener
 	native         nativeOpener
+	bof            bofOpener
 	transfer       clientTransferAction
 	serverLogPath  string
 	serverAttached bool
@@ -73,7 +74,10 @@ func consoleCommandWithOptions(options operatorOptions, lifecycle consoleFeature
 	native := func(ctx context.Context, agentID string, module []byte, args []string, data []byte) (*pivot.InteractiveSession, error) {
 		return openControlNative(ctx, options, agentID, module, args, data)
 	}
-	lifecycle.open, lifecycle.script, lifecycle.wasm, lifecycle.native = opener, script, wasm, native
+	bofOpen := func(ctx context.Context, agentID string, object, arguments []byte) (*pivot.InteractiveSession, error) {
+		return openControlBOF(ctx, options, agentID, object, arguments)
+	}
+	lifecycle.open, lifecycle.script, lifecycle.wasm, lifecycle.native, lifecycle.bof = opener, script, wasm, native, bofOpen
 	return runConsole(ctx, os.Stdin, os.Stdout, caller, nil, nil, nil, nil, lifecycle)
 }
 
@@ -359,6 +363,8 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 				args = append([]string{"run-wasm", selectedID}, args[1:]...)
 			case "run-native":
 				args = append([]string{"run-native", selectedID}, args[1:]...)
+			case "run-bof":
+				args = append([]string{"run-bof", selectedID}, args[1:]...)
 			case "pwd", "ls", "stat", "mkdir", "rm", "whoami", "ps", "privileges", "env", "interfaces", "dns", "route-table":
 				args = append([]string{args[0], selectedID}, args[1:]...)
 			case "upload", "download":
@@ -415,6 +421,16 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 				open = features[0].native
 			}
 			if err := runConsoleNative(ctx, output, editor, call, open, args); err != nil {
+				fmt.Fprintln(output, "error:", err)
+			}
+			continue
+		}
+		if args[0] == "run-bof" {
+			var open bofOpener
+			if len(features) != 0 {
+				open = features[0].bof
+			}
+			if err := runConsoleBOF(ctx, output, editor, call, open, args); err != nil {
 				fmt.Fprintln(output, "error:", err)
 			}
 			continue
@@ -590,6 +606,7 @@ func runConsoleCommand(ctx context.Context, output io.Writer, call consoleCaller
   run-script AGENT_ID [--background] bash|powershell LOCAL_FILE
   run-wasm AGENT_ID [--background] [--stdin FILE] MODULE [ARGS]
   run-native AGENT_ID [--background] [--data FILE] MODULE [ARGS]
+  run-bof AGENT_ID [--background] [--format FORMAT] OBJECT.o [ARGS]
   job start AGENT_ID PROGRAM ... Start a background task
   jobs; job show|output|cancel ID Inspect or stop tasks
   HOST_OP AGENT_ID [ARGS]        Host operations; type use NUMBER then help
@@ -615,6 +632,7 @@ Quote arguments containing spaces.
   run-script AGENT_ID [--background] bash|powershell LOCAL_FILE
   run-wasm AGENT_ID [--background] [--stdin FILE] MODULE [ARGS]
   run-native AGENT_ID [--background] [--data FILE] MODULE [ARGS]
+  run-bof AGENT_ID [--background] [--format FORMAT] OBJECT.o [ARGS]
   job start AGENT_ID PROGRAM ... Start a background task
   jobs; job show|output|cancel ID Inspect or stop tasks
   HOST_OP AGENT_ID [ARGS]        Host operations; type use NUMBER then help

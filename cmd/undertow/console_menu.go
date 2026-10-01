@@ -73,6 +73,7 @@ func printConsoleOverview(output io.Writer, vpnClient, selected, serverAttached 
 		m.row("run-script [OPTIONS] FILE", "Run a local script on this agent")
 		m.row("run-wasm [OPTIONS] MODULE", "Run a local WASM module")
 		m.row("run-native [OPTIONS] MODULE", "Run a Windows native module")
+		m.row("run-bof [OPTIONS] OBJECT.o", "Run a Windows AMD64 BOF")
 		m.row("job start PROGRAM [ARGS]", "Start a background task")
 		m.row("jobs", "List this agent's numbered tasks")
 		m.row("jobs NUMBER", "Show one task")

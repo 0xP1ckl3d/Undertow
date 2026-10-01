@@ -56,6 +56,7 @@ Commands:
   session    Disconnect an agent session.
   examples   Show common setups with commands by machine.
   doctor     Check local prerequisites before starting a role.
+  bof        Inspect a Windows AMD64 Beacon Object File.
   version    Print build version.
 
 Transport: the server listens on QUIC UDP/443, WebSocket TCP/443 and DNS UDP/53
@@ -281,13 +282,20 @@ this console automatically with 'undertow server'; 'server attach' returns
 after detaching. Type 'agents', 'use 1', and 'show' to inspect an agent.
 'help' shows the full menu for the current level. Type 'help relay', 'help route', 'help
 run-script', or another topic for detailed usage. Tab completes command
-names and local script, WASM, and transfer paths. 'clear' or 'cls' clears the
+names and local script, WASM, native module, BOF, and transfer paths. 'clear' or 'cls' clears the
 screen. The client console supports 'vpn on|off|status' and
 'internal on|off|status'. Ctrl-] exits a live shell
 without closing the Undertow console. See docs/console.md for the full guide.
 `
-	case "relay", "topology", "transport", "transports", "run-script", "run-wasm", "run-native", "shell", "jobs", "host":
+	case "relay", "topology", "transport", "transports", "run-script", "run-wasm", "run-native", "run-bof", "shell", "jobs", "host":
 		return printConsoleHelp(w, false, true, false, topic)
+	case "bof":
+		body = `undertow bof inspect FILE.o — inspect BOF compatibility locally
+
+Parses an AMD64 COFF object and reports sections, symbols, relocations,
+Windows imports, Beacon imports, and compatibility errors. Execution uses
+the same parser. See docs/bof-compatibility.md.
+`
 	case "forward", "upload", "download", "internal":
 		return printConsoleHelp(w, true, true, false, topic)
 	case "status":

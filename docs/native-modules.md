@@ -1,6 +1,6 @@
 # Developing Undertow native modules
 
-Native modules complement [WASM modules](wasm-development.md). WASM uses portable `wasip1/wasm` code and `undertow_host_v1` imports. Native modules target a specific OS and architecture, use ordinary platform APIs, and use `undertow_native_v1` only for Undertow output, arguments, cancellation, and run information. Native code has the agent process's privileges and shares its address space; use modules you trust. A native crash can terminate the agent process.
+Native modules complement [WASM modules](wasm-development.md). WASM uses portable `wasip1/wasm` code and `undertow_host_v1` imports. Native modules target a specific OS and architecture, use ordinary platform APIs, and use `undertow_native_v1` only for Undertow output, arguments, cancellation, and run information. [BOF compatibility](bof-compatibility.md) is a third extension path for existing AMD64 COFF `.o` files with the Beacon ABI; those run with `run-bof`, while Undertow `.module` DLLs run with `run-native`. Native code has the agent process's privileges and shares its address space; use modules you trust. A native crash can terminate the agent process.
 
 ## Supported format and build
 

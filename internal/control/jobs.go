@@ -12,6 +12,7 @@ import (
 	"sort"
 	"time"
 
+	"undertow/internal/bof"
 	"undertow/internal/mux"
 	"undertow/internal/nativemodule"
 	"undertow/internal/pivot"
@@ -135,6 +136,36 @@ func (m *Manager) StartNativeJob(ctx context.Context, owner uint64, agentID stri
 		return JobInfo{}, err
 	}
 	return m.registerJob(owner, agentID, state.mux, session, JobInfo{AgentID: agentID, Kind: "native", Argv: append([]string(nil), args...)})
+}
+
+func (m *Manager) StartBOFJob(ctx context.Context, owner uint64, agentID string, object, arguments []byte) (JobInfo, error) {
+	compat, err := bof.Parse(object)
+	if err != nil {
+		return JobInfo{}, err
+	}
+	if !compat.Supported {
+		return JobInfo{}, errors.New("unsupported BOF: " + compat.Errors[0])
+	}
+	if len(arguments) < 4 || len(arguments) > bof.MaxArguments+4 {
+		return JobInfo{}, errors.New("invalid BOF argument buffer")
+	}
+	m.mu.RLock()
+	state := m.agents[agentID]
+	count := len(m.jobs)
+	m.mu.RUnlock()
+	if state == nil {
+		return JobInfo{}, errors.New("agent is not connected")
+	}
+	if count >= 512 {
+		return JobInfo{}, errors.New("job limit reached")
+	}
+	startCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	session, err := pivot.OpenBOF(startCtx, state.mux, object, arguments)
+	if err != nil {
+		return JobInfo{}, err
+	}
+	return m.registerJob(owner, agentID, state.mux, session, JobInfo{AgentID: agentID, Kind: "bof"})
 }
 
 func (m *Manager) registerJob(owner uint64, agentID string, agent *mux.Mux, session *pivot.InteractiveSession, info JobInfo) (JobInfo, error) {
@@ -334,6 +365,22 @@ func (m *Manager) jobHTTPHandlers(muxer *http.ServeMux) {
 			return
 		}
 		job, err := m.StartNativeJob(r.Context(), jobOwner(r.Context()), r.PathValue("id"), request.Source, request.Args, request.Data)
+		if err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		jsonReply(w, http.StatusCreated, job)
+	})
+	muxer.HandleFunc("POST /v1/agents/{id}/bof/jobs", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Source    []byte `json:"source"`
+			Arguments []byte `json:"arguments"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 12<<20)).Decode(&request); err != nil {
+			http.Error(w, "invalid BOF job request", 400)
+			return
+		}
+		job, err := m.StartBOFJob(r.Context(), jobOwner(r.Context()), r.PathValue("id"), request.Source, request.Arguments)
 		if err != nil {
 			http.Error(w, err.Error(), 400)
 			return

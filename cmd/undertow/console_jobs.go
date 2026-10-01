@@ -70,6 +70,8 @@ func runConsoleJobCommand(ctx context.Context, output io.Writer, call consoleCal
 					label = strings.TrimSpace("WASM module " + label)
 				} else if job.Kind == "native" {
 					label = strings.TrimSpace("native module " + label)
+				} else if job.Kind == "bof" {
+					label = strings.TrimSpace("BOF " + label)
 				}
 				status := job.State
 				if job.ExitCode != nil {

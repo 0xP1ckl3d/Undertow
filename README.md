@@ -102,6 +102,8 @@ Use `run-wasm ./tool.wasm` or `run-wasm --background ./long-task.wasm` to run a 
 
 On Windows amd64 agents, `run-native examples/native/wininfo/wininfo.module` runs a native DLL module with direct Windows API access. `run-native --background` uses the same jobs system, and `--data FILE` passes opaque binary data. The independent `native` capability controls execution. See the [native module guide](docs/native-modules.md), [SDK](sdk/native/README.md), and [examples](examples/native/README.md).
 
+Existing Windows AMD64 BOFs can run directly as COFF `.o` files with `run-bof examples/bof/hello.o`, or be inspected locally with `undertow bof inspect examples/bof/hello.o`. `run-bof --background` uses the same jobs and `native` capability. Use `--format` or an optional sidecar manifest for Beacon arguments. See the [BOF compatibility guide](docs/bof-compatibility.md) and [examples](examples/bof/README.md). WASM, Undertow native modules, and BOFs are separate extension formats with shared agent transport and job output.
+
 Agent inventory includes IPv4 routes with gateways, interfaces, route sources, and a separate default route. In the client console, `routes` shows candidates; after `use 1`, enter `route accept 10.20.0.0/16` for a reported network or `route add 10.20.0.0/16` for a manually known path. No server route command is required for this client-owned setup.
 
 `status` gives a short multi-agent view. Select an agent and type `show`, or run `undertow agent show AGENT_ID` on the server, for connection, transport, route, capability, job, and forwarding details. Add `--json` to the CLI command for structured output.

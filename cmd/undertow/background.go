@@ -33,6 +33,7 @@ var backgroundInteractiveHandler func(context.Context, string, net.Conn) error
 var backgroundScriptHandler func(context.Context, string, net.Conn) error
 var backgroundWASMHandler func(context.Context, string, net.Conn) error
 var backgroundNativeHandler func(context.Context, string, net.Conn) error
+var backgroundBOFHandler func(context.Context, string, net.Conn) error
 var backgroundTransferHandler func(context.Context, json.RawMessage, func(pivot.TransferProgress)) (pivot.FileMessage, error)
 var backgroundConsoleMu sync.RWMutex
 
@@ -63,6 +64,12 @@ func setBackgroundWASMHandler(handler func(context.Context, string, net.Conn) er
 func setBackgroundNativeHandler(handler func(context.Context, string, net.Conn) error) {
 	backgroundConsoleMu.Lock()
 	backgroundNativeHandler = handler
+	backgroundConsoleMu.Unlock()
+}
+
+func setBackgroundBOFHandler(handler func(context.Context, string, net.Conn) error) {
+	backgroundConsoleMu.Lock()
+	backgroundBOFHandler = handler
 	backgroundConsoleMu.Unlock()
 }
 
@@ -346,7 +353,7 @@ func startBackgroundControl(pidPath string) (func(), error) {
 					if err := json.Unmarshal([]byte(request), &input); err != nil {
 						response.Error = "invalid console request"
 					} else {
-						if input.Action == "interactive" || input.Action == "script" || input.Action == "wasm" || input.Action == "native" {
+						if input.Action == "interactive" || input.Action == "script" || input.Action == "wasm" || input.Action == "native" || input.Action == "bof" {
 							_ = conn.SetDeadline(time.Time{})
 							backgroundConsoleMu.RLock()
 							interactive := backgroundInteractiveHandler
@@ -356,6 +363,8 @@ func startBackgroundControl(pidPath string) (func(), error) {
 								interactive = backgroundWASMHandler
 							} else if input.Action == "native" {
 								interactive = backgroundNativeHandler
+							} else if input.Action == "bof" {
+								interactive = backgroundBOFHandler
 							}
 							backgroundConsoleMu.RUnlock()
 							if interactive == nil {

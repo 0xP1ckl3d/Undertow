@@ -84,10 +84,13 @@ func attachClientAt(path string) error {
 	native := func(ctx context.Context, agentID string, module []byte, args []string, data []byte) (*pivot.InteractiveSession, error) {
 		return openAttachedNative(ctx, path, agentID, module, args, data)
 	}
+	bofOpen := func(ctx context.Context, agentID string, object, arguments []byte) (*pivot.InteractiveSession, error) {
+		return openAttachedBOF(ctx, path, agentID, object, arguments)
+	}
 	transfer := func(ctx context.Context, request clientFileRequest, progress func(pivot.TransferProgress)) (pivot.FileMessage, error) {
 		return attachedTransfer(ctx, path, request, progress)
 	}
-	return runConsole(ctx, os.Stdin, os.Stdout, caller, clientID, quit, routes, nil, consoleFeatures{open: opener, script: script, wasm: wasm, native: native, transfer: transfer})
+	return runConsole(ctx, os.Stdin, os.Stdout, caller, clientID, quit, routes, nil, consoleFeatures{open: opener, script: script, wasm: wasm, native: native, bof: bofOpen, transfer: transfer})
 }
 
 func openAttachedInteractive(ctx context.Context, path, agentID string, request pivot.InteractiveRequest) (*pivot.InteractiveSession, error) {
@@ -120,6 +123,14 @@ func openAttachedNative(ctx context.Context, path, agentID string, module []byte
 		return nil, err
 	}
 	return pivot.StartMemorySession(ctx, conn, reader, pivot.MemoryRequest{Args: args, Stdin: data, Size: len(module)}, module)
+}
+
+func openAttachedBOF(ctx context.Context, path, agentID string, object, arguments []byte) (*pivot.InteractiveSession, error) {
+	conn, reader, err := openAttachedSession(ctx, path, agentID, "bof")
+	if err != nil {
+		return nil, err
+	}
+	return pivot.StartMemorySession(ctx, conn, reader, pivot.MemoryRequest{Size: len(object), Stdin: arguments}, object)
 }
 
 func openAttachedSession(ctx context.Context, path, agentID, action string) (*net.TCPConn, *bufio.Reader, error) {

@@ -2,6 +2,8 @@
 
 The interactive console supports `run-native [--background] [--data LOCAL_FILE] MODULE_FILE [ARGS]` for Windows amd64 native `.module` files. At the main menu, put `AGENT_ID` immediately after `run-native`; after `use NUMBER`, omit it. Native runs use the agent's independent `native` capability and share the normal `jobs`, `job output`, and `job stop` commands. See [native modules](native-modules.md) for the ABI, MSVC build, imports and compatibility limits.
 
+The console also supports `run-bof [--background] [--format FORMAT] [--manifest FILE] OBJECT.o [--format FORMAT] [ARGS]` for compatible Windows AMD64 BOFs. At the main menu, put `AGENT_ID` immediately after `run-bof`. Use `undertow bof inspect FILE.o` to inspect compatibility locally. BOFs use the same `native` capability and normal job commands; they remain separate from UTN1 `.module` DLLs and portable WASM. See [BOF compatibility](bof-compatibility.md) for arguments, imports and the supported COFF subset.
+
 Run `undertow help` or `undertow help COMMAND` for terminal help. Linux binary: `./bin/undertow`; Windows binary: `.\bin\undertow.exe`. This page describes the current command line. Paths are relative to the process working directory unless absolute.
 
 Run `undertow examples` (or `undertow help examples`) for short commands by host covering server pivots, internal-only clients, VPN egress, combined routing, and a single TCP forward. For verification and cleanup, see the [quickstart](quickstart.md).

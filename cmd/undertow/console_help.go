@@ -124,6 +124,15 @@ MODULE_FILE is a .module container built with tools/nativepack. --data passes
 opaque binary bytes; ARGS are UTF-8. At the main menu, put AGENT_ID after
 run-native. The agent must allow the native capability.
 `)
+	case "run-bof", "bof":
+		fmt.Fprint(output, `Run a Windows AMD64 BOF object on the selected agent:
+  run-bof [--background] [--format FORMAT] [--manifest FILE] OBJECT.o [--format FORMAT] [ARGS]
+  bof inspect OBJECT.o      Inspect locally from the command line.
+The BOF must export go. Format characters: i=int32, s=int16, z=ANSI string,
+Z=wide string, b=binary (@FILE or base64:DATA). A sidecar OBJECT.o.json can
+provide argument types instead. At the main menu, put AGENT_ID after run-bof.
+The agent must allow the native capability. See docs/bof-compatibility.md.
+`)
 	case "job", "jobs":
 		fmt.Fprint(output, `Agent background tasks:
   job start PROGRAM [ARGS]  Start a task on the selected agent.
@@ -135,7 +144,7 @@ run-native. The agent must allow the native capability.
   job stop NUMBER|ID        Alias for job cancel.
 jobs show|output|cancel|stop NUMBER|ID also work. Job IDs remain valid if list
 numbers change. At the main menu, jobs AGENT_ID filters the list.
-run-script, run-wasm and run-native also accept --background.
+run-script, run-wasm, run-native and run-bof also accept --background.
 `)
 	case "host", "hostops", "pwd", "ls", "stat", "mkdir", "rm", "whoami", "ps", "privileges", "env", "interfaces", "dns", "route-table":
 		fmt.Fprint(output, `Built-in agent host operations (select an agent first):
