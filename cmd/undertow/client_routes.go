@@ -311,7 +311,7 @@ func (c *liveClientConsole) routeCommand(ctx context.Context, args []string, out
 					kind = "routed via " + route.Gateway
 				}
 				if conflict {
-					kind += ", conflicts with this client's local routes"
+					kind += "; overlaps a local route"
 				}
 				fmt.Fprintf(output, "  candidate %s via %s\n", route.Prefix, agentRouteLabel(agent.ID, status.Agents))
 				fmt.Fprintf(output, "    %s; interface=%s; source=%s\n", kind, route.Interface, route.Source)
