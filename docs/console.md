@@ -131,6 +131,8 @@ Accepted and manual routes are saved locally in `client-routes.json` by default 
 
 `vpn on|off` changes only Undertow's Internet routes; accepted agent routes stay installed. `internal on|off` changes server configured routes for new flows. Both settings survive carrier reconnects while the client worker runs. Restarting the client uses the startup flags again.
 
+`vpn status` shows whether Internet egress is enabled, the carrier (`dns`, `quic`, or `websocket`), and the last public IPv4 address verified on this connection. `internal status` lists currently installed accepted and server routes with their agent hostname and full ID, for example `10.10.10.0/24 via TALON (d24bb3...)`. The `routes` and server route views use the same agent label.
+
 After `background`, run `undertow client attach` to return. A VPN started with `client --background` can be attached the same way. Use the same `--pid-file PATH` on `attach` or `--stop` if startup used a custom PID file. `undertow client --stop` gracefully stops a detached client and removes its owned routes. `quit` in an attached VPN console does the same. A nonterminal invocation runs without a prompt unless `--interactive` is supplied.
 
 ### Expose a client TCP service on an agent

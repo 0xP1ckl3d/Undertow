@@ -4,13 +4,18 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"sort"
 	"sync"
 	"time"
+
+	"undertow/internal/control"
+	"undertow/internal/routing"
 )
 
 var internetRoutePrefixes = [...]string{"0.0.0.0/1", "128.0.0.0/1"}
@@ -82,6 +87,7 @@ func (c *liveClientConsole) vpnCommand(ctx context.Context, args []string, outpu
 	}
 	c.mu.RLock()
 	enabled, modeRoutes, verifyURL := c.vpn, c.modeRoutes, c.verifyURL
+	transport, publicIP, sessionID := c.transport, c.publicIP, c.sessionID
 	c.mu.RUnlock()
 	if len(args) == 1 || args[1] == "status" {
 		state := "off"
@@ -89,6 +95,18 @@ func (c *liveClientConsole) vpnCommand(ctx context.Context, args []string, outpu
 			state = "on"
 		}
 		fmt.Fprintf(output, "Internet egress through Undertow: %s\n", state)
+		if transport != "" {
+			fmt.Fprintf(output, "VPN transport: %s\n", transport)
+		}
+		if sessionID == 0 {
+			fmt.Fprintln(output, "VPN connection: disconnected")
+		} else if enabled {
+			if publicIP != "" {
+				fmt.Fprintf(output, "Public egress verified: %s\n", publicIP)
+			} else {
+				fmt.Fprintln(output, "Public egress: not verified")
+			}
+		}
 		return nil
 	}
 	if modeRoutes == nil {
@@ -100,6 +118,7 @@ func (c *liveClientConsole) vpnCommand(ctx context.Context, args []string, outpu
 		return nil
 	}
 	verificationAddress := ""
+	publicIP = ""
 	if want && verifyURL != "" {
 		resolveCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		address, err := resolveVerificationTarget(resolveCtx, verifyURL)
@@ -114,7 +133,7 @@ func (c *liveClientConsole) vpnCommand(ctx context.Context, args []string, outpu
 	}
 	if want && verifyURL != "" {
 		verifyCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-		publicIP, err := verifyPublicIP(verifyCtx, verifyURL, verificationAddress)
+		verifiedIP, err := verifyPublicIP(verifyCtx, verifyURL, verificationAddress)
 		cancel()
 		if err != nil {
 			if rollbackErr := modeRoutes.set(false); rollbackErr != nil {
@@ -122,10 +141,12 @@ func (c *liveClientConsole) vpnCommand(ctx context.Context, args []string, outpu
 			}
 			return fmt.Errorf("public egress check failed; VPN routes rolled back: %w", err)
 		}
+		publicIP = verifiedIP
 		fmt.Fprintf(output, "Public egress verified: %s\n", publicIP)
 	}
 	c.mu.Lock()
 	c.vpn = want
+	c.publicIP = publicIP
 	c.mu.Unlock()
 	fmt.Fprintf(output, "Internet egress through Undertow: %s\n", args[1])
 	if !want {
@@ -151,6 +172,22 @@ func (c *liveClientConsole) internalCommand(ctx context.Context, args []string, 
 			state = "on"
 		}
 		fmt.Fprintf(output, "Internal agent routing: %s\n", state)
+		if id == 0 {
+			fmt.Fprintln(output, "Routes: unavailable while disconnected")
+			return nil
+		}
+		data, err := c.call(ctx, http.MethodGet, "/v1/status", nil)
+		if err != nil {
+			return fmt.Errorf("fetch current routes: %w", err)
+		}
+		var status struct {
+			Agents []control.AgentInfo `json:"agents"`
+			Routes []routing.Route     `json:"routes"`
+		}
+		if err := json.Unmarshal(data, &status); err != nil {
+			return err
+		}
+		c.printInternalRoutes(output, status.Agents, status.Routes)
 		return nil
 	}
 	if id == 0 {
@@ -172,4 +209,34 @@ func (c *liveClientConsole) internalCommand(ctx context.Context, args []string, 
 		fmt.Fprintf(output, "Internal route sync pending: %v\n", err)
 	}
 	return nil
+}
+
+// The caller holds routeMu, so active and global reflect installed routes.
+func (c *liveClientConsole) printInternalRoutes(output io.Writer, agents []control.AgentInfo, serverRoutes []routing.Route) {
+	byPrefix := make(map[string]string)
+	for _, route := range c.routes {
+		if c.active[route.Prefix] {
+			byPrefix[route.Prefix] = route.AgentID
+		}
+	}
+	for _, route := range serverRoutes {
+		prefix := route.Prefix.Masked().String()
+		if (route.Active && c.internal && c.vpn) || c.global[prefix] {
+			if _, exists := byPrefix[prefix]; !exists {
+				byPrefix[prefix] = route.AgentID
+			}
+		}
+	}
+	prefixes := make([]string, 0, len(byPrefix))
+	for prefix := range byPrefix {
+		prefixes = append(prefixes, prefix)
+	}
+	sort.Strings(prefixes)
+	fmt.Fprintln(output, "Routes:")
+	if len(prefixes) == 0 {
+		fmt.Fprintln(output, "  (none)")
+	}
+	for _, prefix := range prefixes {
+		fmt.Fprintf(output, "  %s via %s\n", prefix, agentRouteLabel(byPrefix[prefix], agents))
+	}
 }

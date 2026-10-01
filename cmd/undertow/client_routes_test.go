@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"undertow/internal/control"
+	"undertow/internal/routing"
 )
 
 func TestInternalOnlyMirrorsActiveServerRoutes(t *testing.T) {
@@ -112,9 +113,34 @@ func TestClientConsoleTogglesInternetRoutes(t *testing.T) {
 
 func TestClientModeChoicesSurviveDisconnect(t *testing.T) {
 	client := &liveClientConsole{vpn: true, internal: true, events: make(chan string, 1)}
-	client.set(nil, 0, nil, nil)
+	client.set(nil, 0, nil, nil, "")
 	if !client.vpn || !client.internal {
 		t.Fatalf("mode choices changed on disconnect: vpn=%t internal=%t", client.vpn, client.internal)
+	}
+}
+
+func TestClientStatusNamesTransportEgressAndActiveRouteAgents(t *testing.T) {
+	client := &liveClientConsole{
+		vpn: true, transport: "quic", publicIP: "13.210.247.60", sessionID: 42,
+		routes: []control.AcceptedRoute{{Prefix: "10.10.10.0/24", AgentID: "agent-talon"}},
+		active: map[string]bool{"10.10.10.0/24": true},
+		global: map[string]bool{"192.168.20.0/24": true},
+	}
+	var output bytes.Buffer
+	if err := client.routeCommand(context.Background(), []string{"vpn", "status"}, &output); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Internet egress through Undertow: on", "VPN transport: quic", "Public egress verified: 13.210.247.60"} {
+		if !strings.Contains(output.String(), want) {
+			t.Fatalf("VPN status missing %q: %q", want, output.String())
+		}
+	}
+	output.Reset()
+	client.printInternalRoutes(&output, []control.AgentInfo{{ID: "agent-talon", Hostname: "TALON"}, {ID: "agent-ws01", Hostname: "WS01"}}, []routing.Route{{Prefix: netip.MustParsePrefix("192.168.20.0/24"), AgentID: "agent-ws01"}})
+	for _, want := range []string{"10.10.10.0/24 via TALON (agent-talon)", "192.168.20.0/24 via WS01 (agent-ws01)"} {
+		if !strings.Contains(output.String(), want) {
+			t.Fatalf("internal routes missing %q: %q", want, output.String())
+		}
 	}
 }
 

@@ -244,12 +244,12 @@ func renderStatus(w io.Writer, data []byte) error {
 	for _, c := range status.Clients {
 		fmt.Fprintf(w, "%-20d %-24s %-12s %-18s %-8t %8d %8d %7d %6d %6d %6d %8d\n", c.SessionID, c.Hostname, c.Transport, c.Remote, c.Internal, c.RXBytes, c.TXBytes, c.Streams, c.Queued, c.InFlight, c.Window, c.Retransmits)
 		for _, route := range c.AcceptedRoutes {
-			fmt.Fprintf(w, "  accepted %s via %s\n", route.Prefix, route.AgentID)
+			fmt.Fprintf(w, "  accepted %s via %s\n", route.Prefix, agentRouteLabel(route.AgentID, status.Agents))
 		}
 	}
 	fmt.Fprintf(w, "\nRoutes (%d)\n", len(status.Routes))
 	for _, r := range status.Routes {
-		fmt.Fprintf(w, "%-20s via %-18s active=%v\n", r.Prefix, r.AgentID, r.Active)
+		fmt.Fprintf(w, "%s via %s active=%v\n", r.Prefix, agentRouteLabel(r.AgentID, status.Agents), r.Active)
 	}
 	if status.Selected != "" {
 		fmt.Fprintf(w, "Selected: %s\n", status.Selected)
@@ -365,7 +365,8 @@ func routeCommand(args []string) error {
 			return err
 		}
 		var status struct {
-			Routes []routing.Route `json:"routes"`
+			Routes []routing.Route     `json:"routes"`
+			Agents []control.AgentInfo `json:"agents"`
 		}
 		if err = json.Unmarshal(data, &status); err != nil {
 			return err
@@ -375,7 +376,7 @@ func routeCommand(args []string) error {
 			return printJSON(b)
 		}
 		for _, r := range status.Routes {
-			fmt.Printf("%-20s via %-18s active=%v\n", r.Prefix, r.AgentID, r.Active)
+			fmt.Printf("%s via %s active=%v\n", r.Prefix, agentRouteLabel(r.AgentID, status.Agents), r.Active)
 		}
 		return nil
 	case "add":

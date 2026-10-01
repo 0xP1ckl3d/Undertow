@@ -86,11 +86,12 @@ func saveClientRoutes(path string, routes []control.AcceptedRoute) error {
 	return os.Rename(temp.Name(), path)
 }
 
-func (c *liveClientConsole) set(session *mux.Mux, id uint64, device *tun.Device, modeRoutes *clientModeRoutes) {
+func (c *liveClientConsole) set(session *mux.Mux, id uint64, device *tun.Device, modeRoutes *clientModeRoutes, publicIP string) {
 	c.routeMu.Lock()
 	c.mu.Lock()
 	c.session, c.sessionID = session, id
 	c.modeRoutes = modeRoutes
+	c.publicIP = publicIP
 	if device == nil {
 		c.device = nil
 	} else {
@@ -288,7 +289,7 @@ func (c *liveClientConsole) routeCommand(ctx context.Context, args []string, out
 				continue
 			}
 			for _, prefix := range agent.AdvertisedRoutes {
-				fmt.Fprintf(output, "  %s via %s\n", prefix, agent.ID)
+				fmt.Fprintf(output, "  %s via %s\n", prefix, agentRouteLabel(agent.ID, status.Agents))
 			}
 			if agent.DefaultRoute != nil {
 				fmt.Fprintf(output, "  default via %s on %s (informational)\n", agent.DefaultRoute.Gateway, agent.DefaultRoute.Interface)
@@ -312,7 +313,7 @@ func (c *liveClientConsole) routeCommand(ctx context.Context, args []string, out
 				if conflict {
 					kind += ", conflicts with this client's local routes"
 				}
-				fmt.Fprintf(output, "  candidate %s via %s (%s, interface=%s, source=%s)\n", route.Prefix, agent.ID, kind, route.Interface, route.Source)
+				fmt.Fprintf(output, "  candidate %s via %s (%s, interface=%s, source=%s)\n", route.Prefix, agentRouteLabel(agent.ID, status.Agents), kind, route.Interface, route.Source)
 			}
 		}
 		fmt.Fprintln(output, "Accepted local routes:")
@@ -324,7 +325,7 @@ func (c *liveClientConsole) routeCommand(ctx context.Context, args []string, out
 			if route.Manual {
 				kind = "manual"
 			}
-			fmt.Fprintf(output, "  %s via %s (%s, active=%t)\n", route.Prefix, route.AgentID, kind, c.active[route.Prefix])
+			fmt.Fprintf(output, "  %s via %s (%s, active=%t)\n", route.Prefix, agentRouteLabel(route.AgentID, status.Agents), kind, c.active[route.Prefix])
 		}
 		return nil
 	}
@@ -357,7 +358,16 @@ func (c *liveClientConsole) routeCommand(ctx context.Context, args []string, out
 			return fmt.Errorf("save client route: %w", err)
 		}
 		c.routes = updated
-		fmt.Fprintf(output, "Local route %s via %s accepted and saved.\n", route.Prefix, route.AgentID)
+		label := route.AgentID
+		if data, err := c.call(ctx, http.MethodGet, "/v1/status", nil); err == nil {
+			var status struct {
+				Agents []control.AgentInfo `json:"agents"`
+			}
+			if json.Unmarshal(data, &status) == nil {
+				label = agentRouteLabel(route.AgentID, status.Agents)
+			}
+		}
+		fmt.Fprintf(output, "Local route %s via %s accepted and saved.\n", route.Prefix, label)
 		return nil
 	}
 	if (len(args) == 3 || len(args) == 4) && args[0] == "route" && args[1] == "del" {

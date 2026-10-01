@@ -155,7 +155,7 @@ func clientCommand(args []string) error {
 	if err != nil {
 		return err
 	}
-	live := &liveClientConsole{routeFile: *routesFile, routes: savedRoutes, serverIP: serverIP, tunnelPrefix: prefix.Masked(), localNetworks: networks, vpn: *vpn, internal: *internal, verifyURL: *verifyURL, events: make(chan string, 16)}
+	live := &liveClientConsole{routeFile: *routesFile, routes: savedRoutes, serverIP: serverIP, tunnelPrefix: prefix.Masked(), localNetworks: networks, vpn: *vpn, internal: *internal, transport: *carrier.kind, verifyURL: *verifyURL, events: make(chan string, 16)}
 	setBackgroundConsoleHandler(func(ctx context.Context, request consoleRPCRequest) consoleRPCResponse {
 		var response consoleRPCResponse
 		switch request.Action {
@@ -348,6 +348,8 @@ type liveClientConsole struct {
 	global        map[string]bool
 	vpn           bool
 	internal      bool
+	transport     string
+	publicIP      string
 	modeRoutes    *clientModeRoutes
 	verifyURL     string
 	localNetworks []netip.Prefix
@@ -405,7 +407,7 @@ func (c *liveClientConsole) transferProgress(ctx context.Context, encoded []byte
 	return pivot.TransferFileProgress(ctx, session, input.AgentID, input.Operation, input.LocalPath, input.RemotePath, progress)
 }
 
-func runVPN(parent context.Context, c transport.Connection, carrierIP, serverIP netip.Addr, vpn, internal bool, name, address string, prefix netip.Prefix, verifyURL string, onActive func(*mux.Mux, uint64, *tun.Device, *clientModeRoutes)) error {
+func runVPN(parent context.Context, c transport.Connection, carrierIP, serverIP netip.Addr, vpn, internal bool, name, address string, prefix netip.Prefix, verifyURL string, onActive func(*mux.Mux, uint64, *tun.Device, *clientModeRoutes, string)) error {
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	m := mux.New(ctx, c, false)
@@ -499,6 +501,7 @@ func runVPN(parent context.Context, c transport.Connection, carrierIP, serverIP 
 		return err
 	}
 	defer modeRoutes.close()
+	publicIP := ""
 	if vpn && verifyURL != "" {
 		log.Printf("VPN routes installed through %s; verifying egress", carrierIP)
 		verifyCtx, verifyCancel := context.WithTimeout(ctx, 30*time.Second)
@@ -511,7 +514,6 @@ func runVPN(parent context.Context, c transport.Connection, carrierIP, serverIP 
 			ip, err := verifyPublicIP(verifyCtx, verifyURL, verificationAddress)
 			verified <- verificationResult{ip, err}
 		}()
-		var publicIP string
 		var verifyErr error
 		select {
 		case result := <-verified:
@@ -538,8 +540,8 @@ func runVPN(parent context.Context, c transport.Connection, carrierIP, serverIP 
 		return err
 	}
 	if onActive != nil {
-		onActive(m, c.ID(), device, modeRoutes)
-		defer onActive(nil, 0, nil, nil)
+		onActive(m, c.ID(), device, modeRoutes, publicIP)
+		defer onActive(nil, 0, nil, nil, "")
 	}
 	select {
 	case <-ctx.Done():

@@ -180,7 +180,7 @@ forward add 0.0.0.0:8080 127.0.0.1:8080
 			return fmt.Errorf("internal mode is managed in the VPN client console")
 		}
 		fmt.Fprint(output, `Client internal routing:
-  internal status            Show the current internal routing mode.
+  internal status            Show the mode and active routes by agent name and ID.
   internal on               Use server configured agent routes for new flows.
   internal off              Stop using those routes for new flows.
 Routes explicitly accepted or added by this client remain active in either
@@ -192,7 +192,7 @@ Use routes to inspect accepted routes and route del CIDR to remove one.
 			return fmt.Errorf("VPN Internet routing is managed in the client console")
 		}
 		fmt.Fprint(output, `Client Internet egress:
-  vpn status                Show whether Internet egress is enabled.
+  vpn status                Show Internet mode, carrier and verified public IP.
   vpn on                    Install the two Undertow IPv4 Internet routes.
   vpn off                   Remove only Undertow's Internet routes.
 This does not stop the client or change accepted internal routes. vpn on

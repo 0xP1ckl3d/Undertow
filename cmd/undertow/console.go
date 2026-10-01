@@ -651,7 +651,8 @@ Quote arguments containing spaces. Commands run only when submitted.
 			return err
 		}
 		var status struct {
-			Routes []routing.Route `json:"routes"`
+			Routes []routing.Route     `json:"routes"`
+			Agents []control.AgentInfo `json:"agents"`
 		}
 		if err := json.Unmarshal(data, &status); err != nil {
 			return err
@@ -661,7 +662,7 @@ Quote arguments containing spaces. Commands run only when submitted.
 			if len(args) == 2 && route.AgentID != args[1] {
 				continue
 			}
-			fmt.Fprintf(output, "%s via %s active=%t\n", route.Prefix, route.AgentID, route.Active)
+			fmt.Fprintf(output, "%s via %s active=%t\n", route.Prefix, agentRouteLabel(route.AgentID, status.Agents), route.Active)
 		}
 		return nil
 	case "route":
