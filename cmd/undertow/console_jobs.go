@@ -18,8 +18,7 @@ import (
 // consoleJobSelection keeps the numbers printed by the last jobs listing stable
 // even if another job starts before the operator inspects one.
 type consoleJobSelection struct {
-	filter string
-	ids    []string
+	ids []string
 }
 
 func consoleJobs(ctx context.Context, call consoleCaller, agentID string) ([]control.JobInfo, error) {
@@ -57,7 +56,6 @@ func runConsoleJobCommand(ctx context.Context, output io.Writer, call consoleCal
 				return err
 			}
 			if selection != nil {
-				selection.filter = filter
 				selection.ids = make([]string, len(jobs))
 			}
 			fmt.Fprintf(output, "Jobs (%d):\n", len(jobs))
@@ -114,7 +112,7 @@ func runConsoleJobCommand(ctx context.Context, output io.Writer, call consoleCal
 	if isJobNumber(jobID) {
 		number, _ := strconv.Atoi(jobID)
 		ids := []string(nil)
-		if selection != nil && selection.ids != nil && selection.filter == selectedAgentID {
+		if selection != nil && selection.ids != nil {
 			ids = selection.ids
 		} else {
 			jobs, err := consoleJobs(ctx, call, selectedAgentID)
@@ -125,7 +123,7 @@ func runConsoleJobCommand(ctx context.Context, output io.Writer, call consoleCal
 				ids = append(ids, job.ID)
 			}
 			if selection != nil {
-				selection.filter, selection.ids = selectedAgentID, ids
+				selection.ids = ids
 			}
 		}
 		if number < 1 || number > len(ids) {

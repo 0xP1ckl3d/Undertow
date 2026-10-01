@@ -207,6 +207,7 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 					emitted = true
 					if selectedID == id {
 						selectedID, selectedLabel = "", ""
+						jobSelection = consoleJobSelection{}
 					}
 				}
 			}

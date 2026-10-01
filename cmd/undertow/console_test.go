@@ -413,6 +413,30 @@ func TestJobNumbersReferToLastPrintedList(t *testing.T) {
 	}
 }
 
+func TestFilteredJobNumbersResolveFromPrintedList(t *testing.T) {
+	caller := func(_ context.Context, _, path string, _ any) ([]byte, error) {
+		switch path {
+		case "/v1/jobs?agent_id=agent-a":
+			return json.Marshal([]control.JobInfo{{ID: "agent-a-job", AgentID: "agent-a"}})
+		case "/v1/jobs/agent-a-job":
+			return json.Marshal(control.JobInfo{ID: "agent-a-job", AgentID: "agent-a"})
+		default:
+			return nil, fmt.Errorf("unexpected request %s", path)
+		}
+	}
+	var output bytes.Buffer
+	selection := new(consoleJobSelection)
+	if err := runConsoleJobCommand(context.Background(), &output, caller, []string{"jobs", "agent-a"}, "", selection); err != nil {
+		t.Fatal(err)
+	}
+	if err := runConsoleJobCommand(context.Background(), &output, caller, []string{"jobs", "1"}, "", selection); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "Job agent-a-job") {
+		t.Fatalf("output=%s", output.String())
+	}
+}
+
 func TestSelectedAgentStartsMemoryScriptJob(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "check.sh")
 	if err := os.WriteFile(path, []byte("echo script\n"), 0600); err != nil {
