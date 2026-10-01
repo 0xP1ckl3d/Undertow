@@ -10,6 +10,9 @@
 *.elf
 *.exe
 *.dll
+*.obj
+*.lib
+*.exp
 *.test
 *.out
 *.key

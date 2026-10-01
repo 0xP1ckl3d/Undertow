@@ -1,14 +1,15 @@
-param([ValidateSet('hello','wininfo','all')][string]$Example = 'all')
+param([ValidateSet('hello','wininfo','hostcheck','all')][string]$Example = 'all')
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 if (-not (Get-Command cl.exe -ErrorAction SilentlyContinue)) { throw 'Run this in an x64 MSVC Developer PowerShell with cl.exe on PATH.' }
-$names = if ($Example -eq 'all') { @('hello','wininfo') } else { @($Example) }
+$names = if ($Example -eq 'all') { @('hello','wininfo','hostcheck') } else { @($Example) }
 foreach ($name in $names) {
     $directory = Join-Path $PSScriptRoot $name
     $dll = Join-Path $directory "$name.dll"
     Push-Location $directory
     try {
-        & cl.exe /nologo /LD /MT /O2 /W4 "/I$(Join-Path $root 'sdk\native')" "$name.c" /link "/OUT:$dll" kernel32.lib
+        $libraries = if ($name -eq 'hostcheck') { @('kernel32.lib','advapi32.lib','iphlpapi.lib','ws2_32.lib') } else { @('kernel32.lib') }
+        & cl.exe /nologo /LD /MT /O2 /W4 "/I$(Join-Path $root 'sdk\native')" "$name.c" /link "/OUT:$dll" @libraries
         if ($LASTEXITCODE -ne 0) { throw "cl.exe failed for $name" }
         Push-Location $root
         try {
