@@ -470,7 +470,7 @@ func printConsoleAgents(output io.Writer, agents []control.AgentInfo) {
 	for i, agent := range agents {
 		path := "direct"
 		if agent.Via != "" {
-			path = "via " + shortAgentID(agent.Via)
+			path = "via " + agentRouteLabel(agent.Via, agents)
 		}
 		fmt.Fprintf(output, "  %d  %-20s  %s  %s  %s  %s  routes=%d jobs=%d\n", i+1, consoleAgentName(agent), shortAgentID(agent.ID), agent.VirtualIP, agent.Transport, path, len(agent.AdvertisedRoutes), agent.ActiveJobs)
 	}

@@ -116,7 +116,7 @@ func printTopology(output io.Writer, agents []control.AgentInfo) {
 			visited[agent.ID] = true
 			path := "direct"
 			if agent.Via != "" {
-				path = "via " + consoleAgentName(byID[agent.Via])
+				path = "via " + agentRouteLabel(agent.Via, agents)
 			}
 			for i := 0; i < depth; i++ {
 				fmt.Fprint(output, "   ")

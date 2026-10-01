@@ -313,7 +313,8 @@ func (c *liveClientConsole) routeCommand(ctx context.Context, args []string, out
 				if conflict {
 					kind += ", conflicts with this client's local routes"
 				}
-				fmt.Fprintf(output, "  candidate %s via %s (%s, interface=%s, source=%s)\n", route.Prefix, agentRouteLabel(agent.ID, status.Agents), kind, route.Interface, route.Source)
+				fmt.Fprintf(output, "  candidate %s via %s\n", route.Prefix, agentRouteLabel(agent.ID, status.Agents))
+				fmt.Fprintf(output, "    %s; interface=%s; source=%s\n", kind, route.Interface, route.Source)
 			}
 		}
 		fmt.Fprintln(output, "Accepted local routes:")
@@ -325,7 +326,8 @@ func (c *liveClientConsole) routeCommand(ctx context.Context, args []string, out
 			if route.Manual {
 				kind = "manual"
 			}
-			fmt.Fprintf(output, "  %s via %s (%s, active=%t)\n", route.Prefix, agentRouteLabel(route.AgentID, status.Agents), kind, c.active[route.Prefix])
+			fmt.Fprintf(output, "  %s via %s\n", route.Prefix, agentRouteLabel(route.AgentID, status.Agents))
+			fmt.Fprintf(output, "    %s; active=%t\n", kind, c.active[route.Prefix])
 		}
 		return nil
 	}
