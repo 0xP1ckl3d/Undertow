@@ -26,18 +26,22 @@ import (
 const upgradeGUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
 type Server struct {
-	listener net.Listener
-	http     *http.Server
-	path     string
-	identity ed25519.PrivateKey
-	token    []byte
-	ctx      context.Context
-	cancel   context.CancelFunc
-	accepted chan transport.Peer
-	mu       sync.RWMutex
-	peers    map[uint64]*stream.Peer
-	once     sync.Once
+	listener     net.Listener
+	http         *http.Server
+	artifactHTTP http.Handler
+	path         string
+	identity     ed25519.PrivateKey
+	token        []byte
+	ctx          context.Context
+	cancel       context.CancelFunc
+	accepted     chan transport.Peer
+	mu           sync.RWMutex
+	peers        map[uint64]*stream.Peer
+	once         sync.Once
 }
+
+// SetArtifactHandler installs the narrowly scoped artifact route before Serve.
+func (s *Server) SetArtifactHandler(handler http.Handler) { s.artifactHTTP = handler }
 
 var _ transport.Listener = (*Server)(nil)
 
@@ -109,6 +113,10 @@ func (s *Server) Close() error {
 }
 
 func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
+	if strings.HasPrefix(r.URL.Path, "/.undertow/artifacts/") && s.artifactHTTP != nil {
+		s.artifactHTTP.ServeHTTP(w, r)
+		return
+	}
 	if r.URL.Path != s.path {
 		http.NotFound(w, r)
 		return

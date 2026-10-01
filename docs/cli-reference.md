@@ -1,5 +1,7 @@
 # CLI reference
 
+The full `undertow agent` CLI remains available. For zero-argument remote deployment, use `undertow-agent` templates and the console's `agent profile`, `agent build`, and `agent host` commands; see [configured thin agents](agent-distribution.md). Server flags `--agent-store DIRECTORY` and `--agent-templates DIRECTORY` select the persisted distribution store and prebuilt template directory. Templates default to the full `undertow` executable's directory.
+
 The interactive console supports `run-native [--background] [--data LOCAL_FILE] MODULE_FILE [ARGS]` for Windows amd64 native `.module` files. At the main menu, put `AGENT_ID` immediately after `run-native`; after `use NUMBER`, omit it. Native runs use the agent's independent `native` capability and share the normal `jobs`, `job output`, and `job stop` commands. See [native modules](native-modules.md) for the ABI, MSVC build, imports and compatibility limits.
 
 The console also supports `run-bof [--background] [--format FORMAT] [--manifest FILE] OBJECT.o [--format FORMAT] [ARGS]` for compatible Windows AMD64 BOFs. At the main menu, put `AGENT_ID` immediately after `run-bof`. Use `undertow bof inspect FILE.o` to inspect compatibility locally. BOFs use the same `native` capability and normal job commands; they remain separate from UTN1 `.module` DLLs and portable WASM. See [BOF compatibility](bof-compatibility.md) for arguments, imports and the supported COFF subset.

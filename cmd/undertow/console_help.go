@@ -33,6 +33,23 @@ func printConsoleHelp(output io.Writer, vpnClient, selected, serverAttached bool
 		}
 	}
 	switch topic {
+	case "agent", "profile", "artifact", "artifacts":
+		fmt.Fprint(output, `Agent distribution (server or client console):
+  agent profile create NAME [server=HOST:PORT transport=quic ...]
+  agent profile list|show NAME|edit NAME FIELD=VALUE|delete NAME
+  agent build PROFILE PLATFORM ARCH
+  agent artifacts                 List generated binaries
+  agent host ARTIFACT_ID          Expose one binary over WebSocket HTTPS
+  agent hosted                    List hosted binaries
+  agent unhost ARTIFACT_ID        Stop future retrieval
+  agent delete ARTIFACT_ID        Delete a generated binary
+  agent deploy-script ID powershell|shell
+Profile fields: server, transport, domain, fingerprint, auth, token-file,
+password-file, payload-profile, websocket-path, tls-server-name,
+tls-insecure-skip-verify, deny, routes (comma-separated IPv4 CIDRs).
+If a listener binds 0.0.0.0 or ::, pass its reachable server=HOST:PORT.
+Credentials are never shown by profile show or artifact listings.
+`)
 	case "load", "unload", "bofs":
 		fmt.Fprint(output, `Loaded BOF commands (local to this console session):
   load bof FILE [NAME] [--format FORMAT]

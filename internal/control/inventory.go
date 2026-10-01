@@ -16,6 +16,18 @@ import (
 
 // SendInventory reports candidate routes; clients must accept them locally.
 func SendInventory(ctx context.Context, streamMux *mux.Mux, explicit []string, caps pivot.Capabilities) error {
+	return SendInventoryWithIdentity(ctx, streamMux, explicit, caps, ArtifactIdentity{})
+}
+
+// ArtifactIdentity describes the configured binary, never its enrollment secret.
+type ArtifactIdentity struct {
+	ProfileID       string `json:"profile_id,omitempty"`
+	Profile         string `json:"profile,omitempty"`
+	ArtifactID      string `json:"artifact_id,omitempty"`
+	UndertowVersion string `json:"undertow_version,omitempty"`
+}
+
+func SendInventoryWithIdentity(ctx context.Context, streamMux *mux.Mux, explicit []string, caps pivot.Capabilities, identity ArtifactIdentity) error {
 	hostname, _ := os.Hostname()
 	info := struct {
 		Hostname         string                 `json:"hostname"`
@@ -24,7 +36,8 @@ func SendInventory(ctx context.Context, streamMux *mux.Mux, explicit []string, c
 		Interfaces       []string               `json:"interfaces,omitempty"`
 		AdvertisedRoutes []string               `json:"advertised_routes,omitempty"`
 		Capabilities     pivot.CapabilityReport `json:"capabilities"`
-	}{Hostname: hostname, OS: runtime.GOOS, Arch: runtime.GOARCH, Capabilities: caps.Report()}
+		ArtifactIdentity
+	}{Hostname: hostname, OS: runtime.GOOS, Arch: runtime.GOARCH, Capabilities: caps.Report(), ArtifactIdentity: identity}
 	seen := make(map[string]bool)
 	for _, raw := range explicit {
 		prefix, err := netip.ParsePrefix(raw)

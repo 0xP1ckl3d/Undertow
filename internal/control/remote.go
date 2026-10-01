@@ -58,7 +58,7 @@ func (m *Manager) ServeRemote(ctx context.Context, token string, clientID uint64
 	if _, err := io.CopyN(io.Discard, stream, 6<<20); err != io.EOF {
 		return
 	}
-	if !strings.HasPrefix(request.Path, "/v1/") || len(request.Path) > 2048 || request.Method != http.MethodGet && request.Method != http.MethodPost && request.Method != http.MethodDelete {
+	if !strings.HasPrefix(request.Path, "/v1/") || len(request.Path) > 2048 || request.Method != http.MethodGet && request.Method != http.MethodPost && request.Method != http.MethodPut && request.Method != http.MethodDelete {
 		writeRemoteResponse(stream, remoteResponse{Status: http.StatusBadRequest, Body: []byte("invalid API request")})
 		return
 	}
@@ -85,6 +85,9 @@ func (m *Manager) ServeRemote(ctx context.Context, token string, clientID uint64
 func clientRequestAllowed(request *http.Request, clientID uint64) bool {
 	path := request.URL.EscapedPath()
 	if request.Method == http.MethodGet && path == "/v1/status" && request.URL.RawQuery == "" {
+		return true
+	}
+	if (path == "/v1/agent-profiles" || strings.HasPrefix(path, "/v1/agent-profiles/") || path == "/v1/agent-artifacts" || strings.HasPrefix(path, "/v1/agent-artifacts/")) && request.URL.RawQuery == "" {
 		return true
 	}
 	if request.Method == http.MethodGet && (path == "/v1/jobs" || strings.HasPrefix(path, "/v1/jobs/")) {

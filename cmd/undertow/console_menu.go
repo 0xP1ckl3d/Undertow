@@ -69,6 +69,12 @@ func printConsoleOverview(output io.Writer, vpnClient, selected, serverAttached 
 	m.row("load bof FILE [NAME]", "Register a local BOF command for this session")
 	m.row("unload bof NAME", "Remove a loaded BOF command")
 	m.row("bofs", "List loaded BOF commands")
+	m.section("AGENT DISTRIBUTION")
+	m.row("agent profile create NAME", "Configure a reusable agent profile")
+	m.row("agent profile list", "List configured profiles")
+	m.row("agent build NAME OS ARCH", "Stamp a prebuilt thin agent")
+	m.row("agent artifacts", "List generated artifacts")
+	m.row("agent host ID", "Expose an artifact over HTTPS")
 
 	if selected {
 		m.section("AGENT SESSION")

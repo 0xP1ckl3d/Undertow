@@ -203,6 +203,9 @@ operations and downloads. Add hostops to deny the built-in commands.
 Connected VPN clients can request allowed operations. 'status' shows the
 agent's supported and allowed capabilities.
 Operator subcommands: 'undertow agent list|show ID|select ID'.
+In a server or client console, use 'agent profile create NAME',
+'agent build NAME PLATFORM ARCH', and 'agent host ARTIFACT_ID' to produce
+a zero-argument thin-agent executable from a prebuilt template.
 `
 	case "client":
 		body = `undertow client — privileged IPv4 tunnel on a separate host

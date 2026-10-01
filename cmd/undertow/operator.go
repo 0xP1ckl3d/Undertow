@@ -268,6 +268,9 @@ func renderStatus(w io.Writer, data []byte) error {
 func renderAgentShow(w io.Writer, a control.AgentInfo) error {
 	fmt.Fprintf(w, "Agent %s\n", a.ID)
 	fmt.Fprintf(w, "Host: %s  OS: %s/%s  Virtual IP: %s  Remote: %s  Transport: %s\n", a.Hostname, a.OS, a.Arch, a.VirtualIP, a.Remote, a.Transport)
+	if a.ArtifactID != "" {
+		fmt.Fprintf(w, "Profile: %s (%s)  Artifact: %s  Undertow: %s\n", a.Profile, a.ProfileID, a.ArtifactID, a.UndertowVersion)
+	}
 	if !a.Connected.IsZero() {
 		fmt.Fprintf(w, "Connected: %s  Duration: %s\n", a.Connected.Local().Format(time.RFC3339), time.Since(a.Connected).Round(time.Second))
 	}

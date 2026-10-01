@@ -150,6 +150,28 @@ func TestVPNClientJobPathsAreScopedToJobAPI(t *testing.T) {
 	}
 }
 
+func TestVPNClientCanManageAgentDistribution(t *testing.T) {
+	for _, tc := range []struct{ method, path string }{
+		{http.MethodGet, "/v1/agent-profiles"},
+		{http.MethodPost, "/v1/agent-profiles"},
+		{http.MethodGet, "/v1/agent-profiles/office"},
+		{http.MethodPut, "/v1/agent-profiles/office"},
+		{http.MethodDelete, "/v1/agent-profiles/office"},
+		{http.MethodGet, "/v1/agent-artifacts"},
+		{http.MethodPost, "/v1/agent-artifacts"},
+		{http.MethodPost, "/v1/agent-artifacts/abc/host"},
+		{http.MethodDelete, "/v1/agent-artifacts/abc/host"},
+	} {
+		req, err := http.NewRequest(tc.method, "http://localhost"+tc.path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !clientRequestAllowed(req, 705) {
+			t.Fatalf("distribution path denied: %s %s", tc.method, tc.path)
+		}
+	}
+}
+
 func TestRemoteExecHelperProcess(t *testing.T) {
 	if os.Getenv("UNDERTOW_REMOTE_EXEC_HELPER") != "1" {
 		return

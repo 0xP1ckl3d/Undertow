@@ -32,6 +32,7 @@ type RouteDevice interface {
 }
 
 type AgentInfo struct {
+	ArtifactIdentity
 	ID                 string                  `json:"id"`
 	Transport          string                  `json:"transport,omitempty"`
 	Via                string                  `json:"via,omitempty"`
@@ -149,28 +150,45 @@ type agentState struct {
 	txRate         float64
 }
 type Manager struct {
-	mu             sync.RWMutex
-	server         ServerInfo
-	transports     TransportController
-	relayAccept    func(context.Context, string, *mux.Stream)
-	relays         map[string]map[string]*mux.Stream
-	agents         map[string]*agentState
-	clients        map[uint64]*clientState
-	forwards       map[string]*forwardState
-	jobs           map[string]*jobState
-	routes         *routing.Table
-	device         RouteDevice
-	selected       string
-	virtualNetwork netip.Prefix
-	proxyIP        netip.Addr
-	virtualByAgent map[string]netip.Addr
-	virtualUsed    map[netip.Addr]bool
+	mu                sync.RWMutex
+	agentDistribution http.Handler
+	server            ServerInfo
+	transports        TransportController
+	relayAccept       func(context.Context, string, *mux.Stream)
+	relays            map[string]map[string]*mux.Stream
+	agents            map[string]*agentState
+	clients           map[uint64]*clientState
+	forwards          map[string]*forwardState
+	jobs              map[string]*jobState
+	routes            *routing.Table
+	device            RouteDevice
+	selected          string
+	virtualNetwork    netip.Prefix
+	proxyIP           netip.Addr
+	virtualByAgent    map[string]netip.Addr
+	virtualUsed       map[netip.Addr]bool
+}
+
+func (m *Manager) SetAgentDistributionHandler(handler http.Handler) {
+	m.mu.Lock()
+	m.agentDistribution = handler
+	m.mu.Unlock()
 }
 
 func (m *Manager) SetServerInfo(info ServerInfo) {
 	m.mu.Lock()
 	m.server = info
 	m.mu.Unlock()
+}
+
+func (m *Manager) ServerInfo() ServerInfo {
+	m.mu.RLock()
+	info, transports := m.server, m.transports
+	m.mu.RUnlock()
+	if transports != nil {
+		info.Listeners = transports.List()
+	}
+	return info
 }
 
 func (m *Manager) SetTransportController(controller TransportController) {
@@ -469,6 +487,7 @@ func (m *Manager) UpdateInventory(id string, streamMux *mux.Mux, b []byte) {
 		state.inventory.Interfaces = append([]string(nil), info.Interfaces...)
 		state.inventory.AdvertisedRoutes = validRoutes
 		state.inventory.Capabilities = info.Capabilities
+		state.inventory.ArtifactIdentity = info.ArtifactIdentity
 		state.inventoryReady = true
 		for _, route := range m.routes.List() {
 			if route.AgentID != id || route.Active == agentPivotAllowed(state) {
@@ -859,6 +878,46 @@ func (m *Manager) ServeHTTP(ctx context.Context, address, token string) error {
 
 func (m *Manager) handler(token string) http.Handler {
 	muxer := http.NewServeMux()
+	muxer.Handle("/v1/agent-profiles/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		m.mu.RLock()
+		handler := m.agentDistribution
+		m.mu.RUnlock()
+		if handler == nil {
+			http.Error(w, "agent distribution unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		handler.ServeHTTP(w, r)
+	}))
+	muxer.Handle("/v1/agent-profiles", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		m.mu.RLock()
+		handler := m.agentDistribution
+		m.mu.RUnlock()
+		if handler == nil {
+			http.Error(w, "agent distribution unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		handler.ServeHTTP(w, r)
+	}))
+	muxer.Handle("/v1/agent-artifacts/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		m.mu.RLock()
+		handler := m.agentDistribution
+		m.mu.RUnlock()
+		if handler == nil {
+			http.Error(w, "agent distribution unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		handler.ServeHTTP(w, r)
+	}))
+	muxer.Handle("/v1/agent-artifacts", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		m.mu.RLock()
+		handler := m.agentDistribution
+		m.mu.RUnlock()
+		if handler == nil {
+			http.Error(w, "agent distribution unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		handler.ServeHTTP(w, r)
+	}))
 	m.jobHTTPHandlers(muxer)
 	muxer.HandleFunc("GET /v1/status", func(w http.ResponseWriter, r *http.Request) {
 		m.mu.RLock()

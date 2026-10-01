@@ -502,7 +502,11 @@ func printConsoleAgents(output io.Writer, agents []control.AgentInfo) {
 		if agent.Via != "" {
 			path = "via " + agentRouteLabel(agent.Via, agents)
 		}
-		fmt.Fprintf(output, "  %d  %-20s  %s  %s  %s  %s  routes=%d jobs=%d\n", i+1, consoleAgentName(agent), shortAgentID(agent.ID), agent.VirtualIP, agent.Transport, path, len(agent.AdvertisedRoutes), agent.ActiveJobs)
+		profile := ""
+		if agent.Profile != "" {
+			profile = " profile=" + agent.Profile
+		}
+		fmt.Fprintf(output, "  %d  %-20s  %s  %s  %s  %s  routes=%d jobs=%d%s\n", i+1, consoleAgentName(agent), shortAgentID(agent.ID), agent.VirtualIP, agent.Transport, path, len(agent.AdvertisedRoutes), agent.ActiveJobs, profile)
 	}
 	if len(agents) > 0 {
 		fmt.Fprintln(output, "Use an agent with: use NUMBER")
@@ -566,6 +570,9 @@ func splitConsoleCommand(line string) ([]string, error) {
 }
 
 func runConsoleCommand(ctx context.Context, output io.Writer, call consoleCaller, vpnClient bool, ownClientID uint64, clientRoutes clientRouteAction, args []string) error {
+	if args[0] == "agent" && len(args) > 1 && args[1] != "show" {
+		return runConsoleAgentDistribution(ctx, output, call, args)
+	}
 	if args[0] == "relay" || args[0] == "topology" {
 		if vpnClient {
 			return errors.New("relay management and topology require a server console")

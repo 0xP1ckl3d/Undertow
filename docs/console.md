@@ -18,6 +18,24 @@ See [getting started](getting-started.md) for enrollment, fingerprint, and privi
 | `routes` | Show routes; from an agent menu, filter to that agent. |
 | `quit` or `exit` | Detach the server console without stopping its worker. In the VPN client console, stop the VPN and remove its owned routes. |
 
+## Configured agent distribution
+
+Both consoles use the server's persisted profile and artifact store:
+
+```text
+agent profile create office server=SERVER_IP:443 transport=quic
+agent profile list
+agent profile show office
+agent profile edit office routes=10.20.0.0/16
+agent build office windows amd64
+agent artifacts
+agent host ARTIFACT_ID
+agent deploy-script ARTIFACT_ID powershell
+agent unhost ARTIFACT_ID
+```
+
+Use `agent profile delete NAME` to remove a logical profile and `agent delete ARTIFACT_ID` to remove an individual generated binary. Editing a profile leaves previously generated artifacts unchanged. `agent host` requires an active WebSocket HTTPS listener and returns a URL and SHA-256. See [configured thin agents](agent-distribution.md) for authentication and retrieval details.
+
 ## Server listeners and agent topology
 
 The default server opens DNS UDP/53, WebSocket TCP/443 and QUIC UDP/443. Use these commands in the **server** console:

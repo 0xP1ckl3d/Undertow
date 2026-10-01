@@ -11,6 +11,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/http"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -18,6 +19,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	agentruntime "undertow/internal/agent"
+	"undertow/internal/agentprofile"
 	"undertow/internal/bof"
 	"undertow/internal/control"
 	"undertow/internal/mux"
@@ -199,6 +202,8 @@ func serve(args []string) error {
 	tunnelAddress := f.String("tunnel-address", "172.16.254.1/24", "proxy TUN IPv4 address/prefix")
 	controlListen := f.String("control-listen", "127.0.0.1:47889", "loopback operator control API")
 	controlTokenPath := f.String("control-token-file", "control.key", "local operator API token file")
+	agentStorePath := f.String("agent-store", "agent-distribution", "agent profile and artifact store directory")
+	agentTemplatePath := f.String("agent-templates", "", "directory containing prebuilt thin-agent templates (default: alongside undertow executable)")
 	var forwardValues forwards
 	f.Var(&forwardValues, "forward", "local TCP forward listen=remote-destination; repeatable")
 	if err := f.Parse(args); err != nil {
@@ -304,6 +309,24 @@ func serve(args []string) error {
 		routeDevice = device
 	}
 	manager := control.NewManager(table, routeDevice, proxyNetwork, proxyPrefix.Addr())
+	templatePath := *agentTemplatePath
+	if templatePath == "" {
+		executable, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		templatePath = filepath.Dir(executable)
+	}
+	buildVersion := version
+	if commit != "none" {
+		buildVersion += " (" + commit + ")"
+	}
+	distributionStore, err := agentprofile.OpenStore(*agentStorePath, templatePath, buildVersion)
+	if err != nil {
+		return err
+	}
+	distribution := &agentDistribution{store: distributionStore, manager: manager, authMode: *authMode, credential: token}
+	manager.SetAgentDistributionHandler(distribution)
 	controlToken, err := control.LoadOrCreateToken(*controlTokenPath)
 	if err != nil {
 		return err
@@ -315,6 +338,7 @@ func serve(args []string) error {
 	transportManager := newServerTransports(ctx, manager, identity, token, *domain, *carrier.path, func(peer transport.Peer) {
 		handleServerPeer(ctx, manager, controlToken, *probeEcho, peer)
 	})
+	transportManager.SetArtifactHandler(http.HandlerFunc(distribution.Retrieve))
 	manager.SetTransportController(transportManager)
 	manager.SetRelayAcceptor(func(_ context.Context, parentID string, stream *mux.Stream) {
 		peer, err := relay.Accept(ctx, stream, parentID, identity, token)
@@ -436,10 +460,6 @@ func agent(args []string) error {
 	if f.NArg() != 0 {
 		return fmt.Errorf("unexpected agent argument %q; use 'undertow agent --server ...'", f.Arg(0))
 	}
-	caps, err := pivot.ParseDenied(*deny)
-	if err != nil {
-		return err
-	}
 	handled, cleanup, err := lifecycle.handle(args)
 	if err != nil || handled {
 		return err
@@ -469,73 +489,51 @@ func agent(args []string) error {
 	if err != nil {
 		return err
 	}
-	key, err := security.LoadOrCreateKey(*keyPath)
-	if err != nil {
-		return err
-	}
-	for {
-		c, err := carrier.dial(ctx, *server, *domain, pinnedFingerprint, token, key, *profileFlag)
-		if err != nil {
-			if ctx.Err() != nil {
-				return nil
-			}
-			log.Printf("connect failed: %v", err)
-			select {
-			case <-ctx.Done():
-				return nil
-			case <-time.After(2 * time.Second):
-				continue
-			}
-		}
+	config := agentruntime.Config{Version: agentruntime.ConfigVersion, Server: *server, Transport: *carrier.kind,
+		Domain: *domain, Fingerprint: pinnedFingerprint, AuthMode: *authMode, Credential: token,
+		PayloadProfile: *profileFlag, WebSocketPath: *carrier.path, TLSServerName: *carrier.serverName,
+		TLSInsecureSkipVerify: *carrier.skipTLSVerify, AdvertisedRoutes: advertise,
+		DeniedCapabilities: *deny, IdentityPath: *keyPath}
+	ready := func() error {
 		if savePin {
 			if err := saveServerFingerprint(*fingerprintFile, pinnedFingerprint); err != nil {
-				c.Close()
 				return fmt.Errorf("save server fingerprint: %w", err)
 			}
 			log.Printf("trusted server fingerprint saved to %s: %s", *fingerprintFile, pinnedFingerprint)
 			savePin = false
 		}
-		if err := markBackgroundReady(); err != nil {
-			c.Close()
+		return markBackgroundReady()
+	}
+	if *probe || *probeCount > 0 {
+		key, err := security.LoadOrCreateKey(*keyPath)
+		if err != nil {
 			return err
 		}
-		if dnsClient, ok := c.(*dns.Client); ok {
-			log.Printf("connected: session=%d agent=%s fragment=%d", c.ID(), security.Fingerprint(key), dnsClient.Session.Stats().FragmentSize)
-		} else {
-			log.Printf("connected: session=%d agent=%s transport=%s", c.ID(), security.Fingerprint(key), *carrier.kind)
-		}
-		if *probe || *probeCount > 0 {
-			err = runProbes(ctx, c, *probeSize, *probeCount, *interval)
-		} else {
-			streamMux := mux.New(ctx, c, false)
-			if sendErr := control.SendInventory(ctx, streamMux, advertise, caps); sendErr != nil {
-				log.Printf("inventory: %v", sendErr)
+		for {
+			c, err := config.Dial(ctx, key)
+			if err == nil {
+				if err := ready(); err != nil {
+					c.Close()
+					return err
+				}
+				err = runProbes(ctx, c, *probeSize, *probeCount, *interval)
+				c.Close()
+				if *probeCount > 0 && err == nil {
+					return nil
+				}
 			}
-			pivot.ServeAgentWithCapabilities(ctx, streamMux, caps)
-			streamMux.Close()
-			err = io.EOF
-		}
-		if dnsClient, ok := c.(*dns.Client); ok {
-			stats, q, r := dnsClient.Stats()
-			adaptive := dnsClient.AdaptiveStats()
-			log.Printf("session finished: queries=%d responses=%d tx=%d rx=%d retransmits=%d rtt=%s fragment=%d payload_adjustments=%d queued=%d in_flight=%d cwnd=%d peer_window=%d dns_outstanding=%d dns_target=%d dns_health_window=%d", q, r, stats.TXBytes, stats.RXBytes, stats.Retransmits, stats.RTT, stats.FragmentSize, stats.PayloadAdjustments, stats.Queued, stats.InFlight, stats.CongestionWindow, stats.PeerReceiveWindow, adaptive.Outstanding, adaptive.Target, adaptive.HealthWindow)
-		} else {
-			log.Printf("session finished: transport=%s", *carrier.kind)
-		}
-		c.Close()
-		if *probeCount > 0 && err == nil {
-			return nil
-		}
-		if ctx.Err() != nil {
-			return nil
-		}
-		log.Printf("reconnecting after %v", err)
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-time.After(2 * time.Second):
+			if ctx.Err() != nil {
+				return nil
+			}
+			log.Printf("probe reconnect after %v", err)
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-time.After(2 * time.Second):
+			}
 		}
 	}
+	return agentruntime.Run(ctx, config, ready)
 }
 
 func runProbes(ctx context.Context, c transport.Connection, size int, count uint64, interval time.Duration) error {

@@ -1,7 +1,8 @@
 package tlscert
 
 import (
-	"crypto/ed25519"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
@@ -19,7 +20,7 @@ func Load(certFile, keyFile string, selfSigned bool) (tls.Certificate, error) {
 		if certFile != "" || keyFile != "" {
 			return tls.Certificate{}, errors.New("--tls-self-signed cannot be combined with --tls-cert or --tls-key")
 		}
-		public, private, err := ed25519.GenerateKey(rand.Reader)
+		private, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 		if err != nil {
 			return tls.Certificate{}, fmt.Errorf("generate TLS key: %w", err)
 		}
@@ -37,7 +38,7 @@ func Load(certFile, keyFile string, selfSigned bool) (tls.Certificate, error) {
 			ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 			BasicConstraintsValid: true,
 		}
-		der, err := x509.CreateCertificate(rand.Reader, template, template, public, private)
+		der, err := x509.CreateCertificate(rand.Reader, template, template, &private.PublicKey, private)
 		if err != nil {
 			return tls.Certificate{}, fmt.Errorf("generate TLS certificate: %w", err)
 		}

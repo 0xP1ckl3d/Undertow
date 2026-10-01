@@ -108,7 +108,7 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 		if matches := wordCompletions(registry.names(), partial); len(matches) == 1 && partial != "" {
 			return matches
 		}
-		commands := []string{"agents", "use", "status", "routes", "help", "clear", "cls", "quit", "exit", "load", "unload", "bofs"}
+		commands := []string{"agents", "agent", "use", "status", "routes", "help", "clear", "cls", "quit", "exit", "load", "unload", "bofs"}
 		commands = append(commands, registry.names()...)
 		if selected {
 			commands = append(commands, "show", "back", "route", "jobs", "job", "exec", "shell", "run-script", "run-wasm", "run-native", "run-bof", "pwd", "ls", "stat", "mkdir", "rm", "whoami", "ps", "privileges", "env", "interfaces", "dns", "route-table")
@@ -130,6 +130,16 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 		return wordCompletions(commands, partial)
 	}
 	switch before[0] {
+	case "agent":
+		if len(before) == 1 {
+			return wordCompletions([]string{"profile", "build", "artifacts", "host", "hosted", "unhost", "delete", "deploy-script"}, partial)
+		}
+		if len(before) == 2 && before[1] == "profile" {
+			return wordCompletions([]string{"create", "list", "show", "edit", "delete"}, partial)
+		}
+		if len(before) == 3 && before[1] == "deploy-script" {
+			return wordCompletions([]string{"powershell", "shell"}, partial)
+		}
 	case "load":
 		if len(before) == 1 {
 			return wordCompletions([]string{"bof"}, partial)
@@ -169,7 +179,7 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 		}
 	case "help":
 		if len(before) == 1 {
-			topics := []string{"agents", "status", "route", "lifecycle", "clear", "load", "unload", "bofs"}
+			topics := []string{"agents", "agent", "profile", "artifacts", "status", "route", "lifecycle", "clear", "load", "unload", "bofs"}
 			topics = append(topics, registry.names()...)
 			if selected {
 				topics = append(topics, "shell", "exec", "run-script", "run-wasm", "run-native", "run-bof", "jobs", "host")

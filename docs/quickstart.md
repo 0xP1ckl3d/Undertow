@@ -1,5 +1,17 @@
 # Quickstart
 
+## Configured agent artifact
+
+Build the release binaries with `sh tools/build-release.sh bin` (or `tools/build-release.ps1` on Windows), then start the server. Its `bin` directory should contain the thin-agent templates. In either the server or client console:
+
+```text
+agent profile create office server=SERVER_IP:443 transport=quic
+agent build office windows amd64
+agent host ARTIFACT_ID
+```
+
+Use the URL printed by `agent host` to retrieve the executable, verify the printed SHA-256, and run it on the target with **no agent arguments**. `agent deploy-script ARTIFACT_ID powershell` can print a simple download-and-run helper. Hosting requires the server's WebSocket HTTPS listener; generated artifacts stay private until hosted. See [configured thin agents](agent-distribution.md) for profiles, templates, credentials, and lifecycle commands.
+
 Use **QUIC on UDP/443** for these examples. The server also listens on WebSocket TCP/443 and DNS UDP/53 by default. Open UDP/443 in the server firewall. Run commands from each host's Undertow directory; `./bin/undertow` is the built Linux binary. On Windows, use `.\bin\undertow.exe`. Replace `SERVER_IP`, `FINGERPRINT`, and the example network with your values.
 
 ## One-time setup

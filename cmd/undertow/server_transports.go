@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"net/netip"
 	"sort"
 	"strings"
@@ -28,6 +29,7 @@ type activeTransport struct {
 }
 
 type serverTransports struct {
+	artifactHTTP http.Handler
 	mu           sync.Mutex
 	ctx          context.Context
 	manager      *control.Manager
@@ -37,6 +39,8 @@ type serverTransports struct {
 	handle       func(transport.Peer)
 	active       map[string]*activeTransport
 }
+
+func (s *serverTransports) SetArtifactHandler(handler http.Handler) { s.artifactHTTP = handler }
 
 func newServerTransports(ctx context.Context, manager *control.Manager, identity ed25519.PrivateKey, token []byte, domain, path string, handle func(transport.Peer)) *serverTransports {
 	return &serverTransports{ctx: ctx, manager: manager, identity: identity, token: token, domain: domain, path: path, handle: handle, active: make(map[string]*activeTransport)}
@@ -104,6 +108,9 @@ func (s *serverTransports) Start(name string, request control.TransportStartRequ
 		if kind == "websocket" {
 			info.Network = "tcp"
 			listener, err = websocket.Listen(addr, s.path, request.TLSCert, request.TLSKey, selfSigned, s.identity, s.token)
+			if err == nil {
+				listener.(*websocket.Server).SetArtifactHandler(s.artifactHTTP)
+			}
 		} else {
 			listener, err = quic.Listen(addr, request.TLSCert, request.TLSKey, selfSigned, s.identity, s.token)
 		}
