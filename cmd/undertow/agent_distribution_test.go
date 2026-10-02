@@ -205,7 +205,7 @@ func TestDeployScriptsVerifyHashAndStartWithoutArguments(t *testing.T) {
 	if err := printDeployScript(&out, h, "powershell"); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(out.String(), "ServicePointManager") || !strings.Contains(out.String(), "HttpClientHandler") || !strings.Contains(out.String(), "Get-FileHash") {
+	if strings.Contains(out.String(), "ServicePointManager") || !strings.Contains(out.String(), "HttpClientHandler") || !strings.Contains(out.String(), "SHA256]::Create") {
 		t.Fatal("self-signed PowerShell helper changed process-global TLS validation or skipped hash validation")
 	}
 }

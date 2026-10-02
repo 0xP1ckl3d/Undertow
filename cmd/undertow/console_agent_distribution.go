@@ -162,11 +162,45 @@ func printDeployScript(out io.Writer, hosted hostedArtifactInfo, shell string) e
 	case "powershell":
 		fmt.Fprintf(out, "param([string]$Destination = '%s')\n$ErrorActionPreference = 'Stop'\n$url = '%s'\n$expected = '%s'\n$temp = $Destination + '.download'\ntry {\n", psQuote(a.Filename), psQuote(hosted.Retrieval), a.SHA256)
 		if hosted.TLSSelfSigned {
-			fmt.Fprint(out, "  Add-Type -AssemblyName System.Net.Http\n  $handler = [System.Net.Http.HttpClientHandler]::new()\n  $handler.ServerCertificateCustomValidationCallback = { param($request, $cert, $chain, $errors) $true }\n  $client = [System.Net.Http.HttpClient]::new($handler)\n  try {\n    $response = $client.GetAsync($url).GetAwaiter().GetResult()\n    try {\n      $response.EnsureSuccessStatusCode() | Out-Null\n      $source = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()\n      try {\n        $target = [System.IO.File]::Create($temp)\n        try { $source.CopyTo($target) } finally { $target.Dispose() }\n      } finally { $source.Dispose() }\n    } finally { $response.Dispose() }\n  } finally { $client.Dispose(); $handler.Dispose() }\n")
+			fmt.Fprint(out, `  Add-Type -AssemblyName System.Net.Http
+  if (-not ('ScopedArtifactTls' -as [type])) {
+    $source = @'
+using System.Net.Http;
+using System.Net.Security;
+using System.Security.Cryptography.X509Certificates;
+public static class ScopedArtifactTls {
+    public static HttpClientHandler CreateHandler() {
+        var handler = new HttpClientHandler();
+        handler.ServerCertificateCustomValidationCallback =
+            (HttpRequestMessage request, X509Certificate2 certificate, X509Chain chain, SslPolicyErrors errors) => true;
+        return handler;
+    }
+}
+'@
+    if ($PSVersionTable.PSVersion.Major -lt 6) {
+      Add-Type -ReferencedAssemblies System.Net.Http -TypeDefinition $source
+    } else {
+      Add-Type -TypeDefinition $source
+    }
+  }
+  $handler = [ScopedArtifactTls]::CreateHandler()
+  $client = [System.Net.Http.HttpClient]::new($handler)
+  try {
+    $response = $client.GetAsync($url).GetAwaiter().GetResult()
+    try {
+      $response.EnsureSuccessStatusCode() | Out-Null
+      $source = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
+      try {
+        $target = [System.IO.File]::Create($temp)
+        try { $source.CopyTo($target) } finally { $target.Dispose() }
+      } finally { $source.Dispose() }
+    } finally { $response.Dispose() }
+  } finally { $client.Dispose(); $handler.Dispose() }
+`)
 		} else {
 			fmt.Fprint(out, "  Invoke-WebRequest -Uri $url -OutFile $temp\n")
 		}
-		fmt.Fprint(out, "  $actual = (Get-FileHash -Algorithm SHA256 -Path $temp).Hash.ToLowerInvariant()\n  if ($actual -ne $expected) { throw 'Artifact SHA-256 mismatch' }\n  Move-Item -Force $temp $Destination\n  Start-Process -FilePath (Resolve-Path $Destination)\n} finally { Remove-Item -ErrorAction SilentlyContinue $temp }\n")
+		fmt.Fprint(out, "  $stream = [System.IO.File]::OpenRead($temp)\n  $sha256 = [System.Security.Cryptography.SHA256]::Create()\n  try { $actual = [System.BitConverter]::ToString($sha256.ComputeHash($stream)).Replace('-', '').ToLowerInvariant() }\n  finally { $sha256.Dispose(); $stream.Dispose() }\n  if ($actual -ne $expected) { throw 'Artifact SHA-256 mismatch' }\n  Move-Item -Force $temp $Destination\n  Start-Process -FilePath (Resolve-Path $Destination)\n} finally { Remove-Item -ErrorAction SilentlyContinue $temp }\n")
 	case "shell":
 		curlFlags := "-fL"
 		if hosted.TLSSelfSigned {
