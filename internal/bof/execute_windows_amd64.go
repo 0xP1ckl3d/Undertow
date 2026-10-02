@@ -83,7 +83,7 @@ func Execute(ctx context.Context, object, args []byte, output func(bool, []byte)
 	// all synchronous callbacks must remain on one Windows thread.
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
-	directory, err := os.MkdirTemp("", "undertow-bof-")
+	directory, err := os.MkdirTemp("", "module-")
 	if err != nil {
 		return -1, err
 	}

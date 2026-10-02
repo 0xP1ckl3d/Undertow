@@ -12,7 +12,7 @@ import (
 // closing the launching terminal does not send it SIGHUP. Service managers and
 // test harnesses that already supply nonterminal I/O retain process ownership.
 func detachIfInteractive() (bool, error) {
-	if os.Getenv("_UNDERTOW_AGENT_DETACHED") == "1" || !hasTerminal() {
+	if !hasTerminal() {
 		return false, nil
 	}
 	path, err := os.Executable()
@@ -25,7 +25,6 @@ func detachIfInteractive() (bool, error) {
 	}
 	defer null.Close()
 	child := exec.Command(path)
-	child.Env = append(os.Environ(), "_UNDERTOW_AGENT_DETACHED=1")
 	child.Stdin, child.Stdout, child.Stderr = null, null, null
 	child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := child.Start(); err != nil {

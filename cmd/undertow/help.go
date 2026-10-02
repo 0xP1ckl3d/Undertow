@@ -116,6 +116,7 @@ Internal pivot:
 Operator API and diagnostics:
   --control-listen IP:PORT  Loopback API (default 127.0.0.1:47889).
   --control-token-file PATH Local API token (default control.key).
+  --agent-retrieval-path PATH Opaque artifact download prefix (default /).
   --probe-echo              Echo transport probes; disables normal streams.
 
 Lifecycle:

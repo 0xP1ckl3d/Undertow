@@ -3,15 +3,12 @@ package agent
 import (
 	"context"
 	"crypto/ed25519"
-	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
 	"net"
 	"net/netip"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -46,13 +43,14 @@ type Config struct {
 	AdvertisedRoutes      []string                 `json:"advertised_routes,omitempty"`
 	DeniedCapabilities    string                   `json:"denied_capabilities,omitempty"`
 	IdentityPath          string                   `json:"-"`
+	IdentityKey           ed25519.PrivateKey       `json:"-"`
 	Metadata              control.ArtifactIdentity `json:"-"`
 	Packaged              bool                     `json:"-"`
 }
 
 func (c Config) Validate() error {
 	if c.Version != ConfigVersion {
-		return fmt.Errorf("unsupported embedded agent profile version %d", c.Version)
+		return fmt.Errorf("unsupported configuration version %d", c.Version)
 	}
 	host, port, err := net.SplitHostPort(c.Server)
 	if err != nil {
@@ -138,42 +136,26 @@ func (c Config) Dial(ctx context.Context, key ed25519.PrivateKey) (transport.Con
 	}
 }
 
-func DefaultIdentityPath() (string, error) {
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		return "", err
-	}
-	executable, err := os.Executable()
-	if err != nil {
-		return "", err
-	}
-	sum := sha256.Sum256([]byte(filepath.Clean(executable)))
-	dir = filepath.Join(dir, "undertow-agent", "identities", hex.EncodeToString(sum[:12]))
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return "", err
-	}
-	if err := os.Chmod(dir, 0700); err != nil {
-		return "", err
-	}
-	return filepath.Join(dir, "agent.key"), nil
-}
-
 // Run is the single agent connection, inventory, service, and reconnect loop.
 func Run(ctx context.Context, c Config, ready func() error) error {
 	if err := c.Validate(); err != nil {
 		return err
 	}
-	path := c.IdentityPath
-	if path == "" {
+	var key ed25519.PrivateKey
+	if c.Packaged {
+		if len(c.IdentityKey) != ed25519.PrivateKeySize || !ed25519.NewKeyFromSeed(c.IdentityKey[:ed25519.SeedSize]).Equal(c.IdentityKey) {
+			return errors.New("invalid embedded identity")
+		}
+		key = append(ed25519.PrivateKey(nil), c.IdentityKey...)
+	} else {
+		if c.IdentityPath == "" {
+			return errors.New("manual agent identity path is required")
+		}
 		var err error
-		path, err = DefaultIdentityPath()
+		key, err = security.LoadOrCreateKey(c.IdentityPath)
 		if err != nil {
 			return err
 		}
-	}
-	key, err := security.LoadOrCreateKey(path)
-	if err != nil {
-		return err
 	}
 	caps, err := pivot.ParseDenied(c.DeniedCapabilities)
 	if err != nil {

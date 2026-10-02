@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -14,36 +14,36 @@ import (
 )
 
 func main() {
+	log.SetOutput(io.Discard)
 	if len(os.Args) == 2 && os.Args[1] == "_bof-worker" {
 		if err := bof.WorkerMain(os.Stdin, os.Stdout); err != nil {
-			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
 		return
 	}
 	if len(os.Args) != 1 {
-		fmt.Fprintln(os.Stderr, "undertow-agent accepts no command-line arguments")
 		os.Exit(2)
 	}
 	path, err := os.Executable()
 	if err != nil {
-		log.Fatal(err)
+		os.Exit(1)
 	}
 	if launched, err := detachIfInteractive(); err != nil {
-		log.Fatal(err)
+		os.Exit(1)
 	} else if launched {
 		return
 	}
 	embedded, err := agentprofile.Read(path)
 	if err != nil {
-		log.Fatal(err)
+		os.Exit(1)
 	}
 	cfg := embedded.Config
+	cfg.IdentityKey = embedded.IdentityKey
 	cfg.Metadata = embedded.Identity()
 	cfg.Packaged = true
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := agent.Run(ctx, cfg, nil); err != nil {
-		log.Fatal(err)
+		os.Exit(1)
 	}
 }

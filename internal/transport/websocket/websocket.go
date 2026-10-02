@@ -30,6 +30,7 @@ type Server struct {
 	listener     net.Listener
 	http         *http.Server
 	artifactHTTP http.Handler
+	artifactPath string
 	path         string
 	identity     ed25519.PrivateKey
 	token        []byte
@@ -43,7 +44,9 @@ type Server struct {
 }
 
 // SetArtifactHandler installs the narrowly scoped artifact route before Serve.
-func (s *Server) SetArtifactHandler(handler http.Handler)             { s.artifactHTTP = handler }
+func (s *Server) SetArtifactHandler(path string, handler http.Handler) {
+	s.artifactPath, s.artifactHTTP = path, handler
+}
 func (s *Server) SetEnrollmentVerifier(v security.EnrollmentVerifier) { s.verifier = v }
 
 var _ transport.Listener = (*Server)(nil)
@@ -116,7 +119,7 @@ func (s *Server) Close() error {
 }
 
 func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
-	if strings.HasPrefix(r.URL.Path, "/.undertow/artifacts/") && s.artifactHTTP != nil {
+	if s.artifactHTTP != nil && strings.HasPrefix(r.URL.Path, s.artifactPath) && len(strings.TrimPrefix(r.URL.Path, s.artifactPath)) == 48 {
 		s.artifactHTTP.ServeHTTP(w, r)
 		return
 	}

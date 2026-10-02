@@ -204,6 +204,7 @@ func serve(args []string) error {
 	controlTokenPath := f.String("control-token-file", "control.key", "local operator API token file")
 	agentStorePath := f.String("agent-store", "agent-distribution", "agent profile and artifact store directory")
 	agentTemplatePath := f.String("agent-templates", "", "directory containing prebuilt thin-agent templates (default: alongside undertow executable)")
+	agentRetrievalPath := f.String("agent-retrieval-path", "/", "opaque artifact download path prefix (default: /)")
 	var forwardValues forwards
 	f.Var(&forwardValues, "forward", "local TCP forward listen=remote-destination; repeatable")
 	if err := f.Parse(args); err != nil {
@@ -229,6 +230,9 @@ func serve(args []string) error {
 	}
 	if (*carrier.cert == "") != (*carrier.key == "") {
 		return errors.New("--tls-cert and --tls-key must be supplied together")
+	}
+	if !validRetrievalPath(*agentRetrievalPath) {
+		return errors.New("--agent-retrieval-path must be / or a clean absolute prefix ending in /")
 	}
 	if *carrier.selfSigned && *carrier.cert != "" {
 		return errors.New("--tls-self-signed cannot be combined with certificate files")
@@ -325,7 +329,7 @@ func serve(args []string) error {
 	if err != nil {
 		return err
 	}
-	distribution := &agentDistribution{store: distributionStore, manager: manager, authMode: *authMode, credential: token}
+	distribution := &agentDistribution{store: distributionStore, manager: manager, authMode: *authMode, credential: token, retrievalPath: *agentRetrievalPath}
 	manager.SetAgentDistributionHandler(distribution)
 	manager.SetArtifactLookup(func(id string) (string, string, bool) {
 		a, err := distributionStore.Artifact(id)
@@ -349,7 +353,7 @@ func serve(args []string) error {
 		return distributionStore.VerifyEnrollment(token, auth, transcript)
 	}
 	transportManager.SetEnrollmentVerifier(verifyEnrollment)
-	transportManager.SetArtifactHandler(http.HandlerFunc(distribution.Retrieve))
+	transportManager.SetArtifactHandler(*agentRetrievalPath, http.HandlerFunc(distribution.Retrieve))
 	manager.SetTransportController(transportManager)
 	manager.SetRelayAcceptor(func(_ context.Context, parentID string, stream *mux.Stream) {
 		peer, err := relay.AcceptWithVerifier(ctx, stream, parentID, identity, token, verifyEnrollment)

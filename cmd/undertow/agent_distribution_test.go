@@ -91,18 +91,29 @@ func TestAgentDistributionAPIAndRetrieval(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &hosted); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(hosted.Retrieval, "https://127.0.0.2:443/.undertow/artifacts/") {
+	if !strings.HasPrefix(hosted.Retrieval, "https://127.0.0.2:443/") || strings.Contains(hosted.Retrieval, "/.undertow/artifacts/") {
 		t.Fatal(hosted.Retrieval)
 	}
 	path := strings.TrimPrefix(hosted.Retrieval, "https://127.0.0.2:443")
 	if strings.Contains(path, a.ID) || strings.Contains(path, "office") {
 		t.Fatal("retrieval URL leaked management metadata")
 	}
+	if len(strings.TrimPrefix(path, "/")) != 48 || strings.Contains(strings.TrimPrefix(path, "/"), "/") {
+		t.Fatal("default retrieval path is not a single opaque token")
+	}
+	oldPath := httptest.NewRecorder()
+	d.Retrieve(oldPath, httptest.NewRequest(http.MethodGet, "/.undertow/artifacts/"+strings.TrimPrefix(path, "/"), nil))
+	if oldPath.Code != http.StatusNotFound {
+		t.Fatal("product-labelled retrieval route remained active")
+	}
 	request := httptest.NewRequest(http.MethodGet, path, nil)
 	download := httptest.NewRecorder()
 	d.Retrieve(download, request)
 	if download.Code != http.StatusOK {
 		t.Fatal(download.Code)
+	}
+	if strings.Contains(download.Header().Get("Content-Disposition"), a.ID) || strings.Contains(download.Header().Get("Content-Disposition"), a.Filename) {
+		t.Fatal("public response exposed artifact metadata")
 	}
 	sum := sha256.Sum256(download.Body.Bytes())
 	if hex.EncodeToString(sum[:]) != a.SHA256 {
@@ -113,6 +124,18 @@ func TestAgentDistributionAPIAndRetrieval(t *testing.T) {
 	if head.Code != http.StatusOK || head.Body.Len() != 0 || head.Header().Get("X-Artifact-SHA256") != a.SHA256 {
 		t.Fatal("HEAD response did not match artifact metadata")
 	}
+	d.retrievalPath = "/files/"
+	custom, err := d.hostedInfo(a)
+	if err != nil || !strings.Contains(custom.Retrieval, "/files/") {
+		t.Fatalf("custom retrieval path: %+v %v", custom, err)
+	}
+	customPath := strings.TrimPrefix(custom.Retrieval, "https://127.0.0.2:443")
+	customDownload := httptest.NewRecorder()
+	d.Retrieve(customDownload, httptest.NewRequest(http.MethodGet, customPath, nil))
+	if customDownload.Code != http.StatusOK {
+		t.Fatal("custom retrieval path did not serve the artifact")
+	}
+	d.retrievalPath = "/"
 	w = call(http.MethodPost, "/v1/agent-artifacts/"+a.ID+"/revoke", nil)
 	if w.Code != http.StatusOK {
 		t.Fatal(w.Code, w.Body.String())
@@ -136,6 +159,19 @@ func TestAgentDistributionAPIAndRetrieval(t *testing.T) {
 	w = call(http.MethodGet, "/v1/agent-artifacts/"+a.ID, nil)
 	if w.Code != http.StatusOK {
 		t.Fatal("profile deletion removed artifact")
+	}
+}
+
+func TestRetrievalPathValidation(t *testing.T) {
+	for _, value := range []string{"/", "/dl/", "/a/b/"} {
+		if !validRetrievalPath(value) {
+			t.Fatalf("valid path rejected: %q", value)
+		}
+	}
+	for _, value := range []string{"", "dl/", "/dl", "//", "/a//b/", "/a/../b/", "/a/./", "/a?x/", "/.undertow/artifacts/"} {
+		if validRetrievalPath(value) {
+			t.Fatalf("invalid path accepted: %q", value)
+		}
 	}
 }
 

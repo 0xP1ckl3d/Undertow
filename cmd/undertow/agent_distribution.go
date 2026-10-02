@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -19,10 +20,24 @@ import (
 )
 
 type agentDistribution struct {
-	store      *agentprofile.Store
-	manager    *control.Manager
-	authMode   string
-	credential []byte
+	store         *agentprofile.Store
+	manager       *control.Manager
+	authMode      string
+	credential    []byte
+	retrievalPath string
+}
+
+var retrievalPathPattern = regexp.MustCompile(`^/(?:[A-Za-z0-9_-]+/)*$`)
+
+func validRetrievalPath(value string) bool {
+	return len(value) <= 128 && retrievalPathPattern.MatchString(value)
+}
+
+func (d *agentDistribution) publicPath() string {
+	if d.retrievalPath == "" {
+		return "/"
+	}
+	return d.retrievalPath
 }
 
 // Profile responses deliberately omit the enrollment secret.
@@ -394,7 +409,7 @@ func (d *agentDistribution) hostedInfo(a agentprofile.Artifact) (hostedArtifactI
 	if err != nil {
 		return hostedArtifactInfo{}, err
 	}
-	path := "/.undertow/artifacts/" + token
+	path := d.publicPath() + token
 	server := d.manager.ServerInfo()
 	for _, l := range server.Listeners {
 		if l.Transport != "websocket" {
@@ -420,8 +435,12 @@ func (d *agentDistribution) Retrieve(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	token := strings.TrimPrefix(r.URL.Path, "/.undertow/artifacts/")
-	if strings.Contains(token, "/") {
+	if !strings.HasPrefix(r.URL.Path, d.publicPath()) {
+		http.NotFound(w, r)
+		return
+	}
+	token := strings.TrimPrefix(r.URL.Path, d.publicPath())
+	if len(token) != 48 || strings.Contains(token, "/") {
 		http.NotFound(w, r)
 		return
 	}
@@ -431,10 +450,14 @@ func (d *agentDistribution) Retrieve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer f.Close()
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", a.Filename))
+	publicName := "file"
+	if a.Platform == "windows" {
+		publicName += ".exe"
+	}
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", publicName))
 	w.Header().Set("X-Artifact-SHA256", a.SHA256)
 	w.Header().Set("Cache-Control", "no-store")
-	http.ServeContent(w, r, a.Filename, a.Created, f)
+	http.ServeContent(w, r, publicName, a.Created, f)
 }
 
 func distributionJSON(w http.ResponseWriter, status int, v any) {

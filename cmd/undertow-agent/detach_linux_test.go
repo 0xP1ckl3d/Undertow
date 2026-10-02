@@ -11,18 +11,19 @@ import (
 )
 
 func TestInteractiveLinuxLaunchSurvivesTerminal(t *testing.T) {
-	const stage = "_UNDERTOW_AGENT_DETACH_TEST"
+	const stage = "_DETACH_TEST_STAGE"
 	if os.Getenv(stage) == "launcher" {
+		interactive := hasTerminal()
 		launched, err := detachIfInteractive()
 		if err != nil {
 			t.Fatal(err)
 		}
-		if os.Getenv("_UNDERTOW_AGENT_DETACHED") == "1" {
+		if !interactive {
 			if launched {
 				t.Fatal("detached child launched another copy")
 			}
 			time.Sleep(300 * time.Millisecond)
-			if err := os.WriteFile(os.Getenv("_UNDERTOW_AGENT_DETACH_MARKER"), []byte("survived"), 0600); err != nil {
+			if err := os.WriteFile(os.Getenv("_DETACH_TEST_MARKER"), []byte("survived"), 0600); err != nil {
 				t.Fatal(err)
 			}
 			os.Exit(0)
@@ -44,7 +45,7 @@ func TestInteractiveLinuxLaunchSurvivesTerminal(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "script", "-q", "-c", command, os.DevNull)
-	cmd.Env = append(os.Environ(), stage+"=launcher", "_UNDERTOW_AGENT_DETACH_MARKER="+marker)
+	cmd.Env = append(os.Environ(), stage+"=launcher", "_DETACH_TEST_MARKER="+marker)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("terminal launcher: %v: %s", err, output)
 	}

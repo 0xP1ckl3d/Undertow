@@ -209,7 +209,7 @@ func TransferFileProgress(parent context.Context, session *mux.Mux, agentID, ope
 		return result, errors.New("invalid download size")
 	}
 	parentDir := filepath.Dir(localPath)
-	temp, err := os.CreateTemp(parentDir, ".undertow-download-*")
+	temp, err := os.CreateTemp(parentDir, ".tmp-*")
 	if err != nil {
 		return result, err
 	}
@@ -287,7 +287,7 @@ func serveUpload(stream *mux.Stream, reader *bufio.Reader, request FileMessage) 
 		fileError(stream, reader, err)
 		return
 	}
-	temp, err := os.CreateTemp(filepath.Dir(request.Path), ".undertow-upload-*")
+	temp, err := os.CreateTemp(filepath.Dir(request.Path), ".tmp-*")
 	if err != nil {
 		fileError(stream, reader, err)
 		return

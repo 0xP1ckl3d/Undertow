@@ -1,6 +1,7 @@
 package agentprofile
 
 import (
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -21,6 +22,7 @@ import (
 
 type Artifact struct {
 	ID                   string    `json:"id"`
+	AgentID              string    `json:"agent_id,omitempty"`
 	ProfileID            string    `json:"profile_id"`
 	Profile              string    `json:"profile"`
 	Server               string    `json:"server"`
@@ -330,6 +332,11 @@ func (s *Store) Build(name, platform, arch string, requestedFilename ...string) 
 		}
 	}
 	a := Artifact{ID: id, ProfileID: p.ID, Profile: p.Name, Server: p.Config.Server, Platform: platform, Architecture: arch, Filename: filename, Created: time.Now().UTC(), UndertowVersion: s.version, ProfileFormatVersion: EmbeddedFormatVersion}
+	_, identityKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return Artifact{}, err
+	}
+	a.AgentID = security.Fingerprint(identityKey)[:32]
 	secret := make([]byte, 32)
 	if _, err := rand.Read(secret); err != nil {
 		return Artifact{}, err
@@ -337,7 +344,7 @@ func (s *Store) Build(name, platform, arch string, requestedFilename ...string) 
 	configured := p.Config
 	configured.AuthMode = "artifact"
 	configured.Credential = secret
-	e := Embedded{ProfileID: p.ID, ArtifactID: id, Config: configured}
+	e := Embedded{ProfileID: p.ID, ArtifactID: id, IdentityKey: identityKey, Config: configured}
 	a.SHA256, a.Size, err = Stamp(path, filepath.Join(s.root, "artifacts", filename), e)
 	if err != nil {
 		if errors.Is(err, os.ErrExist) {
@@ -484,6 +491,9 @@ func (s *Store) VerifyEnrollment(primary, auth, transcript []byte) ([16]byte, st
 			continue
 		}
 		if security.CheckEnrollmentMAC(secret, auth, transcript) {
+			if a.AgentID != "" && a.AgentID != hex.EncodeToString(id[:]) {
+				return [16]byte{}, "", security.ErrHandshake
+			}
 			return id, artifactID, nil
 		}
 	}
