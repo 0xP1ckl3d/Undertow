@@ -571,7 +571,7 @@ func TestSelectedAgentShowUsesCurrentStatus(t *testing.T) {
 	if err := runConsole(context.Background(), strings.NewReader("use 1\nshow\nquit\n"), &output, caller, nil, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "Agent agent-a") || !strings.Contains(output.String(), "10.20.0.0/16") {
+	if !strings.Contains(output.String(), "Agent ID: agent-a") || !strings.Contains(output.String(), "10.20.0.0/16") {
 		t.Fatalf("agent show=%s", output.String())
 	}
 }

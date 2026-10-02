@@ -18,22 +18,25 @@ See [getting started](getting-started.md) for enrollment, fingerprint, and privi
 | `routes` | Show routes; from an agent menu, filter to that agent. |
 | `quit` or `exit` | Detach the server console without stopping its worker. In the VPN client console, stop the VPN and remove its owned routes. |
 
-## Configured agent distribution
+## Payload deployment
 
-Both consoles read the server's persisted profile and artifact store. Server operators can change it; a connected client needs an explicit `client distribution-admin SESSION_ID on` grant for changes:
+Type `payload` for the four-step profile → build → host → run guide. Both consoles can read the server's profile and payload records. Server operators can change them; a connected client needs an explicit `client distribution-admin SESSION_ID on` grant for changes:
 
 ```text
-agent profile create office server=SERVER_IP:443 transport=quic
-agent profile list
-agent profile show office
-agent profile edit office routes=10.20.0.0/16
-agent build office windows amd64
-agent artifacts
-agent host ARTIFACT_ID
-agent deploy-script ARTIFACT_ID powershell
-agent unhost ARTIFACT_ID
-agent revoke ARTIFACT_ID
-agent delete ARTIFACT_ID
+payload profile create office server=SERVER_IP:443 transport=quic
+payload profiles
+payload profile show office
+payload profile edit office routes=10.20.0.0/16
+payload build office windows amd64
+payload list
+payload show PAYLOAD_ID
+payload host PAYLOAD_ID
+payload url PAYLOAD_ID
+payload hosted
+payload deploy-script PAYLOAD_ID powershell
+payload unhost PAYLOAD_ID
+payload revoke PAYLOAD_ID
+payload delete PAYLOAD_ID
 agents
 use 1
 show
@@ -42,7 +45,7 @@ session kill
 agent shutdown
 ```
 
-Use `agent profile delete NAME` to remove a logical profile. Editing a profile leaves previously generated artifacts unchanged. `agent host` requires an active WebSocket HTTPS listener and returns a random URL and SHA-256. Verify the download before launching it with no arguments. `session kill` closes a session and permits reconnect; `agent shutdown` stops the configured process. `unhost`, `revoke`, and `delete` separately control download, future enrollment, and the server-side file/record. Normal packaged-agent operation writes no local operational logfile; the server retains bounded lifecycle events. See [configured thin agents](agent-distribution.md) for authentication and endpoint state.
+`payload build` prints a 24-character **payload ID** for the build, a 32-character **agent ID** for the future connection, and the binary's **server file** path. The server file is not an endpoint install path. `payload host` prints the endpoint **download URL** and opaque **download path**; `payload show` and `payload url` retrieve them again. Use `payload profile delete NAME` to remove a reusable profile. Editing one leaves existing payloads unchanged. Verify the download's SHA-256 before launching it with no arguments. `session kill` closes a connection and permits reconnect; `agent shutdown` stops the configured process. `payload unhost`, `revoke`, and `delete` separately control download, future enrollment, and the server-side file/record. Normal packaged-agent operation writes no local runtime files; the server retains bounded lifecycle events. Older `agent profile/build/artifacts/host` forms still work as aliases. See [payload deployment](agent-distribution.md) for authentication and endpoint state.
 
 ## Server listeners and agent topology
 

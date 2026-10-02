@@ -76,6 +76,13 @@ func TestAgentDistributionAPIAndRetrieval(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &a); err != nil {
 		t.Fatal(err)
 	}
+	var buildInfo artifactInfo
+	if err := json.Unmarshal(w.Body.Bytes(), &buildInfo); err != nil {
+		t.Fatal(err)
+	}
+	if buildInfo.ServerPath != store.ArtifactPath(a) || !filepath.IsAbs(buildInfo.ServerPath) {
+		t.Fatalf("build response lacks absolute server path: %+v", buildInfo)
+	}
 	if a.ProfileFormatVersion != agentprofile.EmbeddedFormatVersion || a.UndertowVersion != "test" {
 		t.Fatalf("artifact version metadata missing: %+v", a)
 	}
@@ -93,6 +100,9 @@ func TestAgentDistributionAPIAndRetrieval(t *testing.T) {
 	}
 	if !strings.HasPrefix(hosted.Retrieval, "https://127.0.0.2:443/") || strings.Contains(hosted.Retrieval, "/.undertow/artifacts/") {
 		t.Fatal(hosted.Retrieval)
+	}
+	if hosted.RetrievalPath == "" || !strings.HasSuffix(hosted.Retrieval, hosted.RetrievalPath) || hosted.ServerPath != buildInfo.ServerPath {
+		t.Fatalf("hosted response does not distinguish retrieval and storage paths: %+v", hosted)
 	}
 	path := strings.TrimPrefix(hosted.Retrieval, "https://127.0.0.2:443")
 	if strings.Contains(path, a.ID) || strings.Contains(path, "office") {

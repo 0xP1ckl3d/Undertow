@@ -504,7 +504,10 @@ func consoleAgentName(agent control.AgentInfo) string {
 }
 
 func printConsoleAgents(output io.Writer, agents []control.AgentInfo) {
-	fmt.Fprintf(output, "Agents (%d):\n", len(agents))
+	fmt.Fprintf(output, "Connected agents (%d):\n", len(agents))
+	if len(agents) > 0 {
+		fmt.Fprintln(output, "  No.  Hostname              Agent ID                          Virtual IP      Carrier    Path")
+	}
 	for i, agent := range agents {
 		path := "direct"
 		if agent.Via != "" {
@@ -514,7 +517,7 @@ func printConsoleAgents(output io.Writer, agents []control.AgentInfo) {
 		if agent.Profile != "" {
 			profile = " profile=" + agent.Profile
 		}
-		fmt.Fprintf(output, "  %d  %-20s  %s  %s  %s  %s  routes=%d jobs=%d%s\n", i+1, consoleAgentName(agent), shortAgentID(agent.ID), agent.VirtualIP, agent.Transport, path, len(agent.AdvertisedRoutes), agent.ActiveJobs, profile)
+		fmt.Fprintf(output, "  %-4d %-20s  %-32s  %-15s %s  %s  routes=%d jobs=%d%s\n", i+1, consoleAgentName(agent), agent.ID, agent.VirtualIP, agent.Transport, path, len(agent.AdvertisedRoutes), agent.ActiveJobs, profile)
 	}
 	if len(agents) > 0 {
 		fmt.Fprintln(output, "Use an agent with: use NUMBER")
@@ -610,7 +613,10 @@ func runConsoleCommand(ctx context.Context, output io.Writer, call consoleCaller
 		}
 		return err
 	}
-	if args[0] == "agent" && len(args) > 1 && args[1] != "show" {
+	if args[0] == "payload" {
+		return runConsolePayload(ctx, output, call, args)
+	}
+	if args[0] == "agent" && (len(args) == 1 || args[1] != "show") {
 		return runConsoleAgentDistribution(ctx, output, call, args)
 	}
 	if args[0] == "relay" || args[0] == "topology" {

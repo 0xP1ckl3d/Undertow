@@ -87,6 +87,15 @@ type profileRequest struct {
 	DeniedCapabilities    *string   `json:"denied_capabilities,omitempty"`
 }
 
+type artifactInfo struct {
+	agentprofile.Artifact
+	ServerPath string `json:"server_path"`
+}
+
+func (d *agentDistribution) artifactInfo(a agentprofile.Artifact) artifactInfo {
+	return artifactInfo{Artifact: a, ServerPath: d.store.ArtifactPath(a)}
+}
+
 func decodeDistributionRequest(r *http.Request, target any) error {
 	dec := json.NewDecoder(io.LimitReader(r.Body, agentprofile.MaxProfileSize+1))
 	dec.DisallowUnknownFields()
@@ -285,7 +294,12 @@ func (d *agentDistribution) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
 	case path == "/v1/agent-artifacts" && r.Method == http.MethodGet:
-		distributionJSON(w, http.StatusOK, d.store.Artifacts())
+		artifacts := d.store.Artifacts()
+		out := make([]artifactInfo, 0, len(artifacts))
+		for _, a := range artifacts {
+			out = append(out, d.artifactInfo(a))
+		}
+		distributionJSON(w, http.StatusOK, out)
 	case path == "/v1/agent-artifacts" && r.Method == http.MethodPost:
 		var req struct {
 			Profile      string `json:"profile"`
@@ -302,7 +316,7 @@ func (d *agentDistribution) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			distributionError(w, err)
 			return
 		}
-		distributionJSON(w, http.StatusCreated, a)
+		distributionJSON(w, http.StatusCreated, d.artifactInfo(a))
 	case strings.HasPrefix(path, "/v1/agent-artifacts/"):
 		parts := strings.Split(strings.TrimPrefix(path, "/v1/agent-artifacts/"), "/")
 		id := parts[0]
@@ -325,7 +339,7 @@ func (d *agentDistribution) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					distributionError(w, err)
 					return
 				}
-				distributionJSON(w, http.StatusOK, a)
+				distributionJSON(w, http.StatusOK, d.artifactInfo(a))
 				return
 			}
 		}
@@ -379,7 +393,7 @@ func (d *agentDistribution) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					distributionError(w, err)
 					return
 				}
-				distributionJSON(w, http.StatusOK, a)
+				distributionJSON(w, http.StatusOK, d.artifactInfo(a))
 				return
 			}
 		}
@@ -389,7 +403,7 @@ func (d *agentDistribution) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				distributionError(w, err)
 				return
 			}
-			distributionJSON(w, http.StatusOK, a)
+			distributionJSON(w, http.StatusOK, d.artifactInfo(a))
 			return
 		}
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -400,7 +414,9 @@ func (d *agentDistribution) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 type hostedArtifactInfo struct {
 	agentprofile.Artifact
+	ServerPath    string `json:"server_path"`
 	Retrieval     string `json:"retrieval"`
+	RetrievalPath string `json:"retrieval_path"`
 	TLSSelfSigned bool   `json:"tls_self_signed,omitempty"`
 }
 
@@ -424,10 +440,10 @@ func (d *agentDistribution) hostedInfo(a agentprofile.Artifact) (hostedArtifactI
 			break
 		}
 		if host != "" {
-			return hostedArtifactInfo{Artifact: a, Retrieval: "https://" + net.JoinHostPort(host, port) + path, TLSSelfSigned: l.TLSMode == "self-signed"}, nil
+			return hostedArtifactInfo{Artifact: a, ServerPath: d.store.ArtifactPath(a), Retrieval: "https://" + net.JoinHostPort(host, port) + path, RetrievalPath: path, TLSSelfSigned: l.TLSMode == "self-signed"}, nil
 		}
 	}
-	return hostedArtifactInfo{Artifact: a, Retrieval: path}, nil
+	return hostedArtifactInfo{Artifact: a, ServerPath: d.store.ArtifactPath(a), Retrieval: path, RetrievalPath: path}, nil
 }
 
 func (d *agentDistribution) Retrieve(w http.ResponseWriter, r *http.Request) {

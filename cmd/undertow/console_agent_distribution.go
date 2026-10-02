@@ -10,277 +10,82 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"sort"
 	"strings"
 	"time"
-
-	"undertow/internal/agentprofile"
 )
 
 func runConsoleAgentDistribution(ctx context.Context, out io.Writer, call consoleCaller, args []string) error {
 	if len(args) < 2 {
-		return errors.New("use agent profile|build|artifacts|host|hosted|unhost|revoke|delete|deploy-script|shutdown|events")
+		return errors.New("agent commands manage connected agents: use agents, agent events AGENT_ID, or agent shutdown AGENT_ID; use payload for deployment binaries")
 	}
-	switch args[1] {
-	case "profile":
-		if len(args) < 3 {
-			return errors.New("use agent profile create|list|show|edit|delete")
+	if args[1] != "show" && isPayloadSubcommand(args[1]) {
+		legacy := append([]string{"payload"}, args[1:]...)
+		return runConsolePayload(ctx, out, call, legacy)
+	}
+	if args[1] != "shutdown" && args[1] != "events" {
+		return fmt.Errorf("unknown connected-agent command %q; use agents for live sessions or payload help for deployment", args[1])
+	}
+	if len(args) != 3 {
+		return fmt.Errorf("use agent %s AGENT_NUMBER|AGENT_ID|HOSTNAME, or select a connected agent first", args[1])
+	}
+	if len(args[2]) == 24 {
+		if _, err := hex.DecodeString(args[2]); err == nil {
+			return fmt.Errorf("%s looks like a payload ID; use payload show %s for the build, or agents to find its connected agent ID", args[2], args[2])
 		}
-		switch args[2] {
-		case "list":
-			if len(args) != 3 {
-				return errors.New("use agent profile list")
-			}
-			data, err := call(ctx, http.MethodGet, "/v1/agent-profiles", nil)
-			if err != nil {
-				return err
-			}
-			var profiles []publicAgentProfile
-			if err := json.Unmarshal(data, &profiles); err != nil {
-				return err
-			}
-			if len(profiles) == 0 {
-				fmt.Fprintln(out, "No agent profiles.")
-				return nil
-			}
-			for _, p := range profiles {
-				fmt.Fprintf(out, "%-24s %-10s %-24s %s\n", p.Name, p.Transport, p.Server, p.ID[:min(8, len(p.ID))])
-			}
-			return nil
-		case "show":
-			if len(args) != 4 {
-				return errors.New("use agent profile show NAME")
-			}
-			data, err := call(ctx, http.MethodGet, "/v1/agent-profiles/"+url.PathEscape(args[3]), nil)
-			if err != nil {
-				return err
-			}
-			var p publicAgentProfile
-			if err := json.Unmarshal(data, &p); err != nil {
-				return err
-			}
-			fmt.Fprintf(out, "Profile: %s\nID: %s\nCreated: %s\nUndertow: %s\nFormat: %d\nServer: %s\nTransport: %s\nFingerprint: %s\nAuthentication: %s\nCapabilities denied: %s\nRoutes: %s\n", p.Name, p.ID, p.Created.Format("2006-01-02 15:04 UTC"), p.UndertowVersion, p.FormatVersion, p.Server, p.Transport, p.Fingerprint, p.AuthMode, emptyDefault(p.DeniedCapabilities, "none"), emptyDefault(strings.Join(p.AdvertisedRoutes, ", "), "auto"))
-			return nil
-		case "create", "edit":
-			if len(args) < 4 {
-				return errors.New("use agent profile create|edit NAME [server=HOST:PORT transport=quic ...]")
-			}
-			req, err := parseProfileOptions(args[4:])
-			if err != nil {
-				return err
-			}
-			method := http.MethodPost
-			path := "/v1/agent-profiles"
-			if args[2] == "edit" {
-				method = http.MethodPut
-				path += "/" + url.PathEscape(args[3])
-			} else {
-				req.Name = args[3]
-			}
-			data, err := call(ctx, method, path, req)
-			if err != nil {
-				return err
-			}
-			var p publicAgentProfile
-			if err := json.Unmarshal(data, &p); err != nil {
-				return err
-			}
-			if method == http.MethodPost {
-				fmt.Fprintf(out, "Created profile %s (%s).\n", p.Name, p.ID)
-			} else {
-				fmt.Fprintf(out, "Profile %s changed. Existing artifacts retain their original configuration. Build a new artifact to use the updated profile.\n", p.Name)
-			}
-			return nil
-		case "delete":
-			if len(args) != 4 {
-				return errors.New("use agent profile delete NAME")
-			}
-			if _, err := call(ctx, http.MethodDelete, "/v1/agent-profiles/"+url.PathEscape(args[3]), nil); err != nil {
-				return err
-			}
-			fmt.Fprintf(out, "Deleted profile %s. Existing artifacts remain.\n", args[3])
-			return nil
-		}
-	case "build":
-		if len(args) != 5 && len(args) != 6 {
-			return errors.New("use agent build PROFILE PLATFORM ARCH [filename=NAME]")
-		}
-		request := map[string]string{"profile": args[2], "platform": args[3], "architecture": args[4]}
-		if len(args) == 6 {
-			filename, ok := strings.CutPrefix(args[5], "filename=")
-			if !ok || filename == "" {
-				return errors.New("optional build argument must be filename=NAME")
-			}
-			request["filename"] = filename
-		}
-		data, err := call(ctx, http.MethodPost, "/v1/agent-artifacts", request)
-		if err != nil {
+	}
+	agents, err := consoleAgents(ctx, call)
+	if err != nil {
+		return err
+	}
+	a, err := findConsoleAgent(agents, args[2])
+	id := a.ID
+	if err != nil {
+		if args[1] != "events" || len(args[2]) != 32 {
 			return err
 		}
-		var a agentprofile.Artifact
-		if err := json.Unmarshal(data, &a); err != nil {
+		if _, decodeErr := hex.DecodeString(args[2]); decodeErr != nil {
 			return err
 		}
-		fmt.Fprintf(out, "Created artifact %s: %s\nProfile: %s  Platform: %s/%s  SHA-256: %s\n", a.ID, a.Filename, a.Profile, a.Platform, a.Architecture, a.SHA256)
-		return nil
-	case "artifacts", "hosted":
-		if len(args) != 2 {
-			return errors.New("use agent artifacts or agent hosted")
-		}
-		data, err := call(ctx, http.MethodGet, "/v1/agent-artifacts", nil)
-		if err != nil {
+		id = args[2]
+	}
+	path := "/v1/agents/" + url.PathEscape(id)
+	if args[1] == "shutdown" {
+		if _, err := call(ctx, http.MethodPost, path+"/shutdown", nil); err != nil {
 			return err
 		}
-		var artifacts []agentprofile.Artifact
-		if err := json.Unmarshal(data, &artifacts); err != nil {
-			return err
-		}
-		sort.Slice(artifacts, func(i, j int) bool { return artifacts[i].Created.After(artifacts[j].Created) })
-		found := false
-		for _, a := range artifacts {
-			if args[1] == "hosted" && !a.Hosted {
-				continue
-			}
-			found = true
-			marker := ""
-			if a.Hosted {
-				marker = " hosted"
-			}
-			if a.Revoked {
-				marker += " revoked"
-			}
-			fmt.Fprintf(out, "%-10s %-22s %-15s %s%s\n", a.ID[:min(8, len(a.ID))], a.Profile, a.Platform+"/"+a.Architecture, a.Created.Format("2006-01-02 15:04 UTC"), marker)
-		}
-		if !found {
-			fmt.Fprintln(out, "No agent artifacts.")
-		}
-		return nil
-	case "host":
-		if len(args) != 3 {
-			return errors.New("use agent host ARTIFACT_ID")
-		}
-		data, err := call(ctx, http.MethodPost, "/v1/agent-artifacts/"+url.PathEscape(args[2])+"/host", nil)
-		if err != nil {
-			return err
-		}
-		var a hostedArtifactInfo
-		if err := json.Unmarshal(data, &a); err != nil {
-			return err
-		}
-		fmt.Fprintf(out, "Artifact hosted\nProfile: %s\nPlatform: %s/%s\nArtifact: %s\nFilename: %s\nSize: %d bytes\nSHA-256: %s\nRetrieval: %s\n", a.Profile, a.Platform, a.Architecture, a.ID, a.Filename, a.Size, a.SHA256, a.Retrieval)
-		return nil
-	case "unhost":
-		if len(args) != 3 {
-			return errors.New("use agent unhost ARTIFACT_ID")
-		}
-		if _, err := call(ctx, http.MethodDelete, "/v1/agent-artifacts/"+url.PathEscape(args[2])+"/host", nil); err != nil {
-			return err
-		}
-		fmt.Fprintln(out, "Artifact unhosted.")
-		return nil
-	case "revoke":
-		if len(args) != 3 {
-			return errors.New("use agent revoke ARTIFACT_ID")
-		}
-		if _, err := call(ctx, http.MethodPost, "/v1/agent-artifacts/"+url.PathEscape(args[2])+"/revoke", nil); err != nil {
-			return err
-		}
-		fmt.Fprintln(out, "Artifact enrollment revoked. Existing sessions remain connected; new enrollment using this artifact will be rejected.")
-		return nil
-	case "delete":
-		if len(args) != 3 {
-			return errors.New("use agent delete ARTIFACT_ID")
-		}
-		if _, err := call(ctx, http.MethodDelete, "/v1/agent-artifacts/"+url.PathEscape(args[2]), nil); err != nil {
-			return err
-		}
-		fmt.Fprintln(out, "Artifact deleted. Its profile remains.")
-		return nil
-	case "deploy-script":
-		if len(args) != 4 {
-			return errors.New("use agent deploy-script ARTIFACT_ID powershell|shell")
-		}
-		data, err := call(ctx, http.MethodGet, "/v1/agent-artifacts/"+url.PathEscape(args[2]), nil)
-		if err != nil {
-			return err
-		}
-		var a agentprofile.Artifact
-		if err := json.Unmarshal(data, &a); err != nil {
-			return err
-		}
-		if !a.Hosted {
-			return errors.New("host the artifact before generating a deployment script")
-		}
-		data, err = call(ctx, http.MethodGet, "/v1/agent-artifacts/"+url.PathEscape(a.ID)+"/host", nil)
-		if err != nil {
-			return err
-		}
-		var hosted hostedArtifactInfo
-		if err := json.Unmarshal(data, &hosted); err != nil {
-			return err
-		}
-		if !strings.HasPrefix(hosted.Retrieval, "https://") {
-			return errors.New("no WebSocket HTTPS listener is available for retrieval")
-		}
-		return printDeployScript(out, hosted, args[3])
-	case "shutdown", "events":
-		if len(args) != 3 {
-			return fmt.Errorf("use agent %s AGENT_NUMBER|ID|HOSTNAME, or select an agent first", args[1])
-		}
-		agents, err := consoleAgents(ctx, call)
-		if err != nil {
-			return err
-		}
-		a, err := findConsoleAgent(agents, args[2])
-		id := a.ID
-		if err != nil {
-			if args[1] != "events" || len(args[2]) != 32 {
-				return err
-			}
-			if _, decodeErr := hex.DecodeString(args[2]); decodeErr != nil {
-				return err
-			}
-			id = args[2]
-		}
-		path := "/v1/agents/" + url.PathEscape(id)
-		if args[1] == "shutdown" {
-			if _, err := call(ctx, http.MethodPost, path+"/shutdown", nil); err != nil {
-				return err
-			}
-			fmt.Fprintf(out, "Shutdown acknowledged by %s (%s).\n", consoleAgentName(a), a.ID)
-			return nil
-		}
-		data, err := call(ctx, http.MethodGet, path+"/events", nil)
-		if err != nil {
-			return err
-		}
-		var events []struct {
-			At                time.Time `json:"at"`
-			Kind              string    `json:"kind"`
-			Transport         string    `json:"transport"`
-			DurationSeconds   int64     `json:"duration_seconds"`
-			ReconnectAttempts uint32    `json:"reconnect_attempts"`
-		}
-		if err := json.Unmarshal(data, &events); err != nil {
-			return err
-		}
-		if len(events) == 0 {
-			fmt.Fprintln(out, "No recent lifecycle events.")
-			return nil
-		}
-		for _, e := range events {
-			fmt.Fprintf(out, "%s  %-23s %s", e.At.Local().Format("2006-01-02 15:04:05"), e.Kind, e.Transport)
-			if e.DurationSeconds > 0 {
-				fmt.Fprintf(out, "  duration=%s", (time.Duration(e.DurationSeconds) * time.Second).String())
-			}
-			if e.ReconnectAttempts > 0 {
-				fmt.Fprintf(out, "  attempts=%d", e.ReconnectAttempts)
-			}
-			fmt.Fprintln(out)
-		}
+		fmt.Fprintf(out, "Shutdown acknowledged by %s (agent ID %s).\n", consoleAgentName(a), a.ID)
 		return nil
 	}
-	return errors.New("use agent profile|build|artifacts|host|hosted|unhost|revoke|delete|deploy-script|shutdown|events")
+	data, err := call(ctx, http.MethodGet, path+"/events", nil)
+	if err != nil {
+		return err
+	}
+	var events []struct {
+		At                time.Time `json:"at"`
+		Kind              string    `json:"kind"`
+		Transport         string    `json:"transport"`
+		DurationSeconds   int64     `json:"duration_seconds"`
+		ReconnectAttempts uint32    `json:"reconnect_attempts"`
+	}
+	if err := json.Unmarshal(data, &events); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "Lifecycle events for agent ID %s\n", id)
+	if len(events) == 0 {
+		fmt.Fprintln(out, "No recent lifecycle events.")
+		return nil
+	}
+	for _, e := range events {
+		fmt.Fprintf(out, "%s  %-23s %s", e.At.Local().Format("2006-01-02 15:04:05"), e.Kind, e.Transport)
+		if e.DurationSeconds > 0 {
+			fmt.Fprintf(out, "  duration=%s", (time.Duration(e.DurationSeconds) * time.Second).String())
+		}
+		if e.ReconnectAttempts > 0 {
+			fmt.Fprintf(out, "  attempts=%d", e.ReconnectAttempts)
+		}
+		fmt.Fprintln(out)
+	}
+	return nil
 }
 
 func emptyDefault(value, fallback string) string {

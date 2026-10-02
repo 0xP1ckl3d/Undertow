@@ -383,6 +383,15 @@ func (s *Store) Artifact(id string) (Artifact, error) {
 	return a, nil
 }
 
+// ArtifactPath is the server-side file path, never an endpoint installation path.
+func (s *Store) ArtifactPath(a Artifact) string {
+	path := filepath.Join(s.root, "artifacts", a.Filename)
+	if absolute, err := filepath.Abs(path); err == nil {
+		return absolute
+	}
+	return path
+}
+
 func (s *Store) ArtifactEnrollmentScoped(id string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()

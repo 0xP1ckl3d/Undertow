@@ -108,7 +108,7 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 		if matches := wordCompletions(registry.names(), partial); len(matches) == 1 && partial != "" {
 			return matches
 		}
-		commands := []string{"agents", "agent", "session", "use", "status", "routes", "help", "clear", "cls", "quit", "exit", "load", "unload", "bofs"}
+		commands := []string{"agents", "agent", "payload", "session", "use", "status", "routes", "help", "clear", "cls", "quit", "exit", "load", "unload", "bofs"}
 		commands = append(commands, registry.names()...)
 		if selected {
 			commands = append(commands, "show", "back", "route", "jobs", "job", "exec", "shell", "run-script", "run-wasm", "run-native", "run-bof", "pwd", "ls", "stat", "mkdir", "rm", "whoami", "ps", "privileges", "env", "interfaces", "dns", "route-table")
@@ -143,13 +143,26 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 		}
 	case "agent":
 		if len(before) == 1 {
-			return wordCompletions([]string{"profile", "build", "artifacts", "host", "hosted", "unhost", "revoke", "delete", "deploy-script", "shutdown", "events"}, partial)
+			return wordCompletions([]string{"show", "shutdown", "events"}, partial)
+		}
+	case "payload":
+		if len(before) == 1 {
+			return wordCompletions([]string{"help", "profiles", "profile", "build", "list", "show", "host", "hosted", "url", "unhost", "revoke", "delete", "deploy-script"}, partial)
 		}
 		if len(before) == 2 && before[1] == "profile" {
 			return wordCompletions([]string{"create", "list", "show", "edit", "delete"}, partial)
 		}
 		if len(before) == 3 && before[1] == "deploy-script" {
 			return wordCompletions([]string{"powershell", "shell"}, partial)
+		}
+		if len(before) == 3 && before[1] == "build" {
+			return wordCompletions([]string{"windows", "linux"}, partial)
+		}
+		if len(before) == 4 && before[1] == "build" {
+			if before[3] == "windows" {
+				return wordCompletions([]string{"amd64"}, partial)
+			}
+			return wordCompletions([]string{"amd64", "arm64"}, partial)
 		}
 	case "load":
 		if len(before) == 1 {
@@ -190,7 +203,7 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 		}
 	case "help":
 		if len(before) == 1 {
-			topics := []string{"agents", "agent", "profile", "artifacts", "status", "route", "lifecycle", "clear", "load", "unload", "bofs"}
+			topics := []string{"agents", "agent", "payload", "profile", "artifacts", "status", "route", "lifecycle", "clear", "load", "unload", "bofs"}
 			topics = append(topics, registry.names()...)
 			if selected {
 				topics = append(topics, "shell", "exec", "run-script", "run-wasm", "run-native", "run-bof", "jobs", "host")

