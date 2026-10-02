@@ -231,6 +231,8 @@ func TestVPNClientDistributionIsReadOnlyByDefault(t *testing.T) {
 		{http.MethodDelete, "/v1/agent-artifacts/abc/host"},
 		{http.MethodGet, "/v1/payload-retrieval-path"},
 		{http.MethodPut, "/v1/payload-retrieval-path"},
+		{http.MethodGet, "/v1/payload-retrieval-host"},
+		{http.MethodPut, "/v1/payload-retrieval-host"},
 	} {
 		req, err := http.NewRequest(tc.method, "http://localhost"+tc.path, nil)
 		if err != nil {

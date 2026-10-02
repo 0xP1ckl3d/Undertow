@@ -23,6 +23,25 @@ type routeDevice struct {
 	routes map[string]bool
 }
 
+func TestPayloadRetrievalHostRoutesToDistributionHandler(t *testing.T) {
+	manager := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	manager.SetAgentDistributionHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/payload-retrieval-host" {
+			t.Errorf("unexpected distribution path %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	for _, method := range []string{http.MethodGet, http.MethodPut} {
+		request := httptest.NewRequest(method, "/v1/payload-retrieval-host", nil)
+		request.Header.Set("Authorization", "Bearer test-token")
+		response := httptest.NewRecorder()
+		manager.handler("test-token").ServeHTTP(response, request)
+		if response.Code != http.StatusNoContent {
+			t.Fatalf("%s retrieval host route: %d", method, response.Code)
+		}
+	}
+}
+
 func TestShutdownAcknowledgedAndLifecycleRecorded(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
