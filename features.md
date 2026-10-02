@@ -86,6 +86,12 @@ Agent: undertow agent --transport quic --server SERVER_IP:443 --tls-insecure-ski
 VPN client: sudo undertow client --internal --transport quic --server SERVER_IP:443 --tls-insecure-skip-verify --client-key operator-client.key --trust-on-first-use --fingerprint-file server.fingerprint --token-file token.key
 ```
 
+## Configured payload delivery
+
+The server release includes thin-agent templates. A profile captures carrier and policy settings; each `payload build` creates an immutable Windows or Linux agent with a distinct identity and enrollment secret. `payload host` creates a private HTTPS retrieval URL for a headless endpoint. `payload deploy-script` prints a SHA-256-verifying installer for PowerShell or a POSIX shell. The packaged agent starts without command-line connection settings or local runtime state. See the [first-run workflow](docs/getting-started.md#3-build-host-and-deploy-a-headless-windows-agent) and [payload deployment](docs/agent-distribution.md).
+
+`payload download PAYLOAD_ID [OUTPUT]` is the alternate delivery path: it copies the built binary to the current console host over the authenticated control connection and verifies its SHA-256. It works before hosting and refuses to replace a file. A connected VPN client can list profiles and builds; downloading or changing them requires a server-granted `client distribution-admin SESSION_ID on`, which can be revoked with `off` and ends on disconnect. `payload unhost`, `payload revoke`, and `payload delete` separately disable public retrieval, future enrollment, and the server artifact. `agent events`, `session kill`, and `agent shutdown` cover a connected agent's lifecycle.
+
 ## Routing and network traffic
 
 ### Full IPv4 VPN mode
@@ -267,7 +273,7 @@ VPN client console: shell powershell.exe -NoProfile
 
 ### Long-running jobs
 
-Jobs run while the operator uses or detaches the console. They have unique IDs, agent association, start/end times, running/completed/failed/cancelled state, exit status, and up to 256 KiB of retained output. A VPN client sees its own jobs; the server operator can see all. Jobs use the `interactive` agent capability.
+Jobs run while the operator uses or detaches the console. They have unique IDs, agent association, start/end times, running/completed/failed/cancelled state, and exit status. Output stays in memory through 256 KiB, then spills to a server file up to configurable per-job and total limits. `job output` previews it, `job save` downloads the full output, and `job delete` removes a finished record and its output. A VPN client sees its own jobs; the server operator can see all. Command jobs use the `interactive` agent capability; background script, WASM, native, and BOF jobs use their respective capabilities.
 
 ```text
 VPN client console: use 1
@@ -275,7 +281,9 @@ VPN client console: job start /usr/bin/find /srv -type f
 VPN client console: jobs
 VPN client console: job show JOB_ID
 VPN client console: job output JOB_ID
+VPN client console: job save JOB_ID
 VPN client console: job cancel JOB_ID
+VPN client console: job delete JOB_ID
 ```
 
 ### Memory-backed script execution
@@ -333,7 +341,7 @@ VPN client keyboard during a transfer: Ctrl-] to cancel
 
 ### Granular agent capabilities
 
-All capabilities are enabled by default: `pivot`, `exec`, `hostops`, `interactive`, `scripts`, `wasm`, `upload`, `download`, `listeners`, and `relay`. Deny any combination at agent startup; the server and agent enforce the operation at the relevant stream. `relay` allows an operator-requested child-agent listener; zero relay listeners exist until explicitly started on a selected agent. It is independent of `listeners`, which controls client-service TCP forwards.
+All capabilities are enabled by default: `pivot`, `exec`, `hostops`, `interactive`, `scripts`, `wasm`, `native`, `upload`, `download`, `listeners`, and `relay`. Deny any combination at agent startup; the server and agent enforce the operation at the relevant stream. `relay` allows an operator-requested child-agent listener; zero relay listeners exist until explicitly started on a selected agent. It is independent of `listeners`, which controls client-service TCP forwards.
 
 ```text
 Agent: undertow agent --transport quic --server SERVER_IP:443 --tls-insecure-skip-verify --fingerprint FINGERPRINT --token-file token.key --deny=exec,upload

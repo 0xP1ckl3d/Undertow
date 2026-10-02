@@ -1,4 +1,99 @@
-# Getting started
+# Getting started: server → client → Windows agent
+
+This is a first-run path for a reachable **Linux server**, a **Linux VPN client**, and a **Windows agent** on a network the client wants to reach. Run each block on the named machine. Replace `SERVER_IP`, `FINGERPRINT`, `10.20.0.0/16`, and `10.20.1.25` with values from your deployment. Commands assume you are in the Undertow repository. Go 1.25 or newer is needed to build; the server and client need elevated privileges for listeners/TUN/routes. Permit UDP/443 and TCP/443 to the server.
+
+## 1. Initialize and start the server
+
+On the **server**:
+
+```sh
+sh tools/build-release.sh bin
+./bin/undertow init
+sudo ./bin/undertow server --tun
+```
+
+The release build creates the operator binary **and thin-agent templates** used by `payload build`. Save the fingerprint printed by `init`. It also creates `token.key`, the default enrollment secret. The last command opens the server console. Its `status` command should show QUIC UDP/443 and HTTPS/WebSocket TCP/443 (and direct DNS UDP/53). The HTTPS listener is needed to host payloads. `--tun` lets applications on the **server itself** use agent routes; the separate client creates its own TUN. The server can omit `--tun` when its own applications need no agent route.
+
+Copy `token.key` securely into the Linux client's Undertow directory. Keep `identity.key` and `control.key` on the server. A detached server can start with `server --tun --background`; use `sudo ./bin/undertow server attach` to reopen its console.
+
+## 2. Connect the client and accept the server fingerprint
+
+On the **Linux client**:
+
+```sh
+sh tools/build-release.sh bin
+sudo ./bin/undertow client --vpn --internal --transport quic --server SERVER_IP:443 --token-file token.key --fingerprint FINGERPRINT --tls-insecure-skip-verify
+```
+
+Get `FINGERPRINT` from the server through a trusted channel. Passing it on the first connection accepts and pins that identity. The default TLS certificate is self-signed, hence `--tls-insecure-skip-verify`; Undertow still checks its separate identity fingerprint. If you cannot transfer the fingerprint first, substitute `--trust-on-first-use` for `--fingerprint FINGERPRINT`. After an authenticated connection, Undertow writes `server.fingerprint`; compare the saved value with the server's fingerprint before relying on it. Subsequent connections load the saved pin automatically. The client creates its own `client.key`.
+
+The command opens the **client console**. `--vpn` routes this client's IPv4 Internet traffic through the server; `--internal` enables routes through agents. Use either flag alone if you need only one path. In another client terminal, `curl -4 https://api.ipify.org` should show the server's public IP when VPN is active. `status` on either host should show the connected client. Type `background` to detach while it runs, `sudo ./bin/undertow client attach` to return, and `quit` in the client console to stop it and remove owned routes.
+
+## 3. Build, host, and deploy a headless Windows agent
+
+In the **server console**:
+
+```text
+payload profile create office server=SERVER_IP:443 transport=quic
+payload build office windows amd64
+payload host PAYLOAD_ID
+payload deploy-script PAYLOAD_ID powershell
+```
+
+Replace `PAYLOAD_ID` with the **24-character payload ID** from `payload build`. The build also prints a separate **32-character agent ID** for the connection. The profile stores the server address and carrier; the build stamps a fresh agent identity, enrollment credential, and server fingerprint into the executable. The server file path printed by the build is storage on the server, not a Windows install path. `payload host` creates an opaque HTTPS URL. Keep the URL private. `payload show PAYLOAD_ID` and `payload url PAYLOAD_ID` recover the details.
+
+Save the PowerShell text printed by the last command as `deploy.ps1` on the **Windows host**. Run it there:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\deploy.ps1 -Destination .\worker.exe
+```
+
+The script downloads, verifies SHA-256, installs, and launches the binary hidden. The packaged agent needs **no connection arguments**, console window, Administrator rights, or inbound port. Its executable contains an enrollment credential, so protect both the executable and deploy script. Build once per endpoint if distinct agent identities are needed. The [payload guide](agent-distribution.md) covers manual download, profiles, hosted URL rotation, grants, and lifecycle commands.
+
+**Alternate delivery:** if you need to wrap the executable or deliver it through your own channel, run `payload download PAYLOAD_ID ./staging/worker.exe` in the server console. This retrieves the built binary over the authenticated control connection, verifies its SHA-256, and saves it locally even if it has never been hosted. The output file must not already exist. A connected VPN client can do the same after the server operator grants that client with `client distribution-admin SESSION_ID on`; run `off` to revoke the grant when finished. Read-only profile and payload listings do not need a grant. See [payload deployment](agent-distribution.md#profile--build--host--run) for details.
+
+## 4. Run a command and a module
+
+Back in the **server or client console**:
+
+```text
+agents
+use 1
+show
+whoami
+exec cmd.exe /c whoami
+modules
+module-wininfo
+```
+
+Use the number shown by `agents`, or select by hostname or agent ID; numbers can change as peers reconnect. `whoami` is a built-in host operation and `exec` starts a Windows command. The local console preloads packaged modules from `modules/`. `module-wininfo` is a bundled Windows native module; `help module-wininfo` shows its usage. If absent, start or attach the console from the repository, or set `UNDERTOW_MODULES_DIR` to the absolute path of its `modules/` directory. The direct-file form is `run-native modules/native/wininfo/wininfo.module`. The [module bank](module-bank.md) also documents packaged BOFs and WASM tools.
+
+## 5. Route client traffic through the agent
+
+In the **client console**, select the Windows agent and inspect its reported networks:
+
+```text
+agents
+use 1
+routes
+route accept 10.20.0.0/16
+routes
+```
+
+Accept a CIDR actually shown by `routes`. If the agent can reach a network it does not report, use `route add 10.20.0.0/16` instead. The route belongs to **this client** and persists in `client-routes.json` across reconnects. Test a real service from a separate client terminal, for example `curl http://10.20.1.25/`; check the public IP again to confirm the VPN path. `route del 10.20.0.0/16` removes the client route. If applications on the **server** also need the network, select the agent in the server console and run `route add 10.20.0.0/16` there.
+
+If no agent appears, check `status` and `agent events AGENT_ID` in the server console, the Windows process, and outbound UDP/443. If route acceptance fails, pick a reported subnet that does not overlap the client's local networks. `help`, `help route`, and `payload` provide context-specific guidance.
+
+## Continue from here
+
+| Goal | Guide |
+| --- | --- |
+| Other VPN modes and carrier choices | [Quickstart](quickstart.md) and [scenarios](scenarios.md) |
+| Profiles, downloads, hosting, and shutdown | [Payload deployment](agent-distribution.md) |
+| Shells, files, jobs, forwards, and console commands | [Console guide](console.md) |
+| BOF, native, and WASM tools | [Module bank](module-bank.md), [BOF](bof-compatibility.md), [native](native-modules.md), and [WASM](wasm-development.md) guides |
+| Deeper agent networks | [Topology and relays](topology-and-relays.md) |
+| All flags and feature index | [CLI reference](cli-reference.md) and [feature catalogue](../features.md) |
 
 ## What runs where?
 
@@ -23,33 +118,9 @@ sudo undertow client --vpn --internal --transport quic --server SERVER_IP:443 --
 
 These examples use **QUIC UDP/443** with the server's automatic self-signed TLS certificate and a separately pinned Undertow fingerprint. The server also starts HTTPS/WebSocket TCP/443 and direct DNS UDP/53 by default; peers choose any active carrier independently. See [Quickstart transport choices](quickstart.md#choose-another-carrier). Allow the chosen port through the server firewall. UDP/53 and virtual interfaces commonly need elevated privileges.
 
-## Build and first session
+## Manual agent alternative
 
-Build Linux with `mkdir -p bin && go build -buildvcs=false -o bin/undertow ./cmd/undertow`. In Windows PowerShell use:
-
-```powershell
-New-Item -ItemType Directory -Force .\bin | Out-Null
-go build -buildvcs=false -o .\bin\undertow.exe .\cmd\undertow
-if ($LASTEXITCODE -ne 0) { throw 'Build failed; bin\undertow.exe may be an older version' }
-.\bin\undertow.exe help agent
-```
-
-In the examples below, `undertow` means `./bin/undertow` on Linux or `.\bin\undertow.exe` on Windows. Run from a directory containing your credential files, or use absolute paths.
-
-On the server:
-
-```sh
-undertow init
-sudo undertow server
-```
-
-The server prints a fingerprint. Copy `token.key` securely to the agent host, then run there:
-
-```sh
-undertow agent --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify
-```
-
-The terminal server command opens its operator console. Type `agents`, `use 1`, and `show` to inspect the agent, or `status` for the full view. A connected VPN client appears under **VPN clients**; it needs no agent route for Internet egress. On the server, `background` or `quit` detaches, `sudo undertow server attach` returns, and `stop` shuts the worker down gracefully. Stop the foreground agent with Ctrl+C. The server identity stays on the server. Each agent and VPN client creates its **own** Ed25519 key file (`agent.key` or `client.key`) on first run. Never copy `identity.key` to a client.
+If you want a foreground diagnostic agent instead of the configured Windows payload above, copy `token.key` securely to that host and run `undertow agent --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --token-file token.key --tls-insecure-skip-verify`. On Linux, `undertow` means `./bin/undertow`; on Windows it means `.\bin\undertow.exe`. A manual agent creates its own `agent.key`, remains in the foreground, and stops with Ctrl+C. A configured payload embeds its own identity and credential and runs headlessly. Keep the server identity on the server.
 
 ## Enrollment choices
 

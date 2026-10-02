@@ -138,9 +138,9 @@ if ($LASTEXITCODE -ne 0) { throw 'Build failed; bin\undertow.exe may be an older
 
 ## Guides
 
-- [Goal-oriented quickstart with commands by host](docs/quickstart.md)
-- [Exhaustive feature catalogue with commands by machine](features.md)
-- [Setup, roles, enrollment and fingerprints](docs/getting-started.md)
+- [Getting started: full server, client, and headless Windows agent workflow](docs/getting-started.md)
+- [Quickstart: alternate VPN and internal routing scenarios](docs/quickstart.md)
+- [Feature catalogue with commands by machine](features.md)
 - [Scenario commands: pivot, VPN, forwarding and lifecycle](docs/scenarios.md)
 - [Interactive console commands and examples](docs/console.md)
 - [Local module bank and preload rules](docs/module-bank.md)

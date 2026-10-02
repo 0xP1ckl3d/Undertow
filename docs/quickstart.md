@@ -1,6 +1,10 @@
 # Quickstart
 
+For a complete first installation from `init` through a Linux client, hosted Windows payload, agent command, module, and route, follow [Getting started](getting-started.md). The sections below are short alternatives for particular traffic paths and carriers.
+
 ## Payload deployment
+
+For your own packaging or delivery flow, `payload download PAYLOAD_ID [OUTPUT]` saves a hosted or unhosted build to the console host over the authenticated control connection and verifies its SHA-256. A VPN client needs a temporary `client distribution-admin SESSION_ID on` grant from the server operator to download payload bytes; revoke it with `off`. See [payload deployment](agent-distribution.md) for output rules.
 
 Build the release binaries with `sh tools/build-release.sh bin` (or `tools/build-release.ps1` on Windows), then start the server. Its `bin` directory should contain the thin-agent templates. In the server console:
 

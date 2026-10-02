@@ -92,7 +92,7 @@ func TestConnectedVPNClientHasLimitedAPI(t *testing.T) {
 	}
 }
 
-func TestServerGrantControlsClientDistributionMutations(t *testing.T) {
+func TestServerGrantControlsClientDistributionMutationsAndPayloadDownloads(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	a, b := make(chan []byte, 256), make(chan []byte, 256)
@@ -104,6 +104,10 @@ func TestServerGrantControlsClientDistributionMutations(t *testing.T) {
 	var calls atomic.Int32
 	manager.SetAgentDistributionHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
+		if r.URL.Path == "/v1/agent-artifacts/abc/download/chunk" {
+			_, _ = w.Write([]byte(`{"offset":0,"total":3,"data":"YWJj"}`))
+			return
+		}
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write([]byte(`{"name":"office"}`))
 	}))
@@ -119,6 +123,10 @@ func TestServerGrantControlsClientDistributionMutations(t *testing.T) {
 	if _, err := CallRemote(ctx, client, http.MethodPost, "/v1/agent-profiles", map[string]string{"name": "office"}); err == nil || !strings.Contains(err.Error(), "403") {
 		t.Fatalf("mutation without grant: %v", err)
 	}
+	chunkPath := "/v1/agent-artifacts/abc/download/chunk?offset=0"
+	if _, err := CallRemote(ctx, client, http.MethodGet, chunkPath, nil); err == nil || !strings.Contains(err.Error(), "403") {
+		t.Fatalf("payload download without grant: %v", err)
+	}
 	if calls.Load() != 0 {
 		t.Fatal("distribution handler was reached without a grant")
 	}
@@ -131,9 +139,18 @@ func TestServerGrantControlsClientDistributionMutations(t *testing.T) {
 	if calls.Load() != 1 {
 		t.Fatal("granted mutation did not reach handler")
 	}
+	if data, err := CallRemote(ctx, client, http.MethodGet, chunkPath, nil); err != nil || !strings.Contains(string(data), "YWJj") {
+		t.Fatalf("granted payload download failed: %v %s", err, data)
+	}
+	if calls.Load() != 2 {
+		t.Fatal("granted payload download did not reach handler")
+	}
 	manager.UnregisterClient(704, server)
 	if _, err := CallRemote(ctx, client, http.MethodPost, "/v1/agent-profiles", map[string]string{"name": "office"}); err == nil || !strings.Contains(err.Error(), "403") {
 		t.Fatalf("grant survived disconnect: %v", err)
+	}
+	if _, err := CallRemote(ctx, client, http.MethodGet, chunkPath, nil); err == nil || !strings.Contains(err.Error(), "403") {
+		t.Fatalf("payload grant survived disconnect: %v", err)
 	}
 }
 
