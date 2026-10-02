@@ -33,7 +33,7 @@ func printConsoleHelp(output io.Writer, vpnClient, selected, serverAttached bool
 		}
 	}
 	switch topic {
-	case "payload", "profile", "artifact", "artifacts":
+	case "payload", "profile", "artifact", "artifacts", "retrieval-path":
 		printPayloadWorkflow(output)
 		fmt.Fprint(output, `
 Profile fields: server, transport, domain, fingerprint, auth, token-file,

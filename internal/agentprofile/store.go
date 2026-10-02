@@ -39,10 +39,11 @@ type Artifact struct {
 }
 
 type persisted struct {
-	Profiles          map[string]Profile  `json:"profiles"`
-	Artifacts         map[string]Artifact `json:"artifacts"`
-	RetrievalTokens   map[string]string   `json:"retrieval_tokens,omitempty"`
-	EnrollmentSecrets map[string]string   `json:"enrollment_secrets,omitempty"`
+	Profiles             map[string]Profile  `json:"profiles"`
+	Artifacts            map[string]Artifact `json:"artifacts"`
+	RetrievalTokens      map[string]string   `json:"retrieval_tokens,omitempty"`
+	EnrollmentSecrets    map[string]string   `json:"enrollment_secrets,omitempty"`
+	PayloadRetrievalPath string              `json:"payload_retrieval_path,omitempty"`
 }
 
 const templateManifestName = "undertow-agent-templates.json"
@@ -205,6 +206,59 @@ func (s *Store) save() error {
 		return err
 	}
 	return os.Rename(f.Name(), filepath.Join(s.root, "state.json"))
+}
+
+func (s *Store) PayloadRetrievalPath() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.state.PayloadRetrievalPath
+}
+
+func (s *Store) SetPayloadRetrievalPath(path string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	old := s.state.PayloadRetrievalPath
+	if old == path {
+		return false, nil
+	}
+	oldTokens := s.state.RetrievalTokens
+	if old != "" {
+		newTokens := make(map[string]string, len(oldTokens))
+		seen := make(map[string]bool, len(oldTokens))
+		for id, token := range oldTokens {
+			newTokens[id] = token
+			seen[token] = true
+		}
+		for id, artifact := range s.state.Artifacts {
+			if !artifact.Hosted {
+				continue
+			}
+			for {
+				first, err := ID()
+				if err != nil {
+					return false, err
+				}
+				second, err := ID()
+				if err != nil {
+					return false, err
+				}
+				token := first + second
+				if !seen[token] {
+					newTokens[id] = token
+					seen[token] = true
+					break
+				}
+			}
+		}
+		s.state.RetrievalTokens = newTokens
+	}
+	s.state.PayloadRetrievalPath = path
+	if err := s.save(); err != nil {
+		s.state.PayloadRetrievalPath = old
+		s.state.RetrievalTokens = oldTokens
+		return false, err
+	}
+	return true, nil
 }
 
 func (s *Store) Create(name string, cfg agent.Config) (Profile, error) {

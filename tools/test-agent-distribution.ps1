@@ -68,7 +68,7 @@ function Assert-EndpointUnchanged($endpoint) {
 try {
   $unconfigured = Start-Process -FilePath (Join-Path $templates "undertow-agent-windows-amd64.exe") -PassThru -Wait -WindowStyle Hidden -RedirectStandardError (Join-Path $root "unconfigured.err")
   if ($unconfigured.ExitCode -eq 0 -or (Get-Item (Join-Path $root "unconfigured.err")).Length -ne 0) { throw "Unconfigured thin agent did not exit quietly" }
-  $server = Start-Process -FilePath $operator -ArgumentList @("server", "--foreground", "--transport", "websocket,quic,dns", "--websocket-listen", "127.0.0.1:$wsPort", "--quic-listen", "127.0.0.1:$quicPort", "--dns-listen", "127.0.0.1:$dnsPort", "--control-listen", "127.0.0.1:$controlPort", "--auth", "token", "--token-file", $enrollmentFile, "--tls-self-signed", "--identity", $identity, "--agent-store", $store, "--agent-templates", $templates, "--agent-retrieval-path", "/dl/", "--control-token-file", $tokenFile) -PassThru -WindowStyle Hidden -RedirectStandardOutput (Join-Path $root "server.out") -RedirectStandardError (Join-Path $root "server.err")
+  $server = Start-Process -FilePath $operator -ArgumentList @("server", "--foreground", "--transport", "websocket,quic,dns", "--websocket-listen", "127.0.0.1:$wsPort", "--quic-listen", "127.0.0.1:$quicPort", "--dns-listen", "127.0.0.1:$dnsPort", "--control-listen", "127.0.0.1:$controlPort", "--auth", "token", "--token-file", $enrollmentFile, "--tls-self-signed", "--identity", $identity, "--agent-store", $store, "--agent-templates", $templates, "--payload-retrieval-path", "/dl/", "--control-token-file", $tokenFile) -PassThru -WindowStyle Hidden -RedirectStandardOutput (Join-Path $root "server.out") -RedirectStandardError (Join-Path $root "server.err")
   $base = "http://127.0.0.1:$controlPort"
   $ready = $false
   for ($i=0; $i -lt 60; $i++) {
@@ -79,9 +79,9 @@ try {
     Start-Sleep -Milliseconds 200
   }
   if (-not $ready) { throw "Server did not start: $(Get-Content (Join-Path $root 'server.err') -Raw)" }
-  $consoleLines = @("agent profile create console-check server=127.0.0.1:$quicPort transport=quic", "agent profile list", "agent profile show console-check", "agent profile edit console-check routes=10.20.0.0/16", "agent profile delete console-check", "quit")
+  $consoleLines = @("payload retrieval-path", "payload profile create console-check server=127.0.0.1:$quicPort transport=quic", "payload profiles", "payload profile show console-check", "payload profile edit console-check routes=10.20.0.0/16", "payload profile delete console-check", "quit")
   $consoleOutput = ($consoleLines | & $operator console --control "127.0.0.1:$controlPort" --control-token-file $tokenFile 2>$null | Out-String)
-  if ($consoleOutput -notmatch "Created profile console-check" -or $consoleOutput -notmatch "Existing artifacts retain" -or $consoleOutput -notmatch "Deleted profile console-check") { throw "Server console profile commands failed: $consoleOutput" }
+  if ($consoleOutput -notmatch 'Public payload download prefix: /dl/' -or $consoleOutput -notmatch 'Profile "console-check" created' -or $consoleOutput -notmatch 'Existing payloads keep' -or $consoleOutput -notmatch 'Profile "console-check" deleted') { throw "Server console payload commands failed: $consoleOutput" }
   foreach ($target in @(@{ transport = "websocket"; port = $wsPort }, @{ transport = "quic"; port = $quicPort }, @{ transport = "dns"; port = $dnsPort })) {
     $name = "e2e-$($target.transport)"
     $body = @{ name = $name; server = "127.0.0.1:$($target.port)"; transport = $target.transport; denied_capabilities = "upload"; advertised_routes = @("10.20.0.0/16") } | ConvertTo-Json

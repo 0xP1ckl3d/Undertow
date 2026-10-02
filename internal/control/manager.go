@@ -1080,6 +1080,16 @@ func (m *Manager) handler(token string) http.Handler {
 		}
 		handler.ServeHTTP(w, r)
 	}))
+	muxer.Handle("/v1/payload-retrieval-path", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		m.mu.RLock()
+		handler := m.agentDistribution
+		m.mu.RUnlock()
+		if handler == nil {
+			http.Error(w, "payload distribution unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		handler.ServeHTTP(w, r)
+	}))
 	m.jobHTTPHandlers(muxer)
 	muxer.HandleFunc("GET /v1/status", func(w http.ResponseWriter, r *http.Request) {
 		m.mu.RLock()

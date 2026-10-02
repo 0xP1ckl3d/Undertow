@@ -30,7 +30,6 @@ type Server struct {
 	listener     net.Listener
 	http         *http.Server
 	artifactHTTP http.Handler
-	artifactPath string
 	path         string
 	identity     ed25519.PrivateKey
 	token        []byte
@@ -43,9 +42,10 @@ type Server struct {
 	once         sync.Once
 }
 
-// SetArtifactHandler installs the narrowly scoped artifact route before Serve.
-func (s *Server) SetArtifactHandler(path string, handler http.Handler) {
-	s.artifactPath, s.artifactHTTP = path, handler
+// SetArtifactHandler delegates non-WebSocket requests to the retrieval handler.
+// The handler checks the current opaque path, including runtime changes.
+func (s *Server) SetArtifactHandler(handler http.Handler) {
+	s.artifactHTTP = handler
 }
 func (s *Server) SetEnrollmentVerifier(v security.EnrollmentVerifier) { s.verifier = v }
 
@@ -119,12 +119,12 @@ func (s *Server) Close() error {
 }
 
 func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
-	if s.artifactHTTP != nil && strings.HasPrefix(r.URL.Path, s.artifactPath) && len(strings.TrimPrefix(r.URL.Path, s.artifactPath)) == 48 {
-		s.artifactHTTP.ServeHTTP(w, r)
-		return
-	}
 	if r.URL.Path != s.path {
-		http.NotFound(w, r)
+		if s.artifactHTTP == nil {
+			http.NotFound(w, r)
+		} else {
+			s.artifactHTTP.ServeHTTP(w, r)
+		}
 		return
 	}
 	if r.Method != http.MethodGet || !headerToken(r.Header.Get("Connection"), "upgrade") || !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") || r.Header.Get("Sec-WebSocket-Version") != "13" {

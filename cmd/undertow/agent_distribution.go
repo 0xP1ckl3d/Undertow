@@ -11,6 +11,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	agentruntime "undertow/internal/agent"
@@ -24,6 +25,7 @@ type agentDistribution struct {
 	manager       *control.Manager
 	authMode      string
 	credential    []byte
+	pathMu        sync.RWMutex
 	retrievalPath string
 }
 
@@ -34,10 +36,26 @@ func validRetrievalPath(value string) bool {
 }
 
 func (d *agentDistribution) publicPath() string {
+	d.pathMu.RLock()
+	defer d.pathMu.RUnlock()
 	if d.retrievalPath == "" {
 		return "/"
 	}
 	return d.retrievalPath
+}
+
+func (d *agentDistribution) setPublicPath(path string) (bool, error) {
+	if !validRetrievalPath(path) {
+		return false, errors.New("payload retrieval path must be / or a clean absolute prefix ending in /")
+	}
+	d.pathMu.Lock()
+	defer d.pathMu.Unlock()
+	changed, err := d.store.SetPayloadRetrievalPath(path)
+	if err != nil {
+		return false, err
+	}
+	d.retrievalPath = path
+	return changed, nil
 }
 
 // Profile responses deliberately omit the enrollment secret.
@@ -224,6 +242,27 @@ func (d *agentDistribution) apply(c agentruntime.Config, req profileRequest) (ag
 func (d *agentDistribution) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	switch {
+	case path == "/v1/payload-retrieval-path" && r.Method == http.MethodGet:
+		distributionJSON(w, http.StatusOK, struct {
+			Path string `json:"path"`
+		}{Path: d.publicPath()})
+	case path == "/v1/payload-retrieval-path" && r.Method == http.MethodPut:
+		var req struct {
+			Path string `json:"path"`
+		}
+		if err := decodeDistributionRequest(r, &req); err != nil {
+			distributionError(w, err)
+			return
+		}
+		changed, err := d.setPublicPath(req.Path)
+		if err != nil {
+			distributionError(w, err)
+			return
+		}
+		distributionJSON(w, http.StatusOK, struct {
+			Path    string `json:"path"`
+			Changed bool   `json:"changed"`
+		}{Path: req.Path, Changed: changed})
 	case path == "/v1/agent-profiles" && r.Method == http.MethodGet:
 		profiles := d.store.Profiles()
 		out := make([]publicAgentProfile, 0, len(profiles))
@@ -421,11 +460,18 @@ type hostedArtifactInfo struct {
 }
 
 func (d *agentDistribution) hostedInfo(a agentprofile.Artifact) (hostedArtifactInfo, error) {
+	d.pathMu.RLock()
 	token, err := d.store.HostedToken(a.ID)
 	if err != nil {
+		d.pathMu.RUnlock()
 		return hostedArtifactInfo{}, err
 	}
-	path := d.publicPath() + token
+	prefix := d.retrievalPath
+	if prefix == "" {
+		prefix = "/"
+	}
+	path := prefix + token
+	d.pathMu.RUnlock()
 	server := d.manager.ServerInfo()
 	for _, l := range server.Listeners {
 		if l.Transport != "websocket" {
@@ -447,20 +493,29 @@ func (d *agentDistribution) hostedInfo(a agentprofile.Artifact) (hostedArtifactI
 }
 
 func (d *agentDistribution) Retrieve(w http.ResponseWriter, r *http.Request) {
+	d.pathMu.RLock()
+	prefix := d.retrievalPath
+	if prefix == "" {
+		prefix = "/"
+	}
+	if !strings.HasPrefix(r.URL.Path, prefix) {
+		d.pathMu.RUnlock()
+		http.NotFound(w, r)
+		return
+	}
+	token := strings.TrimPrefix(r.URL.Path, prefix)
+	if len(token) != 48 || strings.Contains(token, "/") {
+		d.pathMu.RUnlock()
+		http.NotFound(w, r)
+		return
+	}
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		d.pathMu.RUnlock()
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if !strings.HasPrefix(r.URL.Path, d.publicPath()) {
-		http.NotFound(w, r)
-		return
-	}
-	token := strings.TrimPrefix(r.URL.Path, d.publicPath())
-	if len(token) != 48 || strings.Contains(token, "/") {
-		http.NotFound(w, r)
-		return
-	}
 	a, f, err := d.store.OpenHosted(token)
+	d.pathMu.RUnlock()
 	if err != nil {
 		http.NotFound(w, r)
 		return

@@ -43,8 +43,11 @@ NAME is a profile name. PAYLOAD_ID is the 24-character build ID shown by
 32-character agent ID; use "agents" and "agent events|shutdown" for it.
 The server file path is where Undertow stores the build. The download URL is
 for the endpoint; choose the endpoint's install path when downloading.
-Server operators may set --agent-retrieval-path /downloads/ when starting the
-server to place the random download token below that neutral public prefix.
+Path: payload retrieval-path | payload retrieval-path set /downloads/
+The public prefix is saved on the server. Changing it rotates download tokens,
+permanently invalidating old URLs;
+use "payload hosted" to retrieve the current URLs. A startup
+--payload-retrieval-path flag overrides the saved prefix.
 Hosting, enrollment revocation, and stopping a running agent are separate.
 `)
 }
@@ -55,6 +58,8 @@ func runConsolePayload(ctx context.Context, out io.Writer, call consoleCaller, a
 		return nil
 	}
 	switch args[1] {
+	case "retrieval-path":
+		return runPayloadRetrievalPath(ctx, out, call, args)
 	case "profiles":
 		if len(args) != 2 {
 			return errors.New("use payload profiles to list profile names; type payload help for the workflow")
@@ -95,6 +100,46 @@ func runConsolePayload(ctx context.Context, out io.Writer, call consoleCaller, a
 		return printDeployScript(out, hosted, args[3])
 	}
 	return fmt.Errorf("unknown payload command %q; type payload help for the four-step workflow", args[1])
+}
+
+func runPayloadRetrievalPath(ctx context.Context, out io.Writer, call consoleCaller, args []string) error {
+	if len(args) == 2 {
+		data, err := call(ctx, http.MethodGet, "/v1/payload-retrieval-path", nil)
+		if err != nil {
+			return err
+		}
+		var current struct {
+			Path string `json:"path"`
+		}
+		if err := json.Unmarshal(data, &current); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "Public payload download prefix: %s\nUse payload hosted to list current URLs. Change with: payload retrieval-path set /downloads/\n", current.Path)
+		return nil
+	}
+	if len(args) != 4 || args[2] != "set" {
+		return errors.New("use payload retrieval-path to view the public prefix, or payload retrieval-path set /downloads/ to change it")
+	}
+	if !validRetrievalPath(args[3]) {
+		return errors.New("public prefix must be / or an absolute path ending in / with letters, numbers, _ or - in each segment; example: /downloads/")
+	}
+	data, err := call(ctx, http.MethodPut, "/v1/payload-retrieval-path", map[string]string{"path": args[3]})
+	if err != nil {
+		return fmt.Errorf("could not change the public payload download prefix: %w", err)
+	}
+	var updated struct {
+		Path    string `json:"path"`
+		Changed bool   `json:"changed"`
+	}
+	if err := json.Unmarshal(data, &updated); err != nil {
+		return err
+	}
+	if !updated.Changed {
+		fmt.Fprintf(out, "Public payload download prefix is already %s. Hosted URLs are unchanged.\n", updated.Path)
+		return nil
+	}
+	fmt.Fprintf(out, "Public payload download prefix set to %s. Hosted download tokens were rotated; earlier URLs no longer work. Run payload hosted or payload url PAYLOAD_ID to get current URLs.\nThe setting is saved for restarts unless an explicit --payload-retrieval-path startup flag overrides it.\n", updated.Path)
+	return nil
 }
 
 func payloadProfiles(ctx context.Context, call consoleCaller) ([]publicAgentProfile, error) {

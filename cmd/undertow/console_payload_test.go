@@ -17,8 +17,18 @@ func TestPayloadConsoleWorkflowAndIdentifierGuidance(t *testing.T) {
 	info := artifactInfo{Artifact: agentprofile.Artifact{ID: id, AgentID: agentID, Profile: "office", Platform: "windows", Architecture: "amd64", Filename: id + ".exe", SHA256: strings.Repeat("c", 64), Hosted: true}, ServerPath: `/srv/builds/` + id + `.exe`}
 	hosted := hostedArtifactInfo{Artifact: info.Artifact, ServerPath: info.ServerPath, Retrieval: "https://example.com/download/opaque-token", RetrievalPath: "/download/opaque-token"}
 	encode := func(v any) []byte { b, _ := json.Marshal(v); return b }
+	publicPath := "/download/"
 	call := func(_ context.Context, method, path string, body any) ([]byte, error) {
 		switch method + " " + path {
+		case "GET /v1/payload-retrieval-path":
+			return encode(map[string]string{"path": publicPath}), nil
+		case "PUT /v1/payload-retrieval-path":
+			changed := publicPath != body.(map[string]string)["path"]
+			publicPath = body.(map[string]string)["path"]
+			return encode(struct {
+				Path    string `json:"path"`
+				Changed bool   `json:"changed"`
+			}{Path: publicPath, Changed: changed}), nil
 		case "GET /v1/agent-profiles":
 			return encode([]publicAgentProfile{{Name: "office"}}), nil
 		case "GET /v1/agent-artifacts":
@@ -75,5 +85,16 @@ func TestPayloadConsoleWorkflowAndIdentifierGuidance(t *testing.T) {
 	var out bytes.Buffer
 	if err := runConsoleAgentDistribution(context.Background(), &out, call, []string{"agent", "events", id}); err == nil || !strings.Contains(err.Error(), "payload show") {
 		t.Fatalf("connected-agent command accepted payload ID: %v", err)
+	}
+	out.Reset()
+	if err := runConsolePayload(context.Background(), &out, call, []string{"payload", "retrieval-path"}); err != nil || !strings.Contains(out.String(), "/download/") {
+		t.Fatalf("retrieval path view: %v %s", err, out.String())
+	}
+	if err := runConsolePayload(context.Background(), &out, call, []string{"payload", "retrieval-path", "set", "/broken"}); err == nil || publicPath != "/download/" {
+		t.Fatalf("invalid retrieval path was accepted: %v", err)
+	}
+	out.Reset()
+	if err := runConsolePayload(context.Background(), &out, call, []string{"payload", "retrieval-path", "set", "/new/"}); err != nil || publicPath != "/new/" || !strings.Contains(out.String(), "earlier URLs no longer work") {
+		t.Fatalf("retrieval path change: %v %s", err, out.String())
 	}
 }

@@ -31,7 +31,6 @@ type activeTransport struct {
 
 type serverTransports struct {
 	artifactHTTP       http.Handler
-	artifactPath       string
 	enrollmentVerifier security.EnrollmentVerifier
 	mu                 sync.Mutex
 	ctx                context.Context
@@ -43,8 +42,8 @@ type serverTransports struct {
 	active             map[string]*activeTransport
 }
 
-func (s *serverTransports) SetArtifactHandler(path string, handler http.Handler) {
-	s.artifactPath, s.artifactHTTP = path, handler
+func (s *serverTransports) SetArtifactHandler(handler http.Handler) {
+	s.artifactHTTP = handler
 }
 func (s *serverTransports) SetEnrollmentVerifier(v security.EnrollmentVerifier) {
 	s.enrollmentVerifier = v
@@ -120,7 +119,7 @@ func (s *serverTransports) Start(name string, request control.TransportStartRequ
 			info.Network = "tcp"
 			listener, err = websocket.Listen(addr, s.path, request.TLSCert, request.TLSKey, selfSigned, s.identity, s.token)
 			if err == nil {
-				listener.(*websocket.Server).SetArtifactHandler(s.artifactPath, s.artifactHTTP)
+				listener.(*websocket.Server).SetArtifactHandler(s.artifactHTTP)
 				listener.(*websocket.Server).SetEnrollmentVerifier(s.enrollmentVerifier)
 			}
 		} else {

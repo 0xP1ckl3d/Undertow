@@ -3,7 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
@@ -12,11 +15,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"net/netip"
 	"undertow/internal/agentprofile"
 	"undertow/internal/control"
 	"undertow/internal/routing"
+	"undertow/internal/transport/websocket"
 )
 
 func TestAgentDistributionAPIAndRetrieval(t *testing.T) {
@@ -33,6 +38,9 @@ func TestAgentDistributionAPIAndRetrieval(t *testing.T) {
 	}
 	store, err := agentprofile.OpenStore(filepath.Join(dir, "store"), templates, "test")
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SetPayloadRetrievalPath("/"); err != nil {
 		t.Fatal(err)
 	}
 	manager := control.NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
@@ -105,6 +113,33 @@ func TestAgentDistributionAPIAndRetrieval(t *testing.T) {
 		t.Fatalf("hosted response does not distinguish retrieval and storage paths: %+v", hosted)
 	}
 	path := strings.TrimPrefix(hosted.Retrieval, "https://127.0.0.2:443")
+	_, tlsIdentity, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := websocket.Listen("127.0.0.1:0", "/undertow", "", "", true, tlsIdentity, make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener.SetArtifactHandler(http.HandlerFunc(d.Retrieve))
+	listenerCtx, stopListener := context.WithCancel(context.Background())
+	defer stopListener()
+	defer listener.Close()
+	go func() { _ = listener.Serve(listenerCtx) }()
+	httpsClient := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}, Timeout: 5 * time.Second} //nolint:gosec -- local self-signed test listener
+	defer httpsClient.CloseIdleConnections()
+	getStatus := func(path string) int {
+		t.Helper()
+		resp, err := httpsClient.Get("https://" + listener.Addr().String() + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode
+	}
+	if getStatus(path) != http.StatusOK {
+		t.Fatal("live HTTPS listener did not serve the original path")
+	}
 	if strings.Contains(path, a.ID) || strings.Contains(path, "office") {
 		t.Fatal("retrieval URL leaked management metadata")
 	}
@@ -134,18 +169,67 @@ func TestAgentDistributionAPIAndRetrieval(t *testing.T) {
 	if head.Code != http.StatusOK || head.Body.Len() != 0 || head.Header().Get("X-Artifact-SHA256") != a.SHA256 {
 		t.Fatal("HEAD response did not match artifact metadata")
 	}
-	d.retrievalPath = "/files/"
+	w = call(http.MethodGet, "/v1/payload-retrieval-path", nil)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"path":"/"`) {
+		t.Fatalf("initial payload retrieval path: %d %s", w.Code, w.Body.String())
+	}
+	w = call(http.MethodPut, "/v1/payload-retrieval-path", map[string]string{"path": "/files"})
+	if w.Code != http.StatusBadRequest || d.publicPath() != "/" {
+		t.Fatalf("invalid retrieval path changed state: %d %s", w.Code, w.Body.String())
+	}
+	w = call(http.MethodPut, "/v1/payload-retrieval-path", map[string]string{"path": "/files/"})
+	if w.Code != http.StatusOK || d.publicPath() != "/files/" {
+		t.Fatalf("could not change retrieval path: %d %s", w.Code, w.Body.String())
+	}
+	oldDownload := httptest.NewRecorder()
+	d.Retrieve(oldDownload, httptest.NewRequest(http.MethodGet, path, nil))
+	if oldDownload.Code != http.StatusNotFound || getStatus(path) != http.StatusNotFound {
+		t.Fatal("old retrieval path remained available")
+	}
 	custom, err := d.hostedInfo(a)
 	if err != nil || !strings.Contains(custom.Retrieval, "/files/") {
 		t.Fatalf("custom retrieval path: %+v %v", custom, err)
 	}
 	customPath := strings.TrimPrefix(custom.Retrieval, "https://127.0.0.2:443")
+	if strings.TrimPrefix(customPath, "/files/") == strings.TrimPrefix(path, "/") {
+		t.Fatal("changing the public prefix did not rotate the hosted token")
+	}
+	w = call(http.MethodPut, "/v1/payload-retrieval-path", map[string]string{"path": "/files/"})
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"changed":false`) {
+		t.Fatalf("repeating the same prefix was not idempotent: %d %s", w.Code, w.Body.String())
+	}
+	stillHosted, err := d.hostedInfo(a)
+	if err != nil || stillHosted.Retrieval != custom.Retrieval {
+		t.Fatal("repeating the prefix rotated a working URL")
+	}
 	customDownload := httptest.NewRecorder()
 	d.Retrieve(customDownload, httptest.NewRequest(http.MethodGet, customPath, nil))
-	if customDownload.Code != http.StatusOK {
+	if customDownload.Code != http.StatusOK || getStatus(customPath) != http.StatusOK {
 		t.Fatal("custom retrieval path did not serve the artifact")
 	}
-	d.retrievalPath = "/"
+	reopened, err := agentprofile.OpenStore(filepath.Join(dir, "store"), templates, "test")
+	if err != nil || reopened.PayloadRetrievalPath() != "/files/" {
+		t.Fatalf("changed retrieval path did not persist: %v", err)
+	}
+	w = call(http.MethodPut, "/v1/payload-retrieval-path", map[string]string{"path": "/"})
+	if w.Code != http.StatusOK {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	oldDownload = httptest.NewRecorder()
+	d.Retrieve(oldDownload, httptest.NewRequest(http.MethodGet, path, nil))
+	if oldDownload.Code != http.StatusNotFound || getStatus(path) != http.StatusNotFound {
+		t.Fatal("an earlier URL became usable after restoring its prefix")
+	}
+	current, err := d.hostedInfo(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentPath := strings.TrimPrefix(current.Retrieval, "https://127.0.0.2:443")
+	currentDownload := httptest.NewRecorder()
+	d.Retrieve(currentDownload, httptest.NewRequest(http.MethodGet, currentPath, nil))
+	if currentDownload.Code != http.StatusOK || getStatus(currentPath) != http.StatusOK {
+		t.Fatal("current URL did not serve the hosted payload")
+	}
 	w = call(http.MethodPost, "/v1/agent-artifacts/"+a.ID+"/revoke", nil)
 	if w.Code != http.StatusOK {
 		t.Fatal(w.Code, w.Body.String())
@@ -158,7 +242,7 @@ func TestAgentDistributionAPIAndRetrieval(t *testing.T) {
 		t.Fatal(w.Code, w.Body.String())
 	}
 	download = httptest.NewRecorder()
-	d.Retrieve(download, request)
+	d.Retrieve(download, httptest.NewRequest(http.MethodGet, currentPath, nil))
 	if download.Code != http.StatusNotFound {
 		t.Fatal("unhost did not revoke retrieval")
 	}

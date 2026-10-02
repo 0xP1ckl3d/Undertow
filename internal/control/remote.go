@@ -133,7 +133,7 @@ func clientRequestAllowed(request *http.Request, clientID uint64) bool {
 
 func distributionRequest(request *http.Request) bool {
 	path := request.URL.EscapedPath()
-	return request.URL.RawQuery == "" && (path == "/v1/agent-profiles" || strings.HasPrefix(path, "/v1/agent-profiles/") || path == "/v1/agent-artifacts" || strings.HasPrefix(path, "/v1/agent-artifacts/"))
+	return request.URL.RawQuery == "" && (path == "/v1/payload-retrieval-path" || path == "/v1/agent-profiles" || strings.HasPrefix(path, "/v1/agent-profiles/") || path == "/v1/agent-artifacts" || strings.HasPrefix(path, "/v1/agent-artifacts/"))
 }
 
 func writeRemoteResponse(stream *mux.Stream, response remoteResponse) {
