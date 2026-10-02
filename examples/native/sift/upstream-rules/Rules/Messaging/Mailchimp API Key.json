@@ -1,0 +1,18 @@
+{
+  "Name": "Mailchimp API Key",
+  "Description": "Detects Mailchimp API Keys (Hex MD5 + Data Center suffix)",
+  "Severity": "Medium",
+  "Matches": [
+    {
+      "Target": "Content",
+      "Keywords": [
+        "-us"
+      ],
+      "Patterns": [
+        "\\b[0-9a-f]{32}-us[1-9][0-9]*\\b"
+      ],
+      "ExtensionProfile": "SourceAndConfig"
+    }
+  ],
+  "Validator": "MailchimpApiKey"
+}

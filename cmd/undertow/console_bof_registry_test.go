@@ -117,8 +117,20 @@ func TestLoadedBOFUnspecifiedLoadOutput(t *testing.T) {
 	if err := printConsoleHelp(&output, false, false, false, "load"); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "arguments are encoded as ANSI strings") {
-		t.Fatalf("load help: %s", output.String())
+	for _, part := range []string{
+		"arguments are encoded as ANSI strings",
+		"one code per argument, in argument order",
+		"i  signed 32-bit integer",
+		"s  signed 16-bit integer",
+		"z  ANSI string (default)",
+		"Z  UTF-16LE wide string",
+		"b  binary data: @LOCAL_FILE or base64:DATA",
+		"load bof ./tool.o tool --format zi",
+		"tool server01 5",
+	} {
+		if !strings.Contains(output.String(), part) {
+			t.Fatalf("load help missing %q: %s", part, output.String())
+		}
 	}
 }
 

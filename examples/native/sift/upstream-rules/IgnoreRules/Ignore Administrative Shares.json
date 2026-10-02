@@ -1,0 +1,4 @@
+[
+  { "Pattern": "IPC$", "MatchTarget": "ShareName", "Description": "Administrative Share", "IsEnabled": true },
+  { "Pattern": "PRINT$", "MatchTarget": "ShareName", "Description": "Administrative Share", "IsEnabled": true }
+]

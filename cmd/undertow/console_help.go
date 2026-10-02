@@ -62,6 +62,16 @@ Load validates the object and an optional FILE.o.json or FILE.json sidecar.
 Without a sidecar or --format, the argument schema is unspecified and supplied
 arguments are encoded as ANSI strings. Use --format or a sidecar for typed
 arguments such as integers, wide strings, or binary data.
+FORMAT is case-sensitive: write one code per argument, in argument order, with
+no spaces or separators:
+  i  signed 32-bit integer          s  signed 16-bit integer
+  z  ANSI string (default)         Z  UTF-16LE wide string
+  b  binary data: @LOCAL_FILE or base64:DATA
+Example: load bof ./tool.o tool --format zi
+         tool server01 5
+Here zi encodes server01 as z and 5 as i. An explicit --format overrides the
+sidecar argument list. A sidecar uses argument types int, short, string,
+wstring, or binary. Type help NAME after loading for that BOF's usage.
 Select an agent and type the loaded command name to execute it.
 `)
 	case "help", "navigation", "agents", "use", "back", "show", "status":

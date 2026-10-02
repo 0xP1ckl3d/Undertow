@@ -1,0 +1,15 @@
+{
+  "Name": "SCCM Content Library Share",
+  "Description": "Detects readable SCCM content library shares.",
+  "Severity": "Medium",
+  "Matches": [
+    {
+      "Target": "ShareName",
+      "IsLiteral": true,
+      "Patterns": [
+        "SCCMContentLib$"
+      ]
+    }
+  ],
+  "EnableLlmValidation": false
+}

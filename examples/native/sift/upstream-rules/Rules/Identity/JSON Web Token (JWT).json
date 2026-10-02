@@ -1,0 +1,19 @@
+{
+  "Name": "JSON Web Token (JWT)",
+  "Description": "Detects signed and unsecured compact JSON Web Tokens.",
+  "Severity": "High",
+  "Matches": [
+    {
+      "Target": "Content",
+      "CaseSensitive": true,
+      "Keywords": [
+        "eyJ"
+      ],
+      "Patterns": [
+        "(?<![A-Za-z0-9_-])eyJ[a-zA-Z0-9_-]+\\.[a-zA-Z0-9_-]+\\.[a-zA-Z0-9_-]*(?![A-Za-z0-9_-])"
+      ],
+      "ExtensionProfile": "SourceAndConfig"
+    }
+  ],
+  "Validator": "Jwt"
+}

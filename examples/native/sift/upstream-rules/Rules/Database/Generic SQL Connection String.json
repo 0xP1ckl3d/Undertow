@@ -1,0 +1,20 @@
+{
+  "Name": "Generic SQL Connection String",
+  "Description": "Detects SQL connection strings containing a server and password in any field order.",
+  "Severity": "High",
+  "Matches": [
+    {
+      "Target": "Content",
+      "Keywords": [
+        "Password",
+        "Pwd"
+      ],
+      "Patterns": [
+        "(?:Server|Data Source|Host|Addr|Address|Network Address)\\s*=[^;\"\\r\\n]+;(?:[^;\"\\r\\n]*;){0,32}\\s*(?:Password|Pwd)\\s*=\\s*[^;\"\\r\\n]{0,128}",
+        "(?:Password|Pwd)\\s*=\\s*[^;\"\\r\\n]{0,128};(?:[^;\"\\r\\n]*;){0,32}\\s*(?:Server|Data Source|Host|Addr|Address|Network Address)\\s*=\\s*[^;\"\\r\\n]+"
+      ],
+      "ExtensionProfile": "SourceAndConfig"
+    }
+  ],
+  "Validator": "SqlConnectionString"
+}
