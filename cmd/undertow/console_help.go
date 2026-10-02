@@ -59,7 +59,9 @@ For deployment binaries, use payload and type help payload for the workflow.
   unload bof NAME
   bofs
 Load validates the object and an optional FILE.o.json or FILE.json sidecar.
-Without a sidecar, --format records argument types for later invocations.
+Without a sidecar or --format, the argument schema is unspecified and supplied
+arguments are encoded as ANSI strings. Use --format or a sidecar for typed
+arguments such as integers, wide strings, or binary data.
 Select an agent and type the loaded command name to execute it.
 `)
 	case "help", "navigation", "agents", "use", "back", "show", "status":

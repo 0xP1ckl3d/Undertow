@@ -212,7 +212,14 @@ func runLoadedBOFManagement(output io.Writer, registry *loadedBOFRegistry, args 
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(output, "Loaded BOF: %s\nArchitecture : windows/%s\nArguments    : %d\n", entry.Name, entry.Compat.Architecture, len(entry.Format))
+		arguments := fmt.Sprintf("%d", len(entry.Format))
+		if !entry.SchemaKnown {
+			arguments = "unspecified"
+		}
+		fmt.Fprintf(output, "Loaded BOF: %s\nArchitecture : windows/%s\nArguments    : %s\n", entry.Name, entry.Compat.Architecture, arguments)
+		if !entry.SchemaKnown {
+			fmt.Fprintln(output, "Default      : supplied arguments are encoded as ANSI strings")
+		}
 		return nil
 	case "unload":
 		if len(args) != 3 || args[1] != "bof" {
@@ -245,7 +252,7 @@ func runLoadedBOFManagement(output io.Writer, registry *loadedBOFRegistry, args 
 
 func (entry *loadedBOF) argumentSummary() string {
 	if !entry.SchemaKnown {
-		return "none"
+		return "unspecified"
 	}
 	if len(entry.Format) == 0 {
 		return "none"
@@ -281,6 +288,9 @@ func (entry *loadedBOF) usage() string {
 	usage := strings.TrimSpace(entry.Manifest.Usage)
 	if usage == "" {
 		usage = entry.Name
+		if !entry.SchemaKnown {
+			usage += " [ARGS...]"
+		}
 		for i := range entry.Format {
 			name := fmt.Sprintf("arg%d", i+1)
 			required := true
@@ -319,8 +329,8 @@ func (entry *loadedBOF) requiredCount() int {
 }
 
 func (entry *loadedBOF) encode(values []string) ([]byte, error) {
-	if !entry.SchemaKnown && len(values) != 0 {
-		return nil, fmt.Errorf("argument schema is unknown for loaded BOF %q; reload it with --format or provide a manifest", entry.Name)
+	if !entry.SchemaKnown {
+		return bof.EncodeArguments(strings.Repeat("z", len(values)), values, bof.ReadBinaryFile)
 	}
 	if len(values) < entry.requiredCount() || len(values) > len(entry.Format) {
 		count := entry.requiredCount()
@@ -379,7 +389,9 @@ func printLoadedBOFHelp(output io.Writer, entry *loadedBOF) {
 	}
 	fmt.Fprintf(output, "Usage:\n  %s\n", entry.usage())
 	if !entry.SchemaKnown {
-		fmt.Fprintln(output, "\nArgument schema: unspecified (zero arguments accepted)")
+		fmt.Fprintln(output, "\nArguments: unspecified")
+		fmt.Fprintln(output, "Default: supplied arguments are encoded as ANSI strings")
+		fmt.Fprintln(output, "Use --format or a sidecar manifest for typed arguments.")
 	}
 	if len(entry.Format) > 0 {
 		fmt.Fprintln(output, "\nArguments:")

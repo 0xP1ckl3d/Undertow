@@ -42,8 +42,28 @@ func TestLoadedBOFRegistry(t *testing.T) {
 	if _, err := entry.encode(nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := entry.encode([]string{"unexpected"}); err == nil || !strings.Contains(err.Error(), "schema is unknown") {
-		t.Fatalf("unknown schema: %v", err)
+	for _, values := range [][]string{{"server01"}, {"server01", "5"}} {
+		packet, err := entry.encode(values)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, err := bof.EncodeArguments(strings.Repeat("z", len(values)), values, bof.ReadBinaryFile)
+		if err != nil || !bytes.Equal(packet, want) {
+			t.Fatalf("unknown-schema packet=%x want %x: %v", packet, want, err)
+		}
+	}
+	if _, err := entry.encode(make([]string, 129)); err == nil || !strings.Contains(err.Error(), "exceeds 128") {
+		t.Fatalf("unknown-schema argument limit: %v", err)
+	}
+	if entry.argumentSummary() != "unspecified" || entry.usage() != "hello [ARGS...] [--background]" {
+		t.Fatalf("unknown-schema summary=%q usage=%q", entry.argumentSummary(), entry.usage())
+	}
+	var help strings.Builder
+	printLoadedBOFHelp(&help, entry)
+	for _, part := range []string{"Arguments: unspecified", "Default: supplied arguments are encoded as ANSI strings", "Use --format or a sidecar manifest"} {
+		if !strings.Contains(help.String(), part) {
+			t.Fatalf("unknown-schema help missing %q: %s", part, help.String())
+		}
 	}
 	if _, err := registry.load(path, "hello", "", false); err == nil || !strings.Contains(err.Error(), "already loaded") {
 		t.Fatalf("duplicate: %v", err)
@@ -64,7 +84,7 @@ func TestLoadedBOFRegistry(t *testing.T) {
 	if err := runLoadedBOFManagement(&listing, registry, []string{"bofs"}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(listing.String(), "hello") || !strings.Contains(listing.String(), path) {
+	if !strings.Contains(listing.String(), "hello") || !strings.Contains(listing.String(), path) || !strings.Contains(listing.String(), "unspecified") {
 		t.Fatalf("BOF list: %s", listing.String())
 	}
 	if err := registry.unload("hello"); err != nil {
@@ -78,6 +98,27 @@ func TestLoadedBOFRegistry(t *testing.T) {
 	}
 	if len(newLoadedBOFRegistry().names()) != 0 {
 		t.Fatal("new console inherited BOFs")
+	}
+}
+
+func TestLoadedBOFUnspecifiedLoadOutput(t *testing.T) {
+	path := copyBOFFixture(t, "hello")
+	registry := newLoadedBOFRegistry()
+	var output strings.Builder
+	if err := runLoadedBOFManagement(&output, registry, []string{"load", "bof", path}); err != nil {
+		t.Fatal(err)
+	}
+	for _, part := range []string{"Arguments    : unspecified", "Default      : supplied arguments are encoded as ANSI strings"} {
+		if !strings.Contains(output.String(), part) {
+			t.Fatalf("load output missing %q: %s", part, output.String())
+		}
+	}
+	output.Reset()
+	if err := printConsoleHelp(&output, false, false, false, "load"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "arguments are encoded as ANSI strings") {
+		t.Fatalf("load help: %s", output.String())
 	}
 }
 
