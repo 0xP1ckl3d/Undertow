@@ -1,44 +1,67 @@
 # Configured thin agents
 
-`undertow` remains the full server, client, and operator console. `undertow-agent` is a separate remote executable with the same agent connection loop and agent-side services. It has no operator console and accepts no normal command-line options. The release build creates prebuilt templates for Windows amd64 and Linux amd64/arm64. The server stamps a selected profile into a template, so the live server needs no Go compiler.
+`undertow` is the full server, client, console, and diagnostic framework. A configured `undertow-agent` is a smaller, non-interactive deployment binary. Both call the same internal agent runtime for authentication, transports, inventory, mux, capabilities, pivots, relays, execution, transfers, scripts, WASM, native modules, BOFs, and reconnects. The full `undertow agent ...` CLI remains available for manual and diagnostic use.
 
-## Build and deploy
+## Prepare release templates
 
-Build release binaries before deploying the server:
+Run `sh tools/build-release.sh bin` on Linux or `./tools/build-release.ps1` on Windows before deploying the server. The release produces Windows amd64 and Linux amd64/arm64 thin templates plus `undertow-agent-templates.json`. Keep these next to `undertow`, or point the server at them with `--agent-templates DIRECTORY`. The server verifies the template hash and build identity, then stamps an artifact without invoking a compiler.
 
-```sh
-sh tools/build-release.sh bin
-```
+The profile and artifact store defaults to `agent-distribution` beneath the server working directory. `--agent-store DIRECTORY` selects another location. Its `state.json` holds profile credentials and per-artifact enrollment secrets; restrict access to the server operator and back it up with the server identity. This is server state, not endpoint state.
 
-On Windows, use `tools/build-release.ps1`. Keep the `undertow-agent-PLATFORM-ARCH` templates and `undertow-agent-templates.json` manifest alongside the full `undertow` binary, or pass `--agent-templates DIRECTORY` to the server. The manifest records the template hashes and build identity; the server rejects a missing, changed, or mismatched template. The profile and artifact database defaults to `agent-distribution` under the server's working directory; set `--agent-store DIRECTORY` for a dedicated persistent location. The store contains enrollment secrets and should be accessible only to the server operator. Back it up with the server identity and enrollment configuration.
+## Build, host, and run
 
-In a server or client console:
+From the server console:
 
 ```text
 agent profile create office server=undertow.example.com:443 transport=quic
-agent profile list
 agent profile show office
 agent build office windows amd64
 agent artifacts
 agent host ARTIFACT_ID
 ```
 
-The server fills in its pinned fingerprint, enrollment secret, DNS domain, WebSocket path, and other known settings. If its listener binds `0.0.0.0` or `::`, provide a reachable `server=HOST:PORT` because the public address cannot be inferred safely. If the server uses a self-signed TLS certificate, the profile defaults to skipping TLS certificate verification while still pinning Undertow's server identity. Use a valid TLS certificate for HTTPS artifact downloads when possible.
+The server fills in its known fingerprint, listener settings, and other safe defaults. If a listener binds `0.0.0.0` or `::`, give the reachable `server=HOST:PORT`. A client console can read profiles and artifacts. To let one connected client create or change deployment state, the server operator runs `client distribution-admin SESSION_ID on`; the grant ends when that client disconnects. `off` removes it immediately. Agent execution and shutdown are operational permissions separate from distribution administration.
 
-`agent host` requires an active WebSocket HTTPS listener. It returns the artifact's filename, size, SHA-256, and retrieval URL. Creating an artifact does not host it. The URL serves only that explicitly hosted artifact. `agent unhost ARTIFACT_ID` revokes future downloads without deleting the artifact; `agent delete ARTIFACT_ID` removes its record and file. `agent hosted` shows the hosted subset.
+New artifacts have neutral filenames based on their full artifact ID, such as `84c13e21...exe`. `agent build office windows amd64 filename=agent.exe` selects another safe filename. A build is an immutable profile snapshot. Editing `office` leaves old binaries unchanged; build again for the edited settings.
 
-Download the executable, verify its SHA-256, and run it with no arguments. Each installation creates its own identity key in the user's Undertow agent configuration directory, scoped to the installed executable path. The profile contains connection and enrollment settings, not a shared agent identity. The agent connects, reports inventory, serves the usual capabilities, and reconnects after a lost session.
+`agent host` requires an active WebSocket HTTPS listener and returns a random retrieval URL, size, and SHA-256. Hosting is explicit. The URL contains no profile name, artifact ID, or filesystem path. Only hosted Undertow artifacts can be retrieved. Save the URL as a secret capability, download with GET, check the printed SHA-256, then run the binary with **no connection arguments**. HEAD returns the same metadata without a body. `agent unhost ARTIFACT_ID` immediately invalidates the URL; hosting again issues a new one.
 
-Optional scripts are generated with `agent deploy-script ARTIFACT_ID powershell` or `agent deploy-script ARTIFACT_ID shell`. They download the selected hosted artifact, verify SHA-256, place it at a chosen destination, and start it without agent flags. They contain no persistence mechanism or second reconnect loop. Manual download and launch always work.
+On Windows the release template uses the GUI subsystem, so normal packaged operation opens no console window. On Linux an interactive launch starts the long-running process in a separate session; launches under a service manager or other nonterminal supervisor remain under that supervisor. The agent uses bounded progressive reconnect delays, approximately 2, 5, 10, 30, 60, 120, then 300 seconds. A healthy session resets the schedule. Runtime cancellation interrupts the wait. The deployment scripts contain no watchdog or reconnect loop.
 
-## Profile management
+Optional `agent deploy-script ARTIFACT_ID powershell|shell` prints a helper that downloads, verifies SHA-256, places, and launches a hosted binary. The PowerShell helper scopes any self-signed certificate exception to its artifact HTTP client. Manual retrieval and launch always work.
 
-`agent profile edit NAME FIELD=VALUE` changes a logical profile. Existing artifacts keep the exact profile snapshot stamped at build time; build a new artifact to deploy the change. `agent profile delete NAME` removes the logical profile but leaves generated artifacts. Each artifact has a unique ID, profile ID, Undertow build version, platform, architecture, creation time, and hash. Connected agents include profile and artifact IDs in inventory.
+## Inspect and manage lifecycle
 
-Fields accepted by create and edit include `server`, `transport`, `domain`, `fingerprint`, `auth`, `payload-profile`, `websocket-path`, `tls-server-name`, `tls-insecure-skip-verify`, `deny`, and comma-separated `routes`. Use `token-file=PATH` or `password-file=PATH` for a custom enrollment secret. Those paths are read by the local console, so the secret does not need to be typed into its history. `agent profile show`, `agent artifacts`, and status omit credentials. Anyone who can read a generated binary may extract its embedded enrollment secret; handle it as sensitive material and revoke or rotate enrollment if it is exposed.
+```text
+agents
+use 1
+show
+agent events
+session kill
+agent shutdown
+agent unhost ARTIFACT_ID
+agent revoke ARTIFACT_ID
+agent delete ARTIFACT_ID
+```
+
+`show` displays the profile, artifact, transport, session uptime, and reconnect policy. `agent events AGENT_NUMBER|ID|HOSTNAME` shows recent connection, reconnect, shutdown, and disconnection events; a full ID still works after the agent disconnects. The server keeps a bounded in-memory history. No extra heartbeat exists for logging. The agent sends a reconnect count with the next normal inventory after an outage. Events do not contain enrollment secrets, identity keys, shell content, module arguments, or file content. Events are not durable across server restarts.
+
+These commands have different effects:
+
+| Command | Effect |
+| --- | --- |
+| `session kill` | Closes the current session; the agent stays running and may reconnect. |
+| `agent shutdown` | Sends an authenticated shutdown request, waits for acknowledgement, and stops that configured agent process. The executable and identity remain. |
+| `agent unhost` | Disables future downloads from that artifact's current URL; it does not affect enrollment or running agents. |
+| `agent revoke` | Rejects future enrollment with that artifact's credential; current sessions stay connected. Other artifacts and manual agent/client enrollment are unaffected. |
+| `agent delete` | Removes the server's artifact record, file, retrieval URL, and enrollment credential; it does not remove deployed copies. |
+
+## Profiles, credentials, and endpoint state
+
+Create/edit fields include `server`, `transport`, `domain`, `fingerprint`, `auth`, `payload-profile`, `websocket-path`, `tls-server-name`, `tls-insecure-skip-verify`, `deny`, and comma-separated IPv4 `routes`. `token-file=PATH` and `password-file=PATH` remain supported for profile creation. New configured artifacts receive a fresh 32-byte enrollment secret at build time regardless of the profile's source credential; the secret is scoped to agent enrollment and can be revoked per artifact. Existing manual agents and VPN clients retain the server's normal enrollment method. Anyone with a binary can extract its embedded credential, so treat the binary as sensitive. `profile show`, `artifacts`, `show`, and lifecycle events do not display secrets.
+
+**Endpoint state:** A configured agent persists one independent Ed25519 identity key under the user's Undertow agent configuration directory, in a directory keyed by the installed executable path. The directory and key use restrictive file modes. It writes no separate operational logfile, telemetry history, reconnect history, or copy of profile/artifact display metadata. The embedded configuration contains only opaque profile and artifact IDs, format version, required connection settings, enrollment material, and capability/route policy. Friendly names, target platform, build version, creation time, hosted state, and hashes stay in the server's distribution store. Server-side lifecycle events provide normal operational logging.
 
 ## Format and compatibility
 
-The stamped executable ends with a bounded JSON snapshot, SHA-256 of that snapshot, a four-byte length, and a 16-byte magic/version footer. The reader rejects missing, oversized, malformed, altered, or unsupported profile formats before connecting. The artifact hash covers the whole executable. The profile format is explicitly versioned independently of the Undertow build version. Build artifacts from templates released with the matching operator framework; old artifacts are immutable and do not inherit later profile edits.
-
-The full `undertow agent --transport ... --server ... --fingerprint ...` command remains available for manual deployment, development, troubleshooting, and probes. Both normal CLI agents and configured thin agents call the same internal agent runtime for transport dialing, authentication, identity validation, inventory, mux, capabilities, agent services, and reconnect behavior.
+New artifacts use a bounded JSON runtime payload followed by SHA-256, a four-byte length, and a compact eight-byte versioned binary footer. The reader strictly checks length, integrity, JSON fields, and supported versions before connecting. Version 1 artifacts with the original 16-byte footer remain readable. Existing version 1 artifacts may still use the broad enrollment credential they were built with; rebuild them to obtain independent enrollment and revocation. Previous predictable hosted URLs are disabled when the updated store opens; explicitly host those artifacts again to receive random URLs. The whole artifact has a SHA-256 for download verification. A profile-format version and Undertow build identity are recorded server-side. Unsupported versions fail explicitly rather than being reinterpreted.

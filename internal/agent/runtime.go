@@ -47,6 +47,7 @@ type Config struct {
 	DeniedCapabilities    string                   `json:"denied_capabilities,omitempty"`
 	IdentityPath          string                   `json:"-"`
 	Metadata              control.ArtifactIdentity `json:"-"`
+	Packaged              bool                     `json:"-"`
 }
 
 func (c Config) Validate() error {
@@ -79,7 +80,7 @@ func (c Config) Validate() error {
 	if len(c.Credential) != 32 {
 		return errors.New("agent enrollment credential must be 32 bytes")
 	}
-	if c.AuthMode != "token" && c.AuthMode != "password" && c.AuthMode != "none" {
+	if c.AuthMode != "token" && c.AuthMode != "password" && c.AuthMode != "none" && c.AuthMode != "artifact" {
 		return errors.New("invalid agent authentication mode")
 	}
 	if c.PayloadProfile != "" && c.PayloadProfile != "auto" && c.PayloadProfile != "small" && c.PayloadProfile != "large" {
@@ -151,6 +152,9 @@ func DefaultIdentityPath() (string, error) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return "", err
 	}
+	if err := os.Chmod(dir, 0700); err != nil {
+		return "", err
+	}
 	return filepath.Join(dir, "agent.key"), nil
 }
 
@@ -175,7 +179,10 @@ func Run(ctx context.Context, c Config, ready func() error) error {
 	if err != nil {
 		return err
 	}
+	ctx, stop := context.WithCancel(ctx)
+	defer stop()
 	first := true
+	failures := 0
 	for {
 		conn, err := c.Dial(ctx, key)
 		if err != nil {
@@ -191,27 +198,72 @@ func Run(ctx context.Context, c Config, ready func() error) error {
 				}
 			}
 			first = false
+			started := time.Now()
 			if d, ok := conn.(*dns.Client); ok {
 				log.Printf("connected: session=%d agent=%s fragment=%d", conn.ID(), security.Fingerprint(key), d.Session.Stats().FragmentSize)
 			} else {
 				log.Printf("connected: session=%d agent=%s transport=%s", conn.ID(), security.Fingerprint(key), c.Transport)
 			}
 			streamMux := mux.New(ctx, conn, false)
-			if err := control.SendInventoryWithIdentity(ctx, streamMux, c.AdvertisedRoutes, caps, c.Metadata); err != nil {
+			metadata := c.Metadata
+			metadata.ReconnectAttempts = uint32(failures)
+			if c.Packaged {
+				metadata.ReconnectPolicy = "progressive"
+			}
+			inventoryReady := true
+			if err := control.SendInventoryWithIdentity(ctx, streamMux, c.AdvertisedRoutes, caps, metadata); err != nil {
+				inventoryReady = false
 				log.Printf("inventory: %v", err)
 			}
-			pivot.ServeAgentWithCapabilities(ctx, streamMux, caps)
+			var shutdown func()
+			if c.Packaged {
+				shutdown = stop
+			}
+			pivot.ServeAgentWithLifecycle(ctx, streamMux, caps, shutdown)
 			streamMux.Close()
 			conn.Close()
 			if ctx.Err() != nil {
 				return nil
 			}
+			failures = failureIndexAfterSession(failures, time.Since(started), inventoryReady)
 			log.Print("agent session ended; reconnecting")
 		}
-		select {
-		case <-ctx.Done():
+		if !waitReconnect(ctx, reconnectDelay(c.Packaged, failures)) {
 			return nil
-		case <-time.After(2 * time.Second):
 		}
+		failures++
+	}
+}
+
+var progressiveDelays = [...]time.Duration{2, 5, 10, 30, 60, 120, 300}
+
+func reconnectDelay(packaged bool, failures int) time.Duration {
+	if !packaged {
+		return 2 * time.Second
+	}
+	if failures < 0 {
+		failures = 0
+	}
+	if failures >= len(progressiveDelays) {
+		failures = len(progressiveDelays) - 1
+	}
+	return progressiveDelays[failures] * time.Second
+}
+
+func failureIndexAfterSession(failures int, duration time.Duration, inventoryReady bool) int {
+	if inventoryReady && duration >= 30*time.Second {
+		return 0
+	}
+	return failures
+}
+
+func waitReconnect(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
 	}
 }

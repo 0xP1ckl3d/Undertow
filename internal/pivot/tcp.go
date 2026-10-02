@@ -28,10 +28,45 @@ func ServeAgentWithExec(ctx context.Context, m *mux.Mux, allowExec bool) {
 }
 
 func ServeAgentWithCapabilities(ctx context.Context, m *mux.Mux, caps Capabilities) {
+	ServeAgentWithLifecycle(ctx, m, caps, nil)
+}
+
+// ServeAgentWithLifecycle adds the configured-agent shutdown control stream.
+// A nil stop callback keeps manually launched agents on their existing path.
+func ServeAgentWithLifecycle(ctx context.Context, m *mux.Mux, caps Capabilities, stop func()) {
 	for {
 		s, err := m.Accept(ctx)
 		if err != nil {
 			return
+		}
+		if s.Destination() == ShutdownDestination {
+			if stop == nil {
+				s.Fail(errors.New("remote shutdown requires a configured agent"))
+				continue
+			}
+			go func() {
+				defer s.Close()
+				if s.AcceptOpen(ctx) != nil {
+					return
+				}
+				if _, err := s.Write([]byte{1}); err != nil {
+					return
+				}
+				var confirmation [1]byte
+				if n, err := s.Read(confirmation[:]); n == 1 && err == nil && confirmation[0] == 1 {
+					if _, err := s.Write([]byte{2}); err != nil {
+						return
+					}
+					if err := s.CloseWrite(); err != nil {
+						return
+					}
+					var end [1]byte
+					if _, err := s.Read(end[:]); err == io.EOF {
+						stop()
+					}
+				}
+			}()
+			continue
 		}
 		if s.Destination() == ExecDestination {
 			if !caps.Exec {
@@ -180,6 +215,7 @@ func serveSocket(ctx context.Context, s *mux.Stream) {
 // ServeVPN accepts outbound client flows. Explicit pivot routes may be sent
 // through an agent when the client requested internal access.
 const ControlDestination = "control.undertow.invalid:0"
+const ShutdownDestination = "shutdown.undertow.invalid:0"
 
 func ServeVPN(ctx context.Context, client *mux.Mux, resolve func(netip.Addr) (*mux.Mux, bool), internal bool) {
 	ServeVPNInteractive(ctx, client, resolve, func() bool { return internal }, nil)

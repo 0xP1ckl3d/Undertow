@@ -327,6 +327,13 @@ func serve(args []string) error {
 	}
 	distribution := &agentDistribution{store: distributionStore, manager: manager, authMode: *authMode, credential: token}
 	manager.SetAgentDistributionHandler(distribution)
+	manager.SetArtifactLookup(func(id string) (string, string, bool) {
+		a, err := distributionStore.Artifact(id)
+		if err != nil || a.ID != id {
+			return "", "", false
+		}
+		return a.Profile, a.UndertowVersion, distributionStore.ArtifactEnrollmentScoped(id)
+	})
 	controlToken, err := control.LoadOrCreateToken(*controlTokenPath)
 	if err != nil {
 		return err
@@ -338,10 +345,14 @@ func serve(args []string) error {
 	transportManager := newServerTransports(ctx, manager, identity, token, *domain, *carrier.path, func(peer transport.Peer) {
 		handleServerPeer(ctx, manager, controlToken, *probeEcho, peer)
 	})
+	verifyEnrollment := func(auth, transcript []byte) ([16]byte, string, error) {
+		return distributionStore.VerifyEnrollment(token, auth, transcript)
+	}
+	transportManager.SetEnrollmentVerifier(verifyEnrollment)
 	transportManager.SetArtifactHandler(http.HandlerFunc(distribution.Retrieve))
 	manager.SetTransportController(transportManager)
 	manager.SetRelayAcceptor(func(_ context.Context, parentID string, stream *mux.Stream) {
-		peer, err := relay.Accept(ctx, stream, parentID, identity, token)
+		peer, err := relay.AcceptWithVerifier(ctx, stream, parentID, identity, token, verifyEnrollment)
 		if err != nil {
 			log.Printf("relay via %s rejected: %v", parentID, err)
 			_ = stream.Close()

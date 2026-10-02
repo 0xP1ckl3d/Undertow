@@ -363,6 +363,14 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 		}
 		if selectedID != "" {
 			switch args[0] {
+			case "agent":
+				if len(args) == 2 && (args[1] == "shutdown" || args[1] == "events") {
+					args = append(args, selectedID)
+				}
+			case "session":
+				if len(args) == 2 && args[1] == "kill" {
+					args = append(args, selectedID)
+				}
 			case "show":
 				args = append([]string{"show", selectedID}, args[1:]...)
 			case "job":
@@ -570,6 +578,38 @@ func splitConsoleCommand(line string) ([]string, error) {
 }
 
 func runConsoleCommand(ctx context.Context, output io.Writer, call consoleCaller, vpnClient bool, ownClientID uint64, clientRoutes clientRouteAction, args []string) error {
+	if args[0] == "session" {
+		if len(args) != 3 || args[1] != "kill" {
+			return errors.New("use session kill AGENT_NUMBER|ID|HOSTNAME, or select an agent first")
+		}
+		agents, err := consoleAgents(ctx, call)
+		if err != nil {
+			return err
+		}
+		a, err := findConsoleAgent(agents, args[2])
+		if err != nil {
+			return err
+		}
+		if _, err := call(ctx, http.MethodPost, "/v1/sessions/"+url.PathEscape(a.ID)+"/kill", nil); err != nil {
+			return err
+		}
+		fmt.Fprintf(output, "Session for %s closed; the agent may reconnect.\n", consoleAgentName(a))
+		return nil
+	}
+	if args[0] == "client" && len(args) == 4 && args[1] == "distribution-admin" {
+		if vpnClient {
+			return errors.New("only the server operator can grant distribution administration")
+		}
+		id, err := strconv.ParseUint(args[2], 10, 64)
+		if err != nil || (args[3] != "on" && args[3] != "off") {
+			return errors.New("use client distribution-admin SESSION_ID on|off")
+		}
+		_, err = call(ctx, http.MethodPost, "/v1/clients/"+strconv.FormatUint(id, 10)+"/distribution-admin", map[string]bool{"enabled": args[3] == "on"})
+		if err == nil {
+			fmt.Fprintf(output, "Client %d distribution administration %s.\n", id, args[3])
+		}
+		return err
+	}
 	if args[0] == "agent" && len(args) > 1 && args[1] != "show" {
 		return runConsoleAgentDistribution(ctx, output, call, args)
 	}

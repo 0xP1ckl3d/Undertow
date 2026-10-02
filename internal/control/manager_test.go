@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"undertow/internal/mux"
+	"undertow/internal/pivot"
 	"undertow/internal/routing"
 	"undertow/internal/security"
 	"undertow/internal/session"
@@ -20,6 +21,51 @@ import (
 type routeDevice struct {
 	mu     sync.Mutex
 	routes map[string]bool
+}
+
+func TestShutdownAcknowledgedAndLifecycleRecorded(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	manager := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	a, b := make(chan []byte, 256), make(chan []byte, 256)
+	serverMux := mux.New(ctx, &remoteTestTransport{in: a, out: b, done: make(chan struct{})}, true)
+	agentMux := mux.New(ctx, &remoteTestTransport{in: b, out: a, done: make(chan struct{})}, false)
+	defer serverMux.Close()
+	defer agentMux.Close()
+	var keys security.Keys
+	sess, err := session.New(9001, keys, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.Register(&dns.Peer{Session: sess, AgentID: "agent-a", Connected: time.Now()}, serverMux)
+	manager.UpdateInventory("agent-a", serverMux, []byte(`{"artifact_id":"artifact-a","profile_id":"profile-a"}`))
+	stopped := make(chan struct{})
+	go pivot.ServeAgentWithLifecycle(ctx, agentMux, pivot.DefaultCapabilities(), func() { close(stopped) })
+	if err := manager.ShutdownAgent(ctx, "agent-a"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-stopped:
+	case <-ctx.Done():
+		t.Fatal("agent did not stop after acknowledged shutdown")
+	}
+	events := manager.LifecycleEvents("agent-a")
+	if len(events) < 3 || events[0].Kind != "shutdown_acknowledged" || events[1].Kind != "shutdown_requested" || events[2].Kind != "connected" {
+		t.Fatalf("events=%+v", events)
+	}
+}
+
+func TestLifecycleHistoryIsBounded(t *testing.T) {
+	manager := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	manager.mu.Lock()
+	for i := 0; i < 1200; i++ {
+		manager.recordLifecycleLocked(LifecycleEvent{AgentID: "agent-a", Kind: "connected"})
+	}
+	count := len(manager.lifecycleEvents)
+	manager.mu.Unlock()
+	if count != 1024 || len(manager.LifecycleEvents("agent-a")) != 32 {
+		t.Fatalf("history=%d recent=%d", count, len(manager.LifecycleEvents("agent-a")))
+	}
 }
 
 func TestVPNClientAppearsInStatusAndIsRemoved(t *testing.T) {
@@ -36,6 +82,12 @@ func TestVPNClientAppearsInStatusAndIsRemoved(t *testing.T) {
 	streamMux := mux.New(ctx, &idleTransport{done: make(chan struct{})}, true)
 	peer := &dns.Peer{Session: s, AgentID: "client-id", Remote: "203.0.113.7:50000", Connected: time.Now(), LastSeen: time.Now()}
 	manager.RegisterClient(peer, streamMux, true, "vpn-host")
+	if manager.ClientDistributionAllowed(702) {
+		t.Fatal("client received distribution administration by default")
+	}
+	if err := manager.SetClientDistributionAdmin(702, true); err != nil || !manager.ClientDistributionAllowed(702) {
+		t.Fatal("server grant did not take effect")
+	}
 	request := httptest.NewRequest(http.MethodGet, "/v1/status", nil)
 	request.Header.Set("Authorization", "Bearer test-token")
 	response := httptest.NewRecorder()
@@ -55,6 +107,9 @@ func TestVPNClientAppearsInStatusAndIsRemoved(t *testing.T) {
 		t.Fatalf("interactive internal mode change failed: %v", err)
 	}
 	manager.UnregisterClient(702, streamMux)
+	if manager.ClientDistributionAllowed(702) {
+		t.Fatal("distribution grant survived client disconnect")
+	}
 	if got := manager.ClientList(); len(got) != 0 {
 		t.Fatalf("disconnected client remains in status: %+v", got)
 	}

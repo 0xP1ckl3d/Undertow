@@ -54,14 +54,15 @@ func (c *Connection) Close() error {
 
 type Peer struct {
 	*Connection
-	Carrier   string
-	Via       string
-	mu        sync.Mutex
-	agentID   string
-	remote    string
-	connected time.Time
-	lastSeen  time.Time
-	virtualIP string
+	Carrier              string
+	Via                  string
+	mu                   sync.Mutex
+	agentID              string
+	remote               string
+	connected            time.Time
+	lastSeen             time.Time
+	virtualIP            string
+	enrollmentArtifactID string
 }
 
 var _ transport.Peer = (*Peer)(nil)
@@ -72,7 +73,7 @@ func (p *Peer) Snapshot() transport.PeerInfo {
 	return transport.PeerInfo{
 		ID: p.ID(), AgentID: p.agentID, Remote: p.remote,
 		Connected: p.connected, LastSeen: p.lastSeen, VirtualIP: p.virtualIP,
-		Authenticated: true, Carrier: p.Carrier, Via: p.Via, Transport: p.Session.Stats(),
+		Authenticated: true, Carrier: p.Carrier, Via: p.Via, EnrollmentArtifactID: p.enrollmentArtifactID, Transport: p.Session.Stats(),
 	}
 }
 func (p *Peer) SetVirtualIP(value string) {
@@ -135,6 +136,10 @@ func Dial(ctx context.Context, conn MessageConn, fingerprint string, token []byt
 }
 
 func Accept(ctx context.Context, conn MessageConn, identity ed25519.PrivateKey, token []byte) (*Peer, error) {
+	return AcceptWithVerifier(ctx, conn, identity, token, nil)
+}
+
+func AcceptWithVerifier(ctx context.Context, conn MessageConn, identity ed25519.PrivateKey, token []byte, verifier security.EnrollmentVerifier) (*Peer, error) {
 	if len(identity) != ed25519.PrivateKeySize || len(token) < 32 {
 		return nil, errors.New("server identity and 32-byte enrollment secret required")
 	}
@@ -198,13 +203,20 @@ func Accept(ctx context.Context, conn MessageConn, identity ed25519.PrivateKey, 
 		c.Close()
 		return nil, err
 	}
-	id, err := security.CheckAuth(token, auth, serverState.Transcript)
+	var id [16]byte
+	artifactID := ""
+	if verifier == nil {
+		id, err = security.CheckAuth(token, auth, serverState.Transcript)
+	} else {
+		id, artifactID, err = verifier(auth, serverState.Transcript)
+	}
 	if err != nil {
 		_ = c.Send(ctx, []byte{security.AuthReject})
 		c.Close()
 		return nil, err
 	}
 	peer.agentID = hex.EncodeToString(id[:])
+	peer.enrollmentArtifactID = artifactID
 	if err := c.Send(ctx, []byte{security.AuthOK}); err != nil {
 		c.Close()
 		return nil, err

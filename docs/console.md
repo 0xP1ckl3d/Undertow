@@ -20,7 +20,7 @@ See [getting started](getting-started.md) for enrollment, fingerprint, and privi
 
 ## Configured agent distribution
 
-Both consoles use the server's persisted profile and artifact store:
+Both consoles read the server's persisted profile and artifact store. Server operators can change it; a connected client needs an explicit `client distribution-admin SESSION_ID on` grant for changes:
 
 ```text
 agent profile create office server=SERVER_IP:443 transport=quic
@@ -32,9 +32,17 @@ agent artifacts
 agent host ARTIFACT_ID
 agent deploy-script ARTIFACT_ID powershell
 agent unhost ARTIFACT_ID
+agent revoke ARTIFACT_ID
+agent delete ARTIFACT_ID
+agents
+use 1
+show
+agent events
+session kill
+agent shutdown
 ```
 
-Use `agent profile delete NAME` to remove a logical profile and `agent delete ARTIFACT_ID` to remove an individual generated binary. Editing a profile leaves previously generated artifacts unchanged. `agent host` requires an active WebSocket HTTPS listener and returns a URL and SHA-256. See [configured thin agents](agent-distribution.md) for authentication and retrieval details.
+Use `agent profile delete NAME` to remove a logical profile. Editing a profile leaves previously generated artifacts unchanged. `agent host` requires an active WebSocket HTTPS listener and returns a random URL and SHA-256. Verify the download before launching it with no arguments. `session kill` closes a session and permits reconnect; `agent shutdown` stops the configured process. `unhost`, `revoke`, and `delete` separately control download, future enrollment, and the server-side file/record. Normal packaged-agent operation writes no local operational logfile; the server retains bounded lifecycle events. See [configured thin agents](agent-distribution.md) for authentication and endpoint state.
 
 ## Server listeners and agent topology
 

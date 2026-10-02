@@ -12,6 +12,7 @@ import (
 	"time"
 
 	quicgo "github.com/quic-go/quic-go"
+	"undertow/internal/security"
 	"undertow/internal/transport"
 	"undertow/internal/transport/stream"
 	"undertow/internal/transport/tlscert"
@@ -76,6 +77,7 @@ type Server struct {
 	listener *quicgo.Listener
 	identity ed25519.PrivateKey
 	token    []byte
+	verifier security.EnrollmentVerifier
 	ctx      context.Context
 	cancel   context.CancelFunc
 	accepted chan transport.Peer
@@ -83,6 +85,8 @@ type Server struct {
 	peers    map[uint64]*stream.Peer
 	once     sync.Once
 }
+
+func (s *Server) SetEnrollmentVerifier(v security.EnrollmentVerifier) { s.verifier = v }
 
 var _ transport.Listener = (*Server)(nil)
 
@@ -142,7 +146,7 @@ func (s *Server) handle(connection *quicgo.Conn) {
 	}
 	_ = channel.SetDeadline(time.Now().Add(15 * time.Second))
 	framed := &messageConn{connection: connection, stream: channel}
-	peer, err := stream.Accept(s.ctx, framed, s.identity, s.token)
+	peer, err := stream.AcceptWithVerifier(s.ctx, framed, s.identity, s.token, s.verifier)
 	if err == nil {
 		peer.Carrier = "quic"
 	}

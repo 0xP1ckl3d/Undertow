@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"syscall"
 
 	"undertow/internal/agent"
 	"undertow/internal/agentprofile"
@@ -28,13 +29,19 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	if launched, err := detachIfInteractive(); err != nil {
+		log.Fatal(err)
+	} else if launched {
+		return
+	}
 	embedded, err := agentprofile.Read(path)
 	if err != nil {
 		log.Fatal(err)
 	}
-	cfg := embedded.Profile.Config
+	cfg := embedded.Config
 	cfg.Metadata = embedded.Identity()
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	cfg.Packaged = true
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := agent.Run(ctx, cfg, nil); err != nil {
 		log.Fatal(err)

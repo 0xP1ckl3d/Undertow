@@ -276,12 +276,13 @@ func (d *agentDistribution) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Profile      string `json:"profile"`
 			Platform     string `json:"platform"`
 			Architecture string `json:"architecture"`
+			Filename     string `json:"filename,omitempty"`
 		}
 		if err := decodeDistributionRequest(r, &req); err != nil {
 			distributionError(w, err)
 			return
 		}
-		a, err := d.store.Build(req.Profile, req.Platform, req.Architecture)
+		a, err := d.store.Build(req.Profile, req.Platform, req.Architecture, req.Filename)
 		if err != nil {
 			distributionError(w, err)
 			return
@@ -324,7 +325,12 @@ func (d *agentDistribution) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					distributionError(w, errors.New("artifact is not hosted"))
 					return
 				}
-				distributionJSON(w, http.StatusOK, d.hostedInfo(a))
+				info, err := d.hostedInfo(a)
+				if err != nil {
+					distributionError(w, err)
+					return
+				}
+				distributionJSON(w, http.StatusOK, info)
 				return
 			}
 			if r.Method == http.MethodPost {
@@ -344,7 +350,12 @@ func (d *agentDistribution) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					distributionError(w, err)
 					return
 				}
-				distributionJSON(w, http.StatusOK, d.hostedInfo(a))
+				info, err := d.hostedInfo(a)
+				if err != nil {
+					distributionError(w, err)
+					return
+				}
+				distributionJSON(w, http.StatusOK, info)
 				return
 			}
 			if r.Method == http.MethodDelete {
@@ -356,6 +367,15 @@ func (d *agentDistribution) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				distributionJSON(w, http.StatusOK, a)
 				return
 			}
+		}
+		if len(parts) == 2 && parts[1] == "revoke" && r.Method == http.MethodPost {
+			a, err := d.store.Revoke(id)
+			if err != nil {
+				distributionError(w, err)
+				return
+			}
+			distributionJSON(w, http.StatusOK, a)
+			return
 		}
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	default:
@@ -369,8 +389,12 @@ type hostedArtifactInfo struct {
 	TLSSelfSigned bool   `json:"tls_self_signed,omitempty"`
 }
 
-func (d *agentDistribution) hostedInfo(a agentprofile.Artifact) hostedArtifactInfo {
-	path := "/.undertow/artifacts/" + a.ID + "/" + url.PathEscape(a.Filename)
+func (d *agentDistribution) hostedInfo(a agentprofile.Artifact) (hostedArtifactInfo, error) {
+	token, err := d.store.HostedToken(a.ID)
+	if err != nil {
+		return hostedArtifactInfo{}, err
+	}
+	path := "/.undertow/artifacts/" + token
 	server := d.manager.ServerInfo()
 	for _, l := range server.Listeners {
 		if l.Transport != "websocket" {
@@ -385,10 +409,10 @@ func (d *agentDistribution) hostedInfo(a agentprofile.Artifact) hostedArtifactIn
 			break
 		}
 		if host != "" {
-			return hostedArtifactInfo{Artifact: a, Retrieval: "https://" + net.JoinHostPort(host, port) + path, TLSSelfSigned: l.TLSMode == "self-signed"}
+			return hostedArtifactInfo{Artifact: a, Retrieval: "https://" + net.JoinHostPort(host, port) + path, TLSSelfSigned: l.TLSMode == "self-signed"}, nil
 		}
 	}
-	return hostedArtifactInfo{Artifact: a, Retrieval: path}
+	return hostedArtifactInfo{Artifact: a, Retrieval: path}, nil
 }
 
 func (d *agentDistribution) Retrieve(w http.ResponseWriter, r *http.Request) {
@@ -396,12 +420,12 @@ func (d *agentDistribution) Retrieve(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/.undertow/artifacts/"), "/")
-	if len(parts) != 2 {
+	token := strings.TrimPrefix(r.URL.Path, "/.undertow/artifacts/")
+	if strings.Contains(token, "/") {
 		http.NotFound(w, r)
 		return
 	}
-	a, f, err := d.store.OpenHosted(parts[0], parts[1])
+	a, f, err := d.store.OpenHosted(token)
 	if err != nil {
 		http.NotFound(w, r)
 		return

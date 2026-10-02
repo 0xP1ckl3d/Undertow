@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"undertow/internal/security"
 	"undertow/internal/transport"
 	"undertow/internal/transport/stream"
 	"undertow/internal/transport/tlscert"
@@ -32,6 +33,7 @@ type Server struct {
 	path         string
 	identity     ed25519.PrivateKey
 	token        []byte
+	verifier     security.EnrollmentVerifier
 	ctx          context.Context
 	cancel       context.CancelFunc
 	accepted     chan transport.Peer
@@ -41,7 +43,8 @@ type Server struct {
 }
 
 // SetArtifactHandler installs the narrowly scoped artifact route before Serve.
-func (s *Server) SetArtifactHandler(handler http.Handler) { s.artifactHTTP = handler }
+func (s *Server) SetArtifactHandler(handler http.Handler)             { s.artifactHTTP = handler }
+func (s *Server) SetEnrollmentVerifier(v security.EnrollmentVerifier) { s.verifier = v }
 
 var _ transport.Listener = (*Server)(nil)
 
@@ -151,7 +154,7 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = conn.SetDeadline(time.Now().Add(15 * time.Second))
 	framed := &messageConn{conn: conn, reader: buffered.Reader}
-	peer, err := stream.Accept(s.ctx, framed, s.identity, s.token)
+	peer, err := stream.AcceptWithVerifier(s.ctx, framed, s.identity, s.token, s.verifier)
 	if err == nil {
 		peer.Carrier = "websocket"
 	}

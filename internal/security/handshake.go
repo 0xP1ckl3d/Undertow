@@ -29,6 +29,11 @@ const (
 
 var ErrHandshake = errors.New("invalid handshake")
 
+// EnrollmentVerifier authenticates a handshake and identifies whether the
+// credential belongs to a configured artifact. An empty artifact ID denotes
+// the existing manual-agent/client credential.
+type EnrollmentVerifier func(auth, transcript []byte) ([16]byte, string, error)
+
 type Keys struct {
 	ClientToServer [32]byte
 	ServerToClient [32]byte
@@ -245,6 +250,14 @@ func MakeAuth(token []byte, agentKey ed25519.PrivateKey, transcript []byte) []by
 }
 
 func CheckAuth(token, b, transcript []byte) ([16]byte, error) {
+	id, err := VerifyAuthSignature(b, transcript)
+	if err != nil || !CheckEnrollmentMAC(token, b, transcript) {
+		return [16]byte{}, ErrHandshake
+	}
+	return id, nil
+}
+
+func VerifyAuthSignature(b, transcript []byte) ([16]byte, error) {
 	var id [16]byte
 	if len(b) != 129 || b[0] != Auth {
 		return id, ErrHandshake
@@ -253,15 +266,19 @@ func CheckAuth(token, b, transcript []byte) ([16]byte, error) {
 	if !ed25519.Verify(pub, transcript, b[33:97]) {
 		return id, ErrHandshake
 	}
-	mac := hmac.New(sha256.New, token)
-	mac.Write(transcript)
-	mac.Write(pub)
-	if !hmac.Equal(mac.Sum(nil), b[97:]) {
-		return id, ErrHandshake
-	}
 	sum := sha256.Sum256(pub)
 	copy(id[:], sum[:16])
 	return id, nil
+}
+
+func CheckEnrollmentMAC(token, b, transcript []byte) bool {
+	if len(b) != 129 || b[0] != Auth {
+		return false
+	}
+	mac := hmac.New(sha256.New, token)
+	mac.Write(transcript)
+	mac.Write(b[1:33])
+	return hmac.Equal(mac.Sum(nil), b[97:])
 }
 
 func LoadOrCreateKey(path string) (ed25519.PrivateKey, error) {
@@ -269,6 +286,9 @@ func LoadOrCreateKey(path string) (ed25519.PrivateKey, error) {
 		raw, err := hex.DecodeString(strings.TrimSpace(string(b)))
 		if err != nil || len(raw) != ed25519.PrivateKeySize {
 			return nil, fmt.Errorf("invalid private key %s", path)
+		}
+		if err := os.Chmod(path, 0600); err != nil {
+			return nil, err
 		}
 		return ed25519.PrivateKey(raw), nil
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -278,7 +298,20 @@ func LoadOrCreateKey(path string) (ed25519.PrivateKey, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err = os.WriteFile(path, []byte(hex.EncodeToString(k)+"\n"), 0600); err != nil {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if errors.Is(err, os.ErrExist) {
+		return LoadOrCreateKey(path)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if _, err = f.Write([]byte(hex.EncodeToString(k) + "\n")); err != nil {
+		f.Close()
+		os.Remove(path)
+		return nil, err
+	}
+	if err = f.Close(); err != nil {
+		os.Remove(path)
 		return nil, err
 	}
 	return k, nil

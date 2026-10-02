@@ -9,6 +9,7 @@ import (
 	"net"
 	"sync"
 
+	"undertow/internal/security"
 	"undertow/internal/transport/stream"
 )
 
@@ -78,8 +79,12 @@ func Dial(ctx context.Context, address, fingerprint string, token []byte, key ed
 }
 
 func Accept(ctx context.Context, conn io.ReadWriteCloser, parentID string, identity ed25519.PrivateKey, token []byte) (*stream.Peer, error) {
+	return AcceptWithVerifier(ctx, conn, parentID, identity, token, nil)
+}
+
+func AcceptWithVerifier(ctx context.Context, conn io.ReadWriteCloser, parentID string, identity ed25519.PrivateKey, token []byte, verifier security.EnrollmentVerifier) (*stream.Peer, error) {
 	framed := &messageConn{ReadWriteCloser: conn, remote: "relay via " + parentID}
-	peer, err := stream.Accept(ctx, framed, identity, token)
+	peer, err := stream.AcceptWithVerifier(ctx, framed, identity, token, verifier)
 	if err != nil {
 		_ = conn.Close()
 		return nil, err

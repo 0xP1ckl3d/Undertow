@@ -20,22 +20,23 @@ import (
 )
 
 type Peer struct {
-	Session         *session.Session
-	AgentID         string
-	Remote          string
-	Connected       time.Time
-	LastSeen        time.Time
-	VirtualIP       string
-	transcript      []byte
-	authenticated   bool
-	packetErrorOnce sync.Once
-	mu              sync.Mutex
+	Session              *session.Session
+	AgentID              string
+	Remote               string
+	Connected            time.Time
+	LastSeen             time.Time
+	VirtualIP            string
+	EnrollmentArtifactID string
+	transcript           []byte
+	authenticated        bool
+	packetErrorOnce      sync.Once
+	mu                   sync.Mutex
 }
 
 func (p *Peer) Snapshot() PeerInfo {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return PeerInfo{ID: p.Session.ID(), AgentID: p.AgentID, Remote: p.Remote, VirtualIP: p.VirtualIP, Carrier: "dns", Connected: p.Connected, LastSeen: p.LastSeen, Authenticated: p.authenticated, Transport: p.Session.Stats()}
+	return PeerInfo{ID: p.Session.ID(), AgentID: p.AgentID, Remote: p.Remote, VirtualIP: p.VirtualIP, Carrier: "dns", EnrollmentArtifactID: p.EnrollmentArtifactID, Connected: p.Connected, LastSeen: p.LastSeen, Authenticated: p.authenticated, Transport: p.Session.Stats()}
 }
 
 func (p *Peer) SetVirtualIP(address string) {
@@ -56,6 +57,7 @@ type Server struct {
 	domain       string
 	identity     ed25519.PrivateKey
 	token        []byte
+	verifier     security.EnrollmentVerifier
 	cookieSecret [32]byte
 	mu           sync.RWMutex
 	peers        map[uint64]*Peer
@@ -89,8 +91,9 @@ func Listen(addr, domain string, identity ed25519.PrivateKey, token []byte) (*Se
 	return s, nil
 }
 
-func (s *Server) Addr() net.Addr         { return s.conn.LocalAddr() }
-func (s *Server) Accepted() <-chan *Peer { return s.accepted }
+func (s *Server) Addr() net.Addr                                      { return s.conn.LocalAddr() }
+func (s *Server) SetEnrollmentVerifier(v security.EnrollmentVerifier) { s.verifier = v }
+func (s *Server) Accepted() <-chan *Peer                              { return s.accepted }
 
 func (s *Server) Accept(ctx context.Context) (transport.Peer, error) {
 	select {
@@ -271,7 +274,14 @@ func (s *Server) handle(ctx context.Context, addr *net.UDPAddr, b []byte) {
 		p.mu.Unlock()
 		if !authenticated {
 			if msg, ok := p.Session.TryRecv(); ok {
-				id, authErr := security.CheckAuth(s.token, msg, p.transcript)
+				var id [16]byte
+				artifactID := ""
+				var authErr error
+				if s.verifier == nil {
+					id, authErr = security.CheckAuth(s.token, msg, p.transcript)
+				} else {
+					id, artifactID, authErr = s.verifier(msg, p.transcript)
+				}
 				if authErr != nil {
 					if err = p.Session.Send(ctx, []byte{security.AuthReject}); err != nil {
 						return
@@ -279,6 +289,7 @@ func (s *Server) handle(ctx context.Context, addr *net.UDPAddr, b []byte) {
 				} else {
 					p.mu.Lock()
 					p.AgentID = hex.EncodeToString(id[:])
+					p.EnrollmentArtifactID = artifactID
 					p.authenticated = true
 					p.mu.Unlock()
 					if err = p.Session.Send(ctx, []byte{security.AuthOK}); err != nil {

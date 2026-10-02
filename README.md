@@ -12,7 +12,7 @@
 
 Undertow carries encrypted sessions over QUIC, HTTPS/WebSocket, or direct DNS. A **server** accepts connections, an unprivileged **agent** reaches networks from its host, and a privileged **client** tunnels traffic from its own machine. Start with the [short QUIC quickstart](docs/quickstart.md).
 
-For remote deployment, the separate [configured thin agent](docs/agent-distribution.md) runs with no CLI arguments. From a server or client console, create a profile, build a platform artifact from a prebuilt template, and optionally host it for retrieval. The full `undertow agent` command remains available for manual operation.
+For remote deployment, the separate [configured thin agent](docs/agent-distribution.md) runs with no connection arguments and uses the same agent runtime. Build it from a prebuilt template, optionally host it through Undertow, and inspect its lifecycle from the server. New artifacts have independent enrollment credentials. Client consoles need a server grant to change profiles or artifacts. The full `undertow agent` command remains available for manual operation.
 
 ## What are you trying to do?
 

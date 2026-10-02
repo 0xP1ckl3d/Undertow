@@ -34,21 +34,28 @@ func printConsoleHelp(output io.Writer, vpnClient, selected, serverAttached bool
 	}
 	switch topic {
 	case "agent", "profile", "artifact", "artifacts":
-		fmt.Fprint(output, `Agent distribution (server or client console):
+		fmt.Fprint(output, `Agent distribution (server console; client mutations require a server grant):
   agent profile create NAME [server=HOST:PORT transport=quic ...]
   agent profile list|show NAME|edit NAME FIELD=VALUE|delete NAME
-  agent build PROFILE PLATFORM ARCH
+  agent build PROFILE PLATFORM ARCH [filename=NAME]
   agent artifacts                 List generated binaries
   agent host ARTIFACT_ID          Expose one binary over WebSocket HTTPS
   agent hosted                    List hosted binaries
   agent unhost ARTIFACT_ID        Stop future retrieval
+  agent revoke ARTIFACT_ID        Reject future enrollment with its credential
   agent delete ARTIFACT_ID        Delete a generated binary
+  agent shutdown AGENT            Acknowledge and stop a running configured agent
+  session kill AGENT              Close only the current session
+  agent events AGENT              Show recent server-side lifecycle events
   agent deploy-script ID powershell|shell
+  client distribution-admin SESSION_ID on|off  Grant/revoke one client's mutation access
 Profile fields: server, transport, domain, fingerprint, auth, token-file,
 password-file, payload-profile, websocket-path, tls-server-name,
 tls-insecure-skip-verify, deny, routes (comma-separated IPv4 CIDRs).
 If a listener binds 0.0.0.0 or ::, pass its reachable server=HOST:PORT.
 Credentials are never shown by profile show or artifact listings.
+session kill closes a session and permits reconnect; agent shutdown exits its process.
+unhost, revoke and delete are independent actions.
 `)
 	case "load", "unload", "bofs":
 		fmt.Fprint(output, `Loaded BOF commands (local to this console session):

@@ -6,6 +6,12 @@ $env:APPDATA = Join-Path $root "appdata"
 New-Item -ItemType Directory -Force -Path $env:APPDATA | Out-Null
 $operator = Join-Path $workspace "bin/undertow.exe"
 $templates = Join-Path $workspace "bin"
+$thinTemplate = Join-Path $templates "undertow-agent-windows-amd64.exe"
+if ((Get-Item $thinTemplate).Length -ge (Get-Item $operator).Length) { throw "Thin agent template is not smaller than the operator framework" }
+$pe = [System.IO.File]::ReadAllBytes($thinTemplate)
+$peOffset = [BitConverter]::ToInt32($pe, 0x3c)
+$subsystem = [BitConverter]::ToUInt16($pe, $peOffset + 24 + 68)
+if ($subsystem -ne 2) { throw "Windows thin agent is not a non-console GUI subsystem executable" }
 $identity = Join-Path $root "server.key"
 $enrollmentFile = Join-Path $root "enrollment.key"
 $tokenFile = Join-Path $root "control.key"
@@ -56,6 +62,7 @@ try {
     $body = @{ profile = $name; platform = "windows"; architecture = "amd64" } | ConvertTo-Json
     $artifact = Invoke-RestMethod -Uri "$base/v1/agent-artifacts" -Headers $headers -Method Post -ContentType application/json -Body $body
     $hosted = Invoke-RestMethod -Uri "$base/v1/agent-artifacts/$($artifact.id)/host" -Headers $headers -Method Post
+    if ($artifact.filename -notmatch "^$($artifact.id)(\.exe)?$" -or $hosted.retrieval.Contains($artifact.id) -or $hosted.retrieval.Contains($name)) { throw "Artifact naming or retrieval URL exposed management metadata" }
     $download = Join-Path $root $artifact.filename
     Invoke-WebRequest -Uri $hosted.retrieval -SkipCertificateCheck -OutFile $download
     $actual = (Get-FileHash -Algorithm SHA256 -Path $download).Hash.ToLowerInvariant()
@@ -70,6 +77,7 @@ try {
     }
     if (-not $connected) { throw "Agent did not connect: $(Get-Content (Join-Path $root "$name.err") -Raw)" }
     if ($connected.profile -ne $name) { throw "Inventory metadata missing" }
+    if ($connected.reconnect_policy -ne "progressive") { throw "Configured agent does not report progressive reconnect" }
     if (-not $connected.undertow_version -or -not $connected.profile_id) { throw "Artifact build metadata missing" }
     if ($connected.advertised_routes -notcontains "10.20.0.0/16") { throw "Advertised route missing" }
     if ($connected.capabilities.allowed -contains "upload") { throw "Denied capability was allowed" }
@@ -88,11 +96,28 @@ try {
         Start-Sleep -Milliseconds 200
       }
       if (-not $reconnected) { throw "WebSocket agent did not reconnect" }
+      Invoke-RestMethod -Uri "$base/v1/sessions/$($reconnected.id)/kill" -Headers $headers -Method Post | Out-Null
+      $afterKill = $null
+      for ($i=0; $i -lt 150; $i++) {
+        $status = Invoke-RestMethod -Uri "$base/v1/status" -Headers $headers
+        $afterKill = @($status.agents | Where-Object { $_.artifact_id -eq $artifact.id -and $_.session_id -ne $reconnected.session_id }) | Select-Object -First 1
+        if ($afterKill) { break }
+        Start-Sleep -Milliseconds 200
+      }
+      if (-not $afterKill) { throw "Session kill did not permit agent reconnect" }
     }
     Write-Output "PASS $($target.transport) artifact=$($artifact.id) sha256=$actual agent=$($connected.id) exec=$($result.stdout.Trim())"
-    Stop-Process -Id $agent.Id -Force
+    $current = @( (Invoke-RestMethod -Uri "$base/v1/status" -Headers $headers).agents | Where-Object { $_.artifact_id -eq $artifact.id } ) | Select-Object -First 1
+    Invoke-RestMethod -Uri "$base/v1/agents/$($current.id)/shutdown" -Headers $headers -Method Post | Out-Null
+    if (-not $agent.WaitForExit(10000)) { throw "Configured agent did not exit after acknowledged shutdown" }
+    $events = Invoke-RestMethod -Uri "$base/v1/agents/$($current.id)/events" -Headers $headers
+    if (@($events | Where-Object { $_.kind -eq 'shutdown_acknowledged' }).Count -eq 0) { throw "Server did not record shutdown acknowledgement" }
+    Invoke-RestMethod -Uri "$base/v1/agent-artifacts/$($artifact.id)/host" -Headers $headers -Method Delete | Out-Null
+    try { Invoke-WebRequest -Uri $hosted.retrieval -SkipCertificateCheck -OutFile (Join-Path $root 'unhosted.bin') | Out-Null; throw "Unhosted artifact was retrievable" } catch { if ($_.Exception.Message -eq 'Unhosted artifact was retrievable') { throw } }
+    Invoke-RestMethod -Uri "$base/v1/agent-artifacts/$($artifact.id)/revoke" -Headers $headers -Method Post | Out-Null
     $agent = $null
   }
+  if (@(Get-ChildItem -Path $env:APPDATA -Filter '*.log' -Recurse -ErrorAction SilentlyContinue).Count -ne 0) { throw 'Packaged agent wrote a local operational logfile' }
   $agent = Start-Process -FilePath $operator -ArgumentList @("agent", "--foreground", "--transport", "websocket", "--server", "127.0.0.1:$wsPort", "--fingerprint", $fingerprint, "--auth", "token", "--token-file", $enrollmentFile, "--tls-insecure-skip-verify", "--agent-key", (Join-Path $root "cli-agent.key"), "--deny", "upload", "--advertise-route", "10.20.0.0/16") -PassThru -WindowStyle Hidden -RedirectStandardOutput (Join-Path $root "cli-agent.out") -RedirectStandardError (Join-Path $root "cli-agent.err")
   $cliAgent = $null
   for ($i=0; $i -lt 150; $i++) {

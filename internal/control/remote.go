@@ -67,8 +67,12 @@ func (m *Manager) ServeRemote(ctx context.Context, token string, clientID uint64
 		writeRemoteResponse(stream, remoteResponse{Status: http.StatusBadRequest, Body: []byte("invalid API request")})
 		return
 	}
-	if !clientRequestAllowed(httpRequest, clientID) {
-		writeRemoteResponse(stream, remoteResponse{Status: http.StatusForbidden, Body: []byte("server operator command unavailable from VPN client")})
+	if !clientRequestAllowed(httpRequest, clientID) && !(m.ClientDistributionAllowed(clientID) && distributionRequest(httpRequest)) {
+		message := "server operator command unavailable from VPN client"
+		if distributionRequest(httpRequest) {
+			message = fmt.Sprintf("distribution administration requires a server grant: client distribution-admin %d on", clientID)
+		}
+		writeRemoteResponse(stream, remoteResponse{Status: http.StatusForbidden, Body: []byte(message)})
 		return
 	}
 	httpRequest.Header.Set("Authorization", "Bearer "+token)
@@ -87,7 +91,10 @@ func clientRequestAllowed(request *http.Request, clientID uint64) bool {
 	if request.Method == http.MethodGet && path == "/v1/status" && request.URL.RawQuery == "" {
 		return true
 	}
-	if (path == "/v1/agent-profiles" || strings.HasPrefix(path, "/v1/agent-profiles/") || path == "/v1/agent-artifacts" || strings.HasPrefix(path, "/v1/agent-artifacts/")) && request.URL.RawQuery == "" {
+	if request.Method == http.MethodGet && distributionRequest(request) && !strings.HasSuffix(path, "/host") {
+		return true
+	}
+	if request.Method == http.MethodGet && strings.HasPrefix(path, "/v1/agents/") && strings.HasSuffix(path, "/events") && request.URL.RawQuery == "" {
 		return true
 	}
 	if request.Method == http.MethodGet && (path == "/v1/jobs" || strings.HasPrefix(path, "/v1/jobs/")) {
@@ -113,11 +120,20 @@ func clientRequestAllowed(request *http.Request, clientID uint64) bool {
 	if path == clientPrefix+"/internal" || path == clientPrefix+"/routes" || path == clientPrefix+"/forwards" {
 		return true
 	}
+	if strings.HasPrefix(path, "/v1/sessions/") && strings.HasSuffix(path, "/kill") {
+		parts := strings.Split(path, "/")
+		return len(parts) == 5 && parts[3] != "" && !strings.ContainsAny(parts[3], "%\\")
+	}
 	parts := strings.Split(path, "/")
 	if len(parts) == 6 && parts[1] == "v1" && parts[2] == "agents" && parts[3] != "" && (parts[4] == "scripts" || parts[4] == "wasm" || parts[4] == "native" || parts[4] == "bof") && parts[5] == "jobs" && !strings.ContainsAny(parts[3], "%\\") {
 		return true
 	}
-	return len(parts) == 5 && parts[1] == "v1" && parts[2] == "agents" && parts[3] != "" && (parts[4] == "exec" || parts[4] == "jobs") && !strings.ContainsAny(parts[3], "%\\")
+	return len(parts) == 5 && parts[1] == "v1" && parts[2] == "agents" && parts[3] != "" && (parts[4] == "exec" || parts[4] == "jobs" || parts[4] == "shutdown") && !strings.ContainsAny(parts[3], "%\\")
+}
+
+func distributionRequest(request *http.Request) bool {
+	path := request.URL.EscapedPath()
+	return request.URL.RawQuery == "" && (path == "/v1/agent-profiles" || strings.HasPrefix(path, "/v1/agent-profiles/") || path == "/v1/agent-artifacts" || strings.HasPrefix(path, "/v1/agent-artifacts/"))
 }
 
 func writeRemoteResponse(stream *mux.Stream, response remoteResponse) {

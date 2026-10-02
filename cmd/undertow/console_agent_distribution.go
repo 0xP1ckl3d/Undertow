@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,13 +12,14 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"undertow/internal/agentprofile"
 )
 
 func runConsoleAgentDistribution(ctx context.Context, out io.Writer, call consoleCaller, args []string) error {
 	if len(args) < 2 {
-		return errors.New("use agent profile|build|artifacts|host|hosted|unhost|delete|deploy-script")
+		return errors.New("use agent profile|build|artifacts|host|hosted|unhost|revoke|delete|deploy-script|shutdown|events")
 	}
 	switch args[1] {
 	case "profile":
@@ -100,10 +102,18 @@ func runConsoleAgentDistribution(ctx context.Context, out io.Writer, call consol
 			return nil
 		}
 	case "build":
-		if len(args) != 5 {
-			return errors.New("use agent build PROFILE PLATFORM ARCH")
+		if len(args) != 5 && len(args) != 6 {
+			return errors.New("use agent build PROFILE PLATFORM ARCH [filename=NAME]")
 		}
-		data, err := call(ctx, http.MethodPost, "/v1/agent-artifacts", map[string]string{"profile": args[2], "platform": args[3], "architecture": args[4]})
+		request := map[string]string{"profile": args[2], "platform": args[3], "architecture": args[4]}
+		if len(args) == 6 {
+			filename, ok := strings.CutPrefix(args[5], "filename=")
+			if !ok || filename == "" {
+				return errors.New("optional build argument must be filename=NAME")
+			}
+			request["filename"] = filename
+		}
+		data, err := call(ctx, http.MethodPost, "/v1/agent-artifacts", request)
 		if err != nil {
 			return err
 		}
@@ -136,6 +146,9 @@ func runConsoleAgentDistribution(ctx context.Context, out io.Writer, call consol
 			if a.Hosted {
 				marker = " hosted"
 			}
+			if a.Revoked {
+				marker += " revoked"
+			}
 			fmt.Fprintf(out, "%-10s %-22s %-15s %s%s\n", a.ID[:min(8, len(a.ID))], a.Profile, a.Platform+"/"+a.Architecture, a.Created.Format("2006-01-02 15:04 UTC"), marker)
 		}
 		if !found {
@@ -164,6 +177,15 @@ func runConsoleAgentDistribution(ctx context.Context, out io.Writer, call consol
 			return err
 		}
 		fmt.Fprintln(out, "Artifact unhosted.")
+		return nil
+	case "revoke":
+		if len(args) != 3 {
+			return errors.New("use agent revoke ARTIFACT_ID")
+		}
+		if _, err := call(ctx, http.MethodPost, "/v1/agent-artifacts/"+url.PathEscape(args[2])+"/revoke", nil); err != nil {
+			return err
+		}
+		fmt.Fprintln(out, "Artifact enrollment revoked. Existing sessions remain connected; new enrollment using this artifact will be rejected.")
 		return nil
 	case "delete":
 		if len(args) != 3 {
@@ -201,8 +223,64 @@ func runConsoleAgentDistribution(ctx context.Context, out io.Writer, call consol
 			return errors.New("no WebSocket HTTPS listener is available for retrieval")
 		}
 		return printDeployScript(out, hosted, args[3])
+	case "shutdown", "events":
+		if len(args) != 3 {
+			return fmt.Errorf("use agent %s AGENT_NUMBER|ID|HOSTNAME, or select an agent first", args[1])
+		}
+		agents, err := consoleAgents(ctx, call)
+		if err != nil {
+			return err
+		}
+		a, err := findConsoleAgent(agents, args[2])
+		id := a.ID
+		if err != nil {
+			if args[1] != "events" || len(args[2]) != 32 {
+				return err
+			}
+			if _, decodeErr := hex.DecodeString(args[2]); decodeErr != nil {
+				return err
+			}
+			id = args[2]
+		}
+		path := "/v1/agents/" + url.PathEscape(id)
+		if args[1] == "shutdown" {
+			if _, err := call(ctx, http.MethodPost, path+"/shutdown", nil); err != nil {
+				return err
+			}
+			fmt.Fprintf(out, "Shutdown acknowledged by %s (%s).\n", consoleAgentName(a), a.ID)
+			return nil
+		}
+		data, err := call(ctx, http.MethodGet, path+"/events", nil)
+		if err != nil {
+			return err
+		}
+		var events []struct {
+			At                time.Time `json:"at"`
+			Kind              string    `json:"kind"`
+			Transport         string    `json:"transport"`
+			DurationSeconds   int64     `json:"duration_seconds"`
+			ReconnectAttempts uint32    `json:"reconnect_attempts"`
+		}
+		if err := json.Unmarshal(data, &events); err != nil {
+			return err
+		}
+		if len(events) == 0 {
+			fmt.Fprintln(out, "No recent lifecycle events.")
+			return nil
+		}
+		for _, e := range events {
+			fmt.Fprintf(out, "%s  %-23s %s", e.At.Local().Format("2006-01-02 15:04:05"), e.Kind, e.Transport)
+			if e.DurationSeconds > 0 {
+				fmt.Fprintf(out, "  duration=%s", (time.Duration(e.DurationSeconds) * time.Second).String())
+			}
+			if e.ReconnectAttempts > 0 {
+				fmt.Fprintf(out, "  attempts=%d", e.ReconnectAttempts)
+			}
+			fmt.Fprintln(out)
+		}
+		return nil
 	}
-	return errors.New("use agent profile|build|artifacts|host|hosted|unhost|delete|deploy-script")
+	return errors.New("use agent profile|build|artifacts|host|hosted|unhost|revoke|delete|deploy-script|shutdown|events")
 }
 
 func emptyDefault(value, fallback string) string {
@@ -279,7 +357,7 @@ func printDeployScript(out io.Writer, hosted hostedArtifactInfo, shell string) e
 	case "powershell":
 		fmt.Fprintf(out, "param([string]$Destination = '%s')\n$ErrorActionPreference = 'Stop'\n$url = '%s'\n$expected = '%s'\n$temp = $Destination + '.download'\ntry {\n", psQuote(a.Filename), psQuote(hosted.Retrieval), a.SHA256)
 		if hosted.TLSSelfSigned {
-			fmt.Fprint(out, "  if ($PSVersionTable.PSVersion.Major -ge 7) {\n    Invoke-WebRequest -Uri $url -OutFile $temp -SkipCertificateCheck\n  } else {\n    [Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }\n    Invoke-WebRequest -Uri $url -OutFile $temp\n  }\n")
+			fmt.Fprint(out, "  Add-Type -AssemblyName System.Net.Http\n  $handler = [System.Net.Http.HttpClientHandler]::new()\n  $handler.ServerCertificateCustomValidationCallback = { param($request, $cert, $chain, $errors) $true }\n  $client = [System.Net.Http.HttpClient]::new($handler)\n  try {\n    $response = $client.GetAsync($url).GetAwaiter().GetResult()\n    try {\n      $response.EnsureSuccessStatusCode() | Out-Null\n      $source = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()\n      try {\n        $target = [System.IO.File]::Create($temp)\n        try { $source.CopyTo($target) } finally { $target.Dispose() }\n      } finally { $source.Dispose() }\n    } finally { $response.Dispose() }\n  } finally { $client.Dispose(); $handler.Dispose() }\n")
 		} else {
 			fmt.Fprint(out, "  Invoke-WebRequest -Uri $url -OutFile $temp\n")
 		}

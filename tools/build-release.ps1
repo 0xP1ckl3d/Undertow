@@ -10,7 +10,9 @@ foreach ($target in $targets) {
     $env:GOOS = $target.OS
     $env:GOARCH = $target.Arch
     $filename = "undertow-agent-$($target.OS)-$($target.Arch)$($target.Suffix)"
-    go build -trimpath -buildvcs=false -ldflags='-s -w' -o (Join-Path $Output $filename) ./cmd/undertow-agent
+    $agentLdflags = '-s -w'
+    if ($target.OS -eq 'windows') { $agentLdflags += ' -H=windowsgui' }
+    go build -trimpath -buildvcs=false -ldflags $agentLdflags -o (Join-Path $Output $filename) ./cmd/undertow-agent
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 Remove-Item Env:GOOS, Env:GOARCH

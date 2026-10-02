@@ -70,24 +70,37 @@ type AgentInfo struct {
 	ActiveJobs         int                     `json:"active_jobs"`
 }
 
+type LifecycleEvent struct {
+	At                time.Time `json:"at"`
+	AgentID           string    `json:"agent_id"`
+	Kind              string    `json:"kind"`
+	Transport         string    `json:"transport,omitempty"`
+	ProfileID         string    `json:"profile_id,omitempty"`
+	ArtifactID        string    `json:"artifact_id,omitempty"`
+	SessionID         uint64    `json:"session_id,omitempty"`
+	DurationSeconds   int64     `json:"duration_seconds,omitempty"`
+	ReconnectAttempts uint32    `json:"reconnect_attempts,omitempty"`
+}
+
 type ClientInfo struct {
-	ID             string          `json:"id"`
-	Transport      string          `json:"transport,omitempty"`
-	SessionID      uint64          `json:"session_id"`
-	Hostname       string          `json:"hostname,omitempty"`
-	Remote         string          `json:"remote"`
-	Internal       bool            `json:"internal"`
-	AcceptedRoutes []AcceptedRoute `json:"accepted_routes,omitempty"`
-	Connected      time.Time       `json:"connected"`
-	LastSeen       time.Time       `json:"last_seen"`
-	RTT            time.Duration   `json:"rtt_ns"`
-	RXBytes        uint64          `json:"rx_bytes"`
-	TXBytes        uint64          `json:"tx_bytes"`
-	Retransmits    uint64          `json:"retransmits"`
-	Streams        int             `json:"streams"`
-	InFlight       int             `json:"in_flight"`
-	Queued         int             `json:"queued"`
-	Window         int             `json:"congestion_window"`
+	ID                string          `json:"id"`
+	Transport         string          `json:"transport,omitempty"`
+	SessionID         uint64          `json:"session_id"`
+	Hostname          string          `json:"hostname,omitempty"`
+	Remote            string          `json:"remote"`
+	Internal          bool            `json:"internal"`
+	DistributionAdmin bool            `json:"distribution_admin,omitempty"`
+	AcceptedRoutes    []AcceptedRoute `json:"accepted_routes,omitempty"`
+	Connected         time.Time       `json:"connected"`
+	LastSeen          time.Time       `json:"last_seen"`
+	RTT               time.Duration   `json:"rtt_ns"`
+	RXBytes           uint64          `json:"rx_bytes"`
+	TXBytes           uint64          `json:"tx_bytes"`
+	Retransmits       uint64          `json:"retransmits"`
+	Streams           int             `json:"streams"`
+	InFlight          int             `json:"in_flight"`
+	Queued            int             `json:"queued"`
+	Window            int             `json:"congestion_window"`
 }
 
 type AcceptedRoute struct {
@@ -131,11 +144,12 @@ type TransportController interface {
 }
 
 type clientState struct {
-	peer     transport.Peer
-	mux      *mux.Mux
-	internal bool
-	hostname string
-	accepted map[netip.Prefix]AcceptedRoute
+	peer              transport.Peer
+	mux               *mux.Mux
+	internal          bool
+	hostname          string
+	accepted          map[netip.Prefix]AcceptedRoute
+	distributionAdmin bool
 }
 
 type agentState struct {
@@ -151,6 +165,8 @@ type agentState struct {
 }
 type Manager struct {
 	mu                sync.RWMutex
+	lifecycleEvents   []LifecycleEvent
+	artifactLookup    func(string) (string, string, bool)
 	agentDistribution http.Handler
 	server            ServerInfo
 	transports        TransportController
@@ -167,6 +183,32 @@ type Manager struct {
 	proxyIP           netip.Addr
 	virtualByAgent    map[string]netip.Addr
 	virtualUsed       map[netip.Addr]bool
+}
+
+func (m *Manager) SetArtifactLookup(lookup func(string) (string, string, bool)) {
+	m.mu.Lock()
+	m.artifactLookup = lookup
+	m.mu.Unlock()
+}
+
+func (m *Manager) recordLifecycleLocked(event LifecycleEvent) {
+	event.At = time.Now().UTC()
+	m.lifecycleEvents = append(m.lifecycleEvents, event)
+	if len(m.lifecycleEvents) > 1024 {
+		m.lifecycleEvents = append([]LifecycleEvent(nil), m.lifecycleEvents[len(m.lifecycleEvents)-1024:]...)
+	}
+}
+
+func (m *Manager) LifecycleEvents(id string) []LifecycleEvent {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]LifecycleEvent, 0, 32)
+	for i := len(m.lifecycleEvents) - 1; i >= 0 && len(out) < 32; i-- {
+		if m.lifecycleEvents[i].AgentID == id {
+			out = append(out, m.lifecycleEvents[i])
+		}
+	}
+	return out
 }
 
 func (m *Manager) SetAgentDistributionHandler(handler http.Handler) {
@@ -236,6 +278,24 @@ func (m *Manager) ClientInternal(sessionID uint64) bool {
 	defer m.mu.RUnlock()
 	state := m.clients[sessionID]
 	return state != nil && state.internal
+}
+
+func (m *Manager) ClientDistributionAllowed(sessionID uint64) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	state := m.clients[sessionID]
+	return state != nil && state.distributionAdmin
+}
+
+func (m *Manager) SetClientDistributionAdmin(sessionID uint64, enabled bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	state := m.clients[sessionID]
+	if state == nil {
+		return errors.New("VPN client is not connected")
+	}
+	state.distributionAdmin = enabled
+	return nil
 }
 
 func (m *Manager) SetClientInternal(sessionID uint64, enabled bool) error {
@@ -347,7 +407,7 @@ func (m *Manager) ClientList() []ClientInfo {
 		}
 		sort.Slice(accepted, func(i, j int) bool { return accepted[i].Prefix < accepted[j].Prefix })
 		out = append(out, ClientInfo{
-			ID: p.AgentID, Transport: p.Carrier, SessionID: p.ID, Hostname: state.hostname, Remote: p.Remote, Internal: state.internal,
+			ID: p.AgentID, Transport: p.Carrier, SessionID: p.ID, Hostname: state.hostname, Remote: p.Remote, Internal: state.internal, DistributionAdmin: state.distributionAdmin,
 			AcceptedRoutes: accepted,
 			Connected:      p.Connected, LastSeen: p.LastSeen, RTT: p.Transport.RTT,
 			RXBytes: p.Transport.RXBytes, TXBytes: p.Transport.TXBytes,
@@ -427,6 +487,7 @@ func (m *Manager) Register(peer transport.Peer, streamMux *mux.Mux) {
 		depth = m.agents[parent].inventory.Depth + 1
 	}
 	m.agents[id] = &agentState{peer: peer, mux: streamMux, inventory: AgentInfo{Via: peer.Snapshot().Via, Depth: depth}}
+	m.recordLifecycleLocked(LifecycleEvent{AgentID: id, Kind: "connected", Transport: peer.Snapshot().Carrier, SessionID: peer.Snapshot().ID})
 	m.mu.Unlock()
 	if old != nil {
 		old.mux.Close()
@@ -457,6 +518,28 @@ func (m *Manager) UpdateInventory(id string, streamMux *mux.Mux, b []byte) {
 	if err := json.Unmarshal(b, &info); err != nil {
 		return
 	}
+	if state := m.Get(id); state == streamMux {
+		m.mu.RLock()
+		bound := ""
+		lookup := m.artifactLookup
+		if current := m.agents[id]; current != nil && current.mux == streamMux {
+			bound = current.peer.Snapshot().EnrollmentArtifactID
+		}
+		m.mu.RUnlock()
+		if bound != "" && info.ArtifactID != bound {
+			log.Printf("agent %s rejected: artifact enrollment does not match inventory", id)
+			streamMux.Close()
+			return
+		}
+		if lookup != nil && info.ArtifactID != "" {
+			name, _, scoped := lookup(info.ArtifactID)
+			if name == "" || (scoped && bound == "") {
+				log.Printf("agent %s rejected: inventory artifact is not bound to its enrollment", id)
+				streamMux.Close()
+				return
+			}
+		}
+	}
 	for _, address := range info.Interfaces {
 		_, value, ok := strings.Cut(address, "=")
 		if !ok {
@@ -481,6 +564,18 @@ func (m *Manager) UpdateInventory(id string, streamMux *mux.Mux, b []byte) {
 	}
 	m.mu.Lock()
 	if state := m.agents[id]; state != nil && state.mux == streamMux {
+		if !state.inventoryReady {
+			for i := len(m.lifecycleEvents) - 1; i >= 0; i-- {
+				event := &m.lifecycleEvents[i]
+				if event.AgentID == id && event.SessionID == state.peer.Snapshot().ID && event.Kind == "connected" {
+					event.ProfileID, event.ArtifactID = info.ProfileID, info.ArtifactID
+					break
+				}
+			}
+		}
+		if !state.inventoryReady && info.ReconnectAttempts > 0 {
+			m.recordLifecycleLocked(LifecycleEvent{AgentID: id, Kind: "reconnect_observed", Transport: state.peer.Snapshot().Carrier, SessionID: state.peer.Snapshot().ID, ReconnectAttempts: info.ReconnectAttempts})
+		}
 		state.inventory.Hostname = safeHostname(info.Hostname)
 		state.inventory.OS = info.OS
 		state.inventory.Arch = info.Arch
@@ -488,6 +583,9 @@ func (m *Manager) UpdateInventory(id string, streamMux *mux.Mux, b []byte) {
 		state.inventory.AdvertisedRoutes = validRoutes
 		state.inventory.Capabilities = info.Capabilities
 		state.inventory.ArtifactIdentity = info.ArtifactIdentity
+		if m.artifactLookup != nil && info.ArtifactID != "" {
+			state.inventory.Profile, state.inventory.UndertowVersion, _ = m.artifactLookup(info.ArtifactID)
+		}
 		state.inventoryReady = true
 		for _, route := range m.routes.List() {
 			if route.AgentID != id || route.Active == agentPivotAllowed(state) {
@@ -613,6 +711,13 @@ func (m *Manager) Unregister(id string, streamMux *mux.Mux) {
 		m.mu.Unlock()
 		return
 	}
+	state := m.agents[id]
+	peerInfo := state.peer.Snapshot()
+	duration := int64(0)
+	if !peerInfo.Connected.IsZero() {
+		duration = int64(time.Since(peerInfo.Connected).Seconds())
+	}
+	m.recordLifecycleLocked(LifecycleEvent{AgentID: id, Kind: "disconnected", Transport: peerInfo.Carrier, ProfileID: state.inventory.ProfileID, ArtifactID: state.inventory.ArtifactID, SessionID: peerInfo.ID, DurationSeconds: duration})
 	delete(m.agents, id)
 	var closed []*mux.Stream
 	var descendants []struct {
@@ -812,6 +917,63 @@ func (m *Manager) Kill(id string) error {
 	return streamMux.Close()
 }
 
+func (m *Manager) ShutdownAgent(ctx context.Context, id string) error {
+	streamMux := m.Get(id)
+	if streamMux == nil {
+		return errors.New("agent is not connected")
+	}
+	m.mu.Lock()
+	if state := m.agents[id]; state == nil || state.mux != streamMux || state.inventory.ArtifactID == "" {
+		m.mu.Unlock()
+		return errors.New("agent shutdown requires a connected configured agent; use session kill to close a manual agent session")
+	}
+	if state := m.agents[id]; state != nil && state.mux == streamMux {
+		m.recordLifecycleLocked(LifecycleEvent{AgentID: id, Kind: "shutdown_requested", Transport: state.peer.Snapshot().Carrier, ArtifactID: state.inventory.ArtifactID, ProfileID: state.inventory.ProfileID, SessionID: state.peer.Snapshot().ID})
+	}
+	m.mu.Unlock()
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	stream, err := streamMux.Open(ctx, pivot.ShutdownDestination)
+	if err != nil {
+		return err
+	}
+	defer stream.Close()
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-ctx.Done():
+			stream.Close()
+		case <-done:
+		}
+	}()
+	var ack [1]byte
+	if _, err = io.ReadFull(stream, ack[:]); err != nil {
+		return err
+	}
+	if ack[0] != 1 {
+		return errors.New("invalid agent shutdown acknowledgement")
+	}
+	if _, err := stream.Write([]byte{1}); err != nil {
+		return err
+	}
+	if _, err := io.ReadFull(stream, ack[:]); err != nil {
+		return err
+	}
+	if ack[0] != 2 {
+		return errors.New("invalid agent shutdown completion")
+	}
+	if _, err := stream.Read(ack[:]); err != io.EOF {
+		return errors.New("agent shutdown stream did not finish")
+	}
+	m.mu.Lock()
+	if state := m.agents[id]; state != nil && state.mux == streamMux {
+		m.recordLifecycleLocked(LifecycleEvent{AgentID: id, Kind: "shutdown_acknowledged", Transport: state.peer.Snapshot().Carrier, ArtifactID: state.inventory.ArtifactID, ProfileID: state.inventory.ProfileID, SessionID: state.peer.Snapshot().ID})
+	}
+	m.mu.Unlock()
+	return stream.CloseWrite()
+}
+
 // LoadOrCreateToken keeps the local operator credential separate from the
 // agent enrolment token.
 func LoadOrCreateToken(path string) (string, error) {
@@ -1004,6 +1166,16 @@ func (m *Manager) handler(token string) http.Handler {
 		}
 		http.Error(w, "agent not found", http.StatusNotFound)
 	})
+	muxer.HandleFunc("GET /v1/agents/{id}/events", func(w http.ResponseWriter, r *http.Request) {
+		jsonReply(w, http.StatusOK, m.LifecycleEvents(r.PathValue("id")))
+	})
+	muxer.HandleFunc("POST /v1/agents/{id}/shutdown", func(w http.ResponseWriter, r *http.Request) {
+		if err := m.ShutdownAgent(r.Context(), r.PathValue("id")); err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
 	muxer.HandleFunc("POST /v1/agents/{id}/exec", func(w http.ResponseWriter, r *http.Request) {
 		agent := m.Get(r.PathValue("id"))
 		if agent == nil {
@@ -1051,6 +1223,21 @@ func (m *Manager) handler(token string) http.Handler {
 			return
 		}
 		if err := m.SetClientInternal(id, body.Enabled); err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	muxer.HandleFunc("POST /v1/clients/{id}/distribution-admin", func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.ParseUint(r.PathValue("id"), 10, 64)
+		var body struct {
+			Enabled bool `json:"enabled"`
+		}
+		if err != nil || json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&body) != nil {
+			http.Error(w, "invalid client setting", http.StatusBadRequest)
+			return
+		}
+		if err := m.SetClientDistributionAdmin(id, body.Enabled); err != nil {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return
 		}

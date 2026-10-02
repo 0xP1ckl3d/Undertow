@@ -16,6 +16,7 @@ import (
 	"undertow/internal/control"
 	"undertow/internal/mux"
 	"undertow/internal/pivot"
+	"undertow/internal/security"
 	"undertow/internal/transport"
 	"undertow/internal/transport/dns"
 	"undertow/internal/transport/quic"
@@ -29,18 +30,22 @@ type activeTransport struct {
 }
 
 type serverTransports struct {
-	artifactHTTP http.Handler
-	mu           sync.Mutex
-	ctx          context.Context
-	manager      *control.Manager
-	identity     ed25519.PrivateKey
-	token        []byte
-	domain, path string
-	handle       func(transport.Peer)
-	active       map[string]*activeTransport
+	artifactHTTP       http.Handler
+	enrollmentVerifier security.EnrollmentVerifier
+	mu                 sync.Mutex
+	ctx                context.Context
+	manager            *control.Manager
+	identity           ed25519.PrivateKey
+	token              []byte
+	domain, path       string
+	handle             func(transport.Peer)
+	active             map[string]*activeTransport
 }
 
 func (s *serverTransports) SetArtifactHandler(handler http.Handler) { s.artifactHTTP = handler }
+func (s *serverTransports) SetEnrollmentVerifier(v security.EnrollmentVerifier) {
+	s.enrollmentVerifier = v
+}
 
 func newServerTransports(ctx context.Context, manager *control.Manager, identity ed25519.PrivateKey, token []byte, domain, path string, handle func(transport.Peer)) *serverTransports {
 	return &serverTransports{ctx: ctx, manager: manager, identity: identity, token: token, domain: domain, path: path, handle: handle, active: make(map[string]*activeTransport)}
@@ -87,6 +92,9 @@ func (s *serverTransports) Start(name string, request control.TransportStartRequ
 			return control.ListenerInfo{}, errors.New("DNS does not use TLS options")
 		}
 		listener, err = dns.Listen(addr, s.domain, s.identity, s.token)
+		if err == nil {
+			listener.(*dns.Server).SetEnrollmentVerifier(s.enrollmentVerifier)
+		}
 	} else {
 		if (request.TLSCert == "") != (request.TLSKey == "") {
 			return control.ListenerInfo{}, errors.New("tls-cert and tls-key must be supplied together")
@@ -110,9 +118,13 @@ func (s *serverTransports) Start(name string, request control.TransportStartRequ
 			listener, err = websocket.Listen(addr, s.path, request.TLSCert, request.TLSKey, selfSigned, s.identity, s.token)
 			if err == nil {
 				listener.(*websocket.Server).SetArtifactHandler(s.artifactHTTP)
+				listener.(*websocket.Server).SetEnrollmentVerifier(s.enrollmentVerifier)
 			}
 		} else {
 			listener, err = quic.Listen(addr, request.TLSCert, request.TLSKey, selfSigned, s.identity, s.token)
+			if err == nil {
+				listener.(*quic.Server).SetEnrollmentVerifier(s.enrollmentVerifier)
+			}
 		}
 	}
 	if err != nil {
@@ -248,6 +260,11 @@ func handleServerPeer(ctx context.Context, manager *control.Manager, controlToke
 		return
 	}
 	if control.IsVPNHello(hello) {
+		if peer.Snapshot().EnrollmentArtifactID != "" {
+			log.Printf("artifact enrollment rejected for VPN session %d", peer.Snapshot().ID)
+			streamMux.Close()
+			return
+		}
 		internal := control.VPNInternal(hello)
 		log.Printf("VPN client ready: session=%d remote=%s internal=%t", peer.Snapshot().ID, peer.Snapshot().Remote, internal)
 		if err := streamMux.SendControl(ctx, []byte(`{"mode":"vpn","ready":true}`)); err != nil {

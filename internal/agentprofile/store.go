@@ -1,6 +1,7 @@
 package agentprofile
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"undertow/internal/agent"
+	"undertow/internal/security"
 )
 
 type Artifact struct {
@@ -31,11 +33,14 @@ type Artifact struct {
 	UndertowVersion      string    `json:"undertow_version"`
 	ProfileFormatVersion uint32    `json:"profile_format_version"`
 	Hosted               bool      `json:"hosted"`
+	Revoked              bool      `json:"revoked,omitempty"`
 }
 
 type persisted struct {
-	Profiles  map[string]Profile  `json:"profiles"`
-	Artifacts map[string]Artifact `json:"artifacts"`
+	Profiles          map[string]Profile  `json:"profiles"`
+	Artifacts         map[string]Artifact `json:"artifacts"`
+	RetrievalTokens   map[string]string   `json:"retrieval_tokens,omitempty"`
+	EnrollmentSecrets map[string]string   `json:"enrollment_secrets,omitempty"`
 }
 
 const templateManifestName = "undertow-agent-templates.json"
@@ -111,12 +116,15 @@ func OpenStore(root, templates, version string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Join(root, "artifacts"), 0700); err != nil {
 		return nil, err
 	}
-	s := &Store{root: root, templates: templates, version: version, state: persisted{Profiles: map[string]Profile{}, Artifacts: map[string]Artifact{}}}
+	s := &Store{root: root, templates: templates, version: version, state: persisted{Profiles: map[string]Profile{}, Artifacts: map[string]Artifact{}, RetrievalTokens: map[string]string{}, EnrollmentSecrets: map[string]string{}}}
 	b, err := os.ReadFile(filepath.Join(root, "state.json"))
 	if errors.Is(err, os.ErrNotExist) {
 		return s, nil
 	}
 	if err != nil {
+		return nil, err
+	}
+	if err := os.Chmod(filepath.Join(root, "state.json"), 0600); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal(b, &s.state); err != nil {
@@ -128,16 +136,45 @@ func OpenStore(root, templates, version string) (*Store, error) {
 	if s.state.Artifacts == nil {
 		s.state.Artifacts = map[string]Artifact{}
 	}
+	if s.state.RetrievalTokens == nil {
+		s.state.RetrievalTokens = map[string]string{}
+	}
+	if s.state.EnrollmentSecrets == nil {
+		s.state.EnrollmentSecrets = map[string]string{}
+	}
 	for id, a := range s.state.Artifacts {
 		if id != a.ID || !safeArtifactFilename(a.Filename) {
 			return nil, errors.New("invalid agent artifact record")
+		}
+		if a.Hosted && s.state.RetrievalTokens[id] == "" {
+			// Legacy predictable URLs are not retained after the format upgrade.
+			a.Hosted = false
+			s.state.Artifacts[id] = a
+		}
+	}
+	seenTokens := map[string]bool{}
+	for id, token := range s.state.RetrievalTokens {
+		if _, ok := s.state.Artifacts[id]; !ok || len(token) != 48 || seenTokens[token] {
+			return nil, errors.New("invalid artifact retrieval token record")
+		}
+		if _, err := hex.DecodeString(token); err != nil {
+			return nil, errors.New("invalid artifact retrieval token record")
+		}
+		seenTokens[token] = true
+	}
+	for id, encoded := range s.state.EnrollmentSecrets {
+		if _, ok := s.state.Artifacts[id]; !ok || len(encoded) != 64 {
+			return nil, errors.New("invalid artifact enrollment record")
+		}
+		if _, err := hex.DecodeString(encoded); err != nil {
+			return nil, errors.New("invalid artifact enrollment record")
 		}
 	}
 	return s, nil
 }
 
 func safeArtifactFilename(name string) bool {
-	return name != "" && filepath.Base(name) == name && !strings.ContainsAny(name, "/\\:")
+	return name != "" && name != "." && name != ".." && filepath.Base(name) == name && !strings.ContainsAny(name, "/\\:")
 }
 
 func (s *Store) save() error {
@@ -257,7 +294,7 @@ func templateName(platform, arch string) (string, error) {
 	return name, nil
 }
 
-func (s *Store) Build(name, platform, arch string) (Artifact, error) {
+func (s *Store) Build(name, platform, arch string, requestedFilename ...string) (Artifact, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p, ok := s.state.Profiles[name]
@@ -282,19 +319,37 @@ func (s *Store) Build(name, platform, arch string) (Artifact, error) {
 	if err != nil {
 		return Artifact{}, err
 	}
-	filename := fmt.Sprintf("%s-%s-%s-%s", p.Name, platform, arch, id[:8])
+	filename := id
 	if platform == "windows" {
 		filename += ".exe"
 	}
-	a := Artifact{ID: id, ProfileID: p.ID, Profile: p.Name, Server: p.Config.Server, Platform: platform, Architecture: arch, Filename: filename, Created: time.Now().UTC(), UndertowVersion: s.version, ProfileFormatVersion: p.Config.Version}
-	e := Embedded{Profile: p, ArtifactID: id, Platform: platform, Architecture: arch, Created: a.Created, UndertowVersion: s.version}
+	if len(requestedFilename) > 0 && requestedFilename[0] != "" {
+		filename = requestedFilename[0]
+		if !safeArtifactFilename(filename) || len(filename) > 128 || strings.ContainsAny(filename, "\r\n") || (platform == "windows" && !strings.HasSuffix(strings.ToLower(filename), ".exe")) {
+			return Artifact{}, errors.New("invalid artifact filename")
+		}
+	}
+	a := Artifact{ID: id, ProfileID: p.ID, Profile: p.Name, Server: p.Config.Server, Platform: platform, Architecture: arch, Filename: filename, Created: time.Now().UTC(), UndertowVersion: s.version, ProfileFormatVersion: EmbeddedFormatVersion}
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		return Artifact{}, err
+	}
+	configured := p.Config
+	configured.AuthMode = "artifact"
+	configured.Credential = secret
+	e := Embedded{ProfileID: p.ID, ArtifactID: id, Config: configured}
 	a.SHA256, a.Size, err = Stamp(path, filepath.Join(s.root, "artifacts", filename), e)
 	if err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return Artifact{}, fmt.Errorf("artifact filename %q already exists; choose a different filename", filename)
+		}
 		return Artifact{}, err
 	}
 	s.state.Artifacts[id] = a
+	s.state.EnrollmentSecrets[id] = hex.EncodeToString(secret)
 	if err := s.save(); err != nil {
 		delete(s.state.Artifacts, id)
+		delete(s.state.EnrollmentSecrets, id)
 		os.Remove(filepath.Join(s.root, "artifacts", filename))
 		return Artifact{}, err
 	}
@@ -319,6 +374,12 @@ func (s *Store) Artifact(id string) (Artifact, error) {
 		return Artifact{}, os.ErrNotExist
 	}
 	return a, nil
+}
+
+func (s *Store) ArtifactEnrollmentScoped(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.state.EnrollmentSecrets[id] != ""
 }
 func (s *Store) find(id string) (Artifact, bool) {
 	if a, ok := s.state.Artifacts[id]; ok {
@@ -349,7 +410,49 @@ func (s *Store) setHosted(id string, hosted bool) (Artifact, error) {
 		}
 	}
 	old := a
+	oldToken := s.state.RetrievalTokens[a.ID]
 	a.Hosted = hosted
+	if hosted && oldToken == "" {
+		token, err := ID()
+		if err != nil {
+			return Artifact{}, err
+		}
+		token2, err := ID()
+		if err != nil {
+			return Artifact{}, err
+		}
+		s.state.RetrievalTokens[a.ID] = token + token2
+	}
+	if !hosted {
+		delete(s.state.RetrievalTokens, a.ID)
+	}
+	s.state.Artifacts[a.ID] = a
+	if err := s.save(); err != nil {
+		s.state.Artifacts[a.ID] = old
+		if oldToken != "" {
+			s.state.RetrievalTokens[a.ID] = oldToken
+		} else {
+			delete(s.state.RetrievalTokens, a.ID)
+		}
+		return Artifact{}, err
+	}
+	return a, nil
+}
+func (s *Store) Host(id string) (Artifact, error)   { return s.setHosted(id, true) }
+func (s *Store) Unhost(id string) (Artifact, error) { return s.setHosted(id, false) }
+
+func (s *Store) Revoke(id string) (Artifact, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a, ok := s.find(id)
+	if !ok {
+		return Artifact{}, os.ErrNotExist
+	}
+	if s.state.EnrollmentSecrets[a.ID] == "" {
+		return Artifact{}, errors.New("legacy artifact has no dedicated credential; build a new artifact to use revocation")
+	}
+	old := a
+	a.Revoked = true
 	s.state.Artifacts[a.ID] = a
 	if err := s.save(); err != nil {
 		s.state.Artifacts[a.ID] = old
@@ -357,8 +460,46 @@ func (s *Store) setHosted(id string, hosted bool) (Artifact, error) {
 	}
 	return a, nil
 }
-func (s *Store) Host(id string) (Artifact, error)   { return s.setHosted(id, true) }
-func (s *Store) Unhost(id string) (Artifact, error) { return s.setHosted(id, false) }
+
+// VerifyEnrollment accepts the existing manual/client credential and active
+// artifact credentials. The artifact ID is propagated to the peer so an
+// artifact credential cannot be used for a VPN client session.
+func (s *Store) VerifyEnrollment(primary, auth, transcript []byte) ([16]byte, string, error) {
+	id, err := security.VerifyAuthSignature(auth, transcript)
+	if err != nil {
+		return [16]byte{}, "", err
+	}
+	if security.CheckEnrollmentMAC(primary, auth, transcript) {
+		return id, "", nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for artifactID, encoded := range s.state.EnrollmentSecrets {
+		a := s.state.Artifacts[artifactID]
+		if a.Revoked || encoded == "" {
+			continue
+		}
+		secret, err := hex.DecodeString(encoded)
+		if err != nil {
+			continue
+		}
+		if security.CheckEnrollmentMAC(secret, auth, transcript) {
+			return id, artifactID, nil
+		}
+	}
+	return [16]byte{}, "", security.ErrHandshake
+}
+
+func (s *Store) HostedToken(id string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a, ok := s.find(id)
+	if !ok || !a.Hosted || s.state.RetrievalTokens[a.ID] == "" {
+		return "", os.ErrNotExist
+	}
+	return s.state.RetrievalTokens[a.ID], nil
+}
+
 func (s *Store) DeleteArtifact(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -367,8 +508,18 @@ func (s *Store) DeleteArtifact(id string) error {
 		return os.ErrNotExist
 	}
 	delete(s.state.Artifacts, a.ID)
+	token := s.state.RetrievalTokens[a.ID]
+	delete(s.state.RetrievalTokens, a.ID)
+	secret := s.state.EnrollmentSecrets[a.ID]
+	delete(s.state.EnrollmentSecrets, a.ID)
 	if err := s.save(); err != nil {
 		s.state.Artifacts[a.ID] = a
+		if token != "" {
+			s.state.RetrievalTokens[a.ID] = token
+		}
+		if secret != "" {
+			s.state.EnrollmentSecrets[a.ID] = secret
+		}
 		return err
 	}
 	return os.Remove(filepath.Join(s.root, "artifacts", a.Filename))
@@ -376,11 +527,19 @@ func (s *Store) DeleteArtifact(id string) error {
 
 // OpenHosted checks the allowlist before opening an artifact. The returned file is
 // a fixed artifact path, never a path supplied by an HTTP caller.
-func (s *Store) OpenHosted(id, filename string) (Artifact, *os.File, error) {
+func (s *Store) OpenHosted(token string) (Artifact, *os.File, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	a, ok := s.state.Artifacts[id]
-	if !ok || !a.Hosted || a.Filename != filename {
+	var a Artifact
+	found := false
+	for id, candidate := range s.state.RetrievalTokens {
+		if candidate == token {
+			a = s.state.Artifacts[id]
+			found = true
+			break
+		}
+	}
+	if !found || !a.Hosted || len(token) != 48 {
 		return Artifact{}, nil, os.ErrNotExist
 	}
 	f, err := os.Open(filepath.Join(s.root, "artifacts", a.Filename))

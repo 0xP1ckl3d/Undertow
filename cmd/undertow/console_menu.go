@@ -75,9 +75,14 @@ func printConsoleOverview(output io.Writer, vpnClient, selected, serverAttached 
 	m.row("agent build NAME OS ARCH", "Stamp a prebuilt thin agent")
 	m.row("agent artifacts", "List generated artifacts")
 	m.row("agent host ID", "Expose an artifact over HTTPS")
+	m.row("agent unhost ID", "Disable its download URL")
+	m.row("agent revoke ID", "Disable its enrollment credential")
 
 	if selected {
 		m.section("AGENT SESSION")
+		m.row("agent events", "Show recent lifecycle events")
+		m.row("agent shutdown", "Gracefully stop this configured agent")
+		m.row("session kill", "Close this session; agent reconnects")
 		m.row("shell [PROGRAM ARGS]", "Live terminal; Ctrl-] returns here")
 		m.row("exec PROGRAM [ARGS]", "Run one program")
 		m.row("run-script [OPTIONS] FILE", "Run a local script on this agent")
@@ -126,6 +131,7 @@ func printConsoleOverview(output io.Writer, vpnClient, selected, serverAttached 
 			m.row("forward del BIND", "Close one forward")
 		}
 	} else {
+		m.row("client distribution-admin ID on|off", "Grant deployment management to one client")
 		m.section("SERVER ROUTING AND TOPOLOGY")
 		m.row("routes", "List server managed routes")
 		if selected {

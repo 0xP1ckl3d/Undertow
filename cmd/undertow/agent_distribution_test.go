@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -75,7 +76,7 @@ func TestAgentDistributionAPIAndRetrieval(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &a); err != nil {
 		t.Fatal(err)
 	}
-	if a.ProfileFormatVersion != 1 || a.UndertowVersion != "test" {
+	if a.ProfileFormatVersion != agentprofile.EmbeddedFormatVersion || a.UndertowVersion != "test" {
 		t.Fatalf("artifact version metadata missing: %+v", a)
 	}
 	w = call(http.MethodGet, "/v1/agent-artifacts", nil)
@@ -93,7 +94,10 @@ func TestAgentDistributionAPIAndRetrieval(t *testing.T) {
 	if !strings.HasPrefix(hosted.Retrieval, "https://127.0.0.2:443/.undertow/artifacts/") {
 		t.Fatal(hosted.Retrieval)
 	}
-	path := "/.undertow/artifacts/" + a.ID + "/" + a.Filename
+	path := strings.TrimPrefix(hosted.Retrieval, "https://127.0.0.2:443")
+	if strings.Contains(path, a.ID) || strings.Contains(path, "office") {
+		t.Fatal("retrieval URL leaked management metadata")
+	}
 	request := httptest.NewRequest(http.MethodGet, path, nil)
 	download := httptest.NewRecorder()
 	d.Retrieve(download, request)
@@ -103,6 +107,18 @@ func TestAgentDistributionAPIAndRetrieval(t *testing.T) {
 	sum := sha256.Sum256(download.Body.Bytes())
 	if hex.EncodeToString(sum[:]) != a.SHA256 {
 		t.Fatal("retrieval hash mismatch")
+	}
+	head := httptest.NewRecorder()
+	d.Retrieve(head, httptest.NewRequest(http.MethodHead, path, nil))
+	if head.Code != http.StatusOK || head.Body.Len() != 0 || head.Header().Get("X-Artifact-SHA256") != a.SHA256 {
+		t.Fatal("HEAD response did not match artifact metadata")
+	}
+	w = call(http.MethodPost, "/v1/agent-artifacts/"+a.ID+"/revoke", nil)
+	if w.Code != http.StatusOK {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"revoked":true`) {
+		t.Fatal("revocation missing from artifact record")
 	}
 	w = call(http.MethodDelete, "/v1/agent-artifacts/"+a.ID+"/host", nil)
 	if w.Code != http.StatusOK {
@@ -138,17 +154,63 @@ func TestDeployScriptsVerifyHashAndStartWithoutArguments(t *testing.T) {
 			t.Fatal("script supplies CLI agent options")
 		}
 	}
+	h.TLSSelfSigned = true
+	var out bytes.Buffer
+	if err := printDeployScript(&out, h, "powershell"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "ServicePointManager") || !strings.Contains(out.String(), "HttpClientHandler") || !strings.Contains(out.String(), "Get-FileHash") {
+		t.Fatal("self-signed PowerShell helper changed process-global TLS validation or skipped hash validation")
+	}
 }
 
 func TestConnectedArtifactMetadataShown(t *testing.T) {
 	var out bytes.Buffer
-	a := control.AgentInfo{ID: "agent-one", ArtifactIdentity: control.ArtifactIdentity{ProfileID: "profile-one", Profile: "office", ArtifactID: "artifact-one", UndertowVersion: "1.0"}}
+	a := control.AgentInfo{ID: "agent-one", ArtifactIdentity: control.ArtifactIdentity{ProfileID: "profile-one", Profile: "office", ArtifactID: "artifact-one", UndertowVersion: "1.0", ReconnectPolicy: "progressive", ReconnectAttempts: 3}}
 	if err := renderAgentShow(&out, a); err != nil {
 		t.Fatal(err)
 	}
-	for _, value := range []string{"office", "profile-one", "artifact-one", "1.0"} {
+	for _, value := range []string{"office", "profile-one", "artifact-one", "1.0", "progressive"} {
 		if !strings.Contains(out.String(), value) {
 			t.Fatalf("missing %s from show output", value)
 		}
+	}
+}
+
+func TestConsoleShutdownResolvesAgentNumber(t *testing.T) {
+	var method, path string
+	call := func(_ context.Context, m, p string, _ any) ([]byte, error) {
+		if p == "/v1/status" {
+			return []byte(`{"agents":[{"id":"agent-one","hostname":"TALON"}]}`), nil
+		}
+		method, path = m, p
+		return nil, nil
+	}
+	var out bytes.Buffer
+	if err := runConsoleAgentDistribution(context.Background(), &out, call, []string{"agent", "shutdown", "1"}); err != nil {
+		t.Fatal(err)
+	}
+	if method != http.MethodPost || path != "/v1/agents/agent-one/shutdown" || !strings.Contains(out.String(), "acknowledged") {
+		t.Fatalf("method=%s path=%s output=%s", method, path, out.String())
+	}
+}
+
+func TestConsoleEventsAcceptsOfflineAgentID(t *testing.T) {
+	id := strings.Repeat("a", 32)
+	call := func(_ context.Context, method, path string, _ any) ([]byte, error) {
+		if path == "/v1/status" {
+			return []byte(`{"agents":[]}`), nil
+		}
+		if method != http.MethodGet || path != "/v1/agents/"+id+"/events" {
+			t.Fatalf("unexpected request %s %s", method, path)
+		}
+		return []byte(`[{"kind":"disconnected","at":"2026-10-02T00:00:00Z"}]`), nil
+	}
+	var out bytes.Buffer
+	if err := runConsoleAgentDistribution(context.Background(), &out, call, []string{"agent", "events", id}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "disconnected") {
+		t.Fatal(out.String())
 	}
 }

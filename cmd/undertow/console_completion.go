@@ -108,7 +108,7 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 		if matches := wordCompletions(registry.names(), partial); len(matches) == 1 && partial != "" {
 			return matches
 		}
-		commands := []string{"agents", "agent", "use", "status", "routes", "help", "clear", "cls", "quit", "exit", "load", "unload", "bofs"}
+		commands := []string{"agents", "agent", "session", "use", "status", "routes", "help", "clear", "cls", "quit", "exit", "load", "unload", "bofs"}
 		commands = append(commands, registry.names()...)
 		if selected {
 			commands = append(commands, "show", "back", "route", "jobs", "job", "exec", "shell", "run-script", "run-wasm", "run-native", "run-bof", "pwd", "ls", "stat", "mkdir", "rm", "whoami", "ps", "privileges", "env", "interfaces", "dns", "route-table")
@@ -119,7 +119,7 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 				commands = append(commands, "forward", "upload", "download")
 			}
 		} else {
-			commands = append(commands, "transports", "topology", "start", "stop")
+			commands = append(commands, "transports", "topology", "start", "stop", "client")
 			if selected {
 				commands = append(commands, "relay")
 			}
@@ -130,9 +130,20 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 		return wordCompletions(commands, partial)
 	}
 	switch before[0] {
+	case "session":
+		if len(before) == 1 {
+			return wordCompletions([]string{"kill"}, partial)
+		}
+	case "client":
+		if len(before) == 1 && !vpn {
+			return wordCompletions([]string{"distribution-admin"}, partial)
+		}
+		if len(before) == 3 && before[1] == "distribution-admin" && !vpn {
+			return wordCompletions([]string{"on", "off"}, partial)
+		}
 	case "agent":
 		if len(before) == 1 {
-			return wordCompletions([]string{"profile", "build", "artifacts", "host", "hosted", "unhost", "delete", "deploy-script"}, partial)
+			return wordCompletions([]string{"profile", "build", "artifacts", "host", "hosted", "unhost", "revoke", "delete", "deploy-script", "shutdown", "events"}, partial)
 		}
 		if len(before) == 2 && before[1] == "profile" {
 			return wordCompletions([]string{"create", "list", "show", "edit", "delete"}, partial)

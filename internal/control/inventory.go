@@ -21,10 +21,12 @@ func SendInventory(ctx context.Context, streamMux *mux.Mux, explicit []string, c
 
 // ArtifactIdentity describes the configured binary, never its enrollment secret.
 type ArtifactIdentity struct {
-	ProfileID       string `json:"profile_id,omitempty"`
-	Profile         string `json:"profile,omitempty"`
-	ArtifactID      string `json:"artifact_id,omitempty"`
-	UndertowVersion string `json:"undertow_version,omitempty"`
+	ProfileID         string `json:"profile_id,omitempty"`
+	Profile           string `json:"profile,omitempty"`
+	ArtifactID        string `json:"artifact_id,omitempty"`
+	UndertowVersion   string `json:"undertow_version,omitempty"`
+	ReconnectPolicy   string `json:"reconnect_policy,omitempty"`
+	ReconnectAttempts uint32 `json:"reconnect_attempts,omitempty"`
 }
 
 func SendInventoryWithIdentity(ctx context.Context, streamMux *mux.Mux, explicit []string, caps pivot.Capabilities, identity ArtifactIdentity) error {

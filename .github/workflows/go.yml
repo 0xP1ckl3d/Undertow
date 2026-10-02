@@ -38,7 +38,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force bin | Out-Null
           go build -trimpath -buildvcs=false -ldflags='-s -w' -o bin/undertow.exe ./cmd/undertow
-          go build -trimpath -buildvcs=false -ldflags='-s -w' -o bin/undertow-agent-windows-amd64.exe ./cmd/undertow-agent
+          go build -trimpath -buildvcs=false -ldflags='-s -w -H=windowsgui' -o bin/undertow-agent-windows-amd64.exe ./cmd/undertow-agent
           go run ./tools/agentmanifest bin dev undertow-agent-windows-amd64.exe
       - name: Test configured agent over WebSocket, QUIC, and DNS
         if: matrix.os == 'windows-latest'

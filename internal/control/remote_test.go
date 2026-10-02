@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -91,6 +92,51 @@ func TestConnectedVPNClientHasLimitedAPI(t *testing.T) {
 	}
 }
 
+func TestServerGrantControlsClientDistributionMutations(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	a, b := make(chan []byte, 256), make(chan []byte, 256)
+	server := mux.New(ctx, &remoteTestTransport{in: a, out: b, done: make(chan struct{})}, true)
+	client := mux.New(ctx, &remoteTestTransport{in: b, out: a, done: make(chan struct{})}, false)
+	defer server.Close()
+	defer client.Close()
+	manager := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	var calls atomic.Int32
+	manager.SetAgentDistributionHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"name":"office"}`))
+	}))
+	var keys security.Keys
+	sess, err := session.New(704, keys, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.RegisterClient(&dns.Peer{Session: sess, AgentID: "client", Connected: time.Now()}, server, false, "")
+	go pivot.ServeVPNInteractive(ctx, server, manager.ResolveEgress, func() bool { return false }, func(ctx context.Context, stream *mux.Stream) {
+		manager.ServeRemote(ctx, "operator-secret", 704, stream)
+	})
+	if _, err := CallRemote(ctx, client, http.MethodPost, "/v1/agent-profiles", map[string]string{"name": "office"}); err == nil || !strings.Contains(err.Error(), "403") {
+		t.Fatalf("mutation without grant: %v", err)
+	}
+	if calls.Load() != 0 {
+		t.Fatal("distribution handler was reached without a grant")
+	}
+	if err := manager.SetClientDistributionAdmin(704, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CallRemote(ctx, client, http.MethodPost, "/v1/agent-profiles", map[string]string{"name": "office"}); err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 1 {
+		t.Fatal("granted mutation did not reach handler")
+	}
+	manager.UnregisterClient(704, server)
+	if _, err := CallRemote(ctx, client, http.MethodPost, "/v1/agent-profiles", map[string]string{"name": "office"}); err == nil || !strings.Contains(err.Error(), "403") {
+		t.Fatalf("grant survived disconnect: %v", err)
+	}
+}
+
 func TestRemoteResponseWaitsForRequestFin(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -139,6 +185,9 @@ func TestVPNClientJobPathsAreScopedToJobAPI(t *testing.T) {
 		{"POST", "/v1/jobs/abc", false},
 		{"DELETE", "/v1/jobs/abc", false},
 		{"GET", "/v1/routes", false},
+		{"POST", "/v1/agents/agent-a/shutdown", true},
+		{"GET", "/v1/agents/agent-a/events", true},
+		{"POST", "/v1/sessions/agent-a/kill", true},
 	} {
 		request, err := http.NewRequest(tc.method, "http://localhost"+tc.path, nil)
 		if err != nil {
@@ -150,7 +199,7 @@ func TestVPNClientJobPathsAreScopedToJobAPI(t *testing.T) {
 	}
 }
 
-func TestVPNClientCanManageAgentDistribution(t *testing.T) {
+func TestVPNClientDistributionIsReadOnlyByDefault(t *testing.T) {
 	for _, tc := range []struct{ method, path string }{
 		{http.MethodGet, "/v1/agent-profiles"},
 		{http.MethodPost, "/v1/agent-profiles"},
@@ -160,14 +209,16 @@ func TestVPNClientCanManageAgentDistribution(t *testing.T) {
 		{http.MethodGet, "/v1/agent-artifacts"},
 		{http.MethodPost, "/v1/agent-artifacts"},
 		{http.MethodPost, "/v1/agent-artifacts/abc/host"},
+		{http.MethodGet, "/v1/agent-artifacts/abc/host"},
 		{http.MethodDelete, "/v1/agent-artifacts/abc/host"},
 	} {
 		req, err := http.NewRequest(tc.method, "http://localhost"+tc.path, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !clientRequestAllowed(req, 705) {
-			t.Fatalf("distribution path denied: %s %s", tc.method, tc.path)
+		allowed := tc.method == http.MethodGet && !strings.HasSuffix(tc.path, "/host")
+		if clientRequestAllowed(req, 705) != allowed {
+			t.Fatalf("unexpected distribution access: %s %s", tc.method, tc.path)
 		}
 	}
 }
