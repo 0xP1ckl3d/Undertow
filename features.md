@@ -322,6 +322,8 @@ Agent: undertow agent --transport quic --server SERVER_IP:443 --tls-insecure-ski
 
 The interactive console preloads `.o`, `.module`, and `.wasm` artifacts from its local [`modules/` bank](docs/module-bank.md) as session commands. `load bof|module|wasm FILE [NAME]` adds a command during the session; `help NAME` displays sidecar help and `modules` lists everything loaded. The same command can run on any selected compatible agent.
 
+The native examples include [Sift](modules/native/sift/README.md) for controlled sensitive-data scanning and [askpass](modules/native/askpass/README.md) for an interactive Windows credential dialog. Askpass needs a visible user desktop and returns submitted values in module output; handle that output as sensitive data.
+
 ```text
 Server console: use 1
 Server console: run-native modules/native/wininfo/wininfo.module
