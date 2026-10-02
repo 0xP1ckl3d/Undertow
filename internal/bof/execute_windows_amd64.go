@@ -20,7 +20,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-//go:embed bridge/undertow_bof_bridge.dll
+//go:embed bridge/bridge.dll
 var bridgeDLL []byte
 
 type bofRun struct {
@@ -88,7 +88,7 @@ func Execute(ctx context.Context, object, args []byte, output func(bool, []byte)
 		return -1, err
 	}
 	defer os.RemoveAll(directory)
-	bridgePath := filepath.Join(directory, "undertow_bof_bridge.dll")
+	bridgePath := filepath.Join(directory, "module.dll")
 	if err := os.WriteFile(bridgePath, bridgeDLL, 0600); err != nil {
 		return -1, err
 	}

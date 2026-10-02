@@ -10,6 +10,7 @@
 *.elf
 *.exe
 *.dll
+!internal/bof/bridge/bridge.dll
 *.obj
 *.lib
 *.exp
