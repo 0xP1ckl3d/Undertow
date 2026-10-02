@@ -1,0 +1,5 @@
+{
+  "description": "Report Windows identity, elevation, privileges and adapters.",
+  "usage": "hostcheck",
+  "help": "Read-only Windows host assessment. No arguments required."
+}

@@ -97,6 +97,10 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 	}
 	selectedID, selectedLabel := "", ""
 	loadedBOFs := newLoadedBOFRegistry()
+	loadedArtifacts := newLoadedArtifactRegistry()
+	for _, err := range preloadModuleBank(loadedArtifacts, loadedBOFs) {
+		fmt.Fprintln(output, "module preload:", err)
+	}
 	var jobSelection consoleJobSelection
 	known := make(map[string]control.AgentInfo)
 	type agentRefresh struct {
@@ -132,6 +136,7 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 		editor = newConsoleEditor(output, vpnClient)
 		editor.serverAttached = serverConsole.serverAttached
 		editor.loadedBOFs = loadedBOFs
+		editor.loadedArtifacts = loadedArtifacts
 		go func() { scanDone <- editor.read(ctx, input, lines) }()
 	} else {
 		scanner := bufio.NewScanner(input)
@@ -297,13 +302,19 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 			if len(args) == 2 {
 				topic = args[1]
 			}
-			if err := printConsoleHelp(output, vpnClient, selectedID != "", serverConsole.serverAttached, topic, consoleHelpOptions{agent: selectedLabel, color: terminalOutput && os.Getenv("NO_COLOR") == "" && os.Getenv("TERM") != "dumb", loadedBOFs: loadedBOFs}); err != nil {
+			if err := printConsoleHelp(output, vpnClient, selectedID != "", serverConsole.serverAttached, topic, consoleHelpOptions{agent: selectedLabel, color: terminalOutput && os.Getenv("NO_COLOR") == "" && os.Getenv("TERM") != "dumb", loadedBOFs: loadedBOFs, loadedArtifacts: loadedArtifacts}); err != nil {
 				fmt.Fprintln(output, "error:", err)
 			}
 			continue
 		}
-		if args[0] == "load" || args[0] == "unload" || args[0] == "bofs" {
-			if err := runLoadedBOFManagement(output, loadedBOFs, args); err != nil {
+		if args[0] == "load" || args[0] == "unload" || args[0] == "bofs" || args[0] == "modules" {
+			var err error
+			if args[0] == "bofs" || len(args) > 1 && args[1] == "bof" {
+				err = runLoadedBOFManagement(output, loadedBOFs, args, loadedArtifacts)
+			} else {
+				err = runArtifactManagement(output, loadedArtifacts, loadedBOFs, args)
+			}
+			if err != nil {
 				fmt.Fprintln(output, "error:", err)
 			}
 			continue
@@ -357,6 +368,12 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 		}
 		if entry := loadedBOFs.get(args[0]); entry != nil {
 			if err := runLoadedBOF(ctx, output, editor, call, serverConsole.bof, entry, selectedID, selectedLabel, args[1:]); err != nil {
+				fmt.Fprintln(output, "error:", err)
+			}
+			continue
+		}
+		if entry := loadedArtifacts.get(args[0]); entry != nil {
+			if err := runLoadedArtifact(ctx, output, editor, call, serverConsole.native, serverConsole.wasm, entry, selectedID, selectedLabel, args[1:]); err != nil {
 				fmt.Fprintln(output, "error:", err)
 			}
 			continue

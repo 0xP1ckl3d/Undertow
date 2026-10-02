@@ -71,7 +71,9 @@ var builtinConsoleCommands = map[string]bool{
 	"interfaces": true, "dns": true, "route-table": true,
 	"upload": true, "download": true, "forward": true,
 	"internal": true, "vpn": true, "agent": true, "clients": true,
-	"load": true, "unload": true, "bofs": true,
+	"load": true, "unload": true, "bofs": true, "modules": true,
+	"payload": true, "session": true, "client": true,
+	"profile": true, "artifact": true, "artifacts": true,
 	"bof": true, "script": true, "scripts": true, "wasm": true,
 	"native": true, "hostops": true, "files": true,
 	"navigation": true, "routing": true, "transport": true,
@@ -119,7 +121,7 @@ func sidecarBOFManifest(path string) (bof.Manifest, string, bool, error) {
 	return bof.Manifest{}, "", false, nil
 }
 
-func (r *loadedBOFRegistry) load(path, name, explicitFormat string, hasFormat bool) (*loadedBOF, error) {
+func (r *loadedBOFRegistry) load(path, name, explicitFormat string, hasFormat bool, artifacts ...*loadedArtifactRegistry) (*loadedBOF, error) {
 	if name == "" {
 		name = deriveBOFCommandName(path)
 	}
@@ -130,6 +132,9 @@ func (r *loadedBOFRegistry) load(path, name, explicitFormat string, hasFormat bo
 		return nil, fmt.Errorf("%q is a built-in command", name)
 	}
 	if r.get(name) != nil {
+		return nil, fmt.Errorf("BOF command %q is already loaded; unload it first", name)
+	}
+	if len(artifacts) > 0 && artifacts[0].get(name) != nil {
 		return nil, fmt.Errorf("BOF command %q is already loaded; unload it first", name)
 	}
 	if hasFormat {
@@ -181,7 +186,7 @@ func (r *loadedBOFRegistry) unload(name string) error {
 	return nil
 }
 
-func runLoadedBOFManagement(output io.Writer, registry *loadedBOFRegistry, args []string) error {
+func runLoadedBOFManagement(output io.Writer, registry *loadedBOFRegistry, args []string, artifacts ...*loadedArtifactRegistry) error {
 	switch args[0] {
 	case "load":
 		if len(args) < 3 || args[1] != "bof" {
@@ -208,7 +213,7 @@ func runLoadedBOFManagement(output io.Writer, registry *loadedBOFRegistry, args 
 		if path == "" {
 			return errors.New("use load bof FILE [NAME] [--format FORMAT]")
 		}
-		entry, err := registry.load(path, name, format, hasFormat)
+		entry, err := registry.load(path, name, format, hasFormat, artifacts...)
 		if err != nil {
 			return err
 		}

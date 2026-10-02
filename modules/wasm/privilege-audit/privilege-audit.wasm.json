@@ -1,0 +1,5 @@
+{
+  "description": "Audit Windows policy and service path configuration.",
+  "usage": "privilege-audit",
+  "help": "Read-only privilege and configuration assessment."
+}

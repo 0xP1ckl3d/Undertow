@@ -18,7 +18,7 @@ import (
 
 func copyBOFFixture(t *testing.T, name string) string {
 	t.Helper()
-	object, err := os.ReadFile(filepath.Join("..", "..", "examples", "bof", name+".o"))
+	object, err := os.ReadFile(filepath.Join("..", "..", "modules", "bof", name+".o"))
 	if err != nil {
 		t.Fatal(err)
 	}

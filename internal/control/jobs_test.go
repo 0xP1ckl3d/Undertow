@@ -107,7 +107,7 @@ func TestPackagedWASMBackgroundJobOutput(t *testing.T) {
 	server, agent := forwardAuditAgent(t, ctx, manager, "example-agent", 821, pivot.DefaultCapabilities())
 	defer server.Close()
 	defer agent.Close()
-	module, err := os.ReadFile(filepath.Join("..", "..", "examples", "wasm", "triage", "triage.wasm"))
+	module, err := os.ReadFile(filepath.Join("..", "..", "modules", "wasm", "triage", "triage.wasm"))
 	if err != nil {
 		t.Fatal(err)
 	}

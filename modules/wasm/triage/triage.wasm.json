@@ -1,0 +1,5 @@
+{
+  "description": "Summarize host, user and privilege context.",
+  "usage": "triage",
+  "help": "Portable WASM host triage. No arguments required."
+}

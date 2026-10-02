@@ -13,7 +13,7 @@ import (
 
 func nativeFixture(t *testing.T) []byte {
 	t.Helper()
-	module, err := os.ReadFile(filepath.Join("..", "..", "examples", "native", "hello", "hello.module"))
+	module, err := os.ReadFile(filepath.Join("..", "..", "modules", "native", "hello", "hello.module"))
 	if err != nil {
 		t.Fatal(err)
 	}

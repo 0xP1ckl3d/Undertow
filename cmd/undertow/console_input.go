@@ -11,19 +11,20 @@ import (
 )
 
 type consoleEditor struct {
-	mu             sync.Mutex
-	output         io.Writer
-	prompt         string
-	selected       bool
-	vpn            bool
-	serverAttached bool
-	loadedBOFs     *loadedBOFRegistry
-	line           []rune
-	cursor         int
-	history        []string
-	historyAt      int
-	rawInput       chan byte
-	rawDetach      chan struct{}
+	mu              sync.Mutex
+	output          io.Writer
+	prompt          string
+	selected        bool
+	vpn             bool
+	serverAttached  bool
+	loadedBOFs      *loadedBOFRegistry
+	loadedArtifacts *loadedArtifactRegistry
+	line            []rune
+	cursor          int
+	history         []string
+	historyAt       int
+	rawInput        chan byte
+	rawDetach       chan struct{}
 }
 
 func (e *consoleEditor) beginInteractive() (<-chan byte, <-chan struct{}) {

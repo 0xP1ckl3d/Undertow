@@ -1,0 +1,5 @@
+{
+  "description": "Print process ID and demonstrate BeaconPrintf and BeaconOutput.",
+  "usage": "hello",
+  "help": "No arguments. Uses a generic Windows API import."
+}

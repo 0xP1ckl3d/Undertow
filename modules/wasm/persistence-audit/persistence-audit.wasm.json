@@ -1,0 +1,5 @@
+{
+  "description": "Inspect service startup and user autoruns.",
+  "usage": "persistence-audit",
+  "help": "Read-only persistence audit."
+}

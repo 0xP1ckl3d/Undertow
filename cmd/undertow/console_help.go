@@ -31,6 +31,10 @@ func printConsoleHelp(output io.Writer, vpnClient, selected, serverAttached bool
 			printLoadedBOFHelp(output, entry)
 			return nil
 		}
+		if entry := options[0].loadedArtifacts.get(topic); entry != nil {
+			printLoadedArtifactHelp(output, entry)
+			return nil
+		}
 	}
 	switch topic {
 	case "payload", "profile", "artifact", "artifacts", "retrieval-path":
@@ -53,11 +57,14 @@ grant for changes. Profile and payload views never show enrollment secrets.
   session kill AGENT_ID          Close only its session; it may reconnect.
 For deployment binaries, use payload and type help payload for the workflow.
 `)
-	case "load", "unload", "bofs":
-		fmt.Fprint(output, `Loaded BOF commands (local to this console session):
+	case "load", "unload", "bofs", "modules":
+		fmt.Fprint(output, `Loaded module commands (local to this console session):
   load bof FILE [NAME] [--format FORMAT]
-  unload bof NAME
+  load module FILE [NAME]
+  load wasm FILE [NAME]
+  unload bof|module|wasm NAME
   bofs
+  modules
 Load validates the object and an optional FILE.o.json or FILE.json sidecar.
 Without a sidecar or --format, the argument schema is unspecified and supplied
 arguments are encoded as ANSI strings. Use --format or a sidecar for typed
@@ -73,6 +80,7 @@ Here zi encodes server01 as z and 5 as i. An explicit --format overrides the
 sidecar argument list. A sidecar uses argument types int, short, string,
 wstring, or binary. Type help NAME after loading for that BOF's usage.
 Select an agent and type the loaded command name to execute it.
+Packaged artifacts in modules/ load automatically at console startup.
 `)
 	case "help", "navigation", "agents", "use", "back", "show", "status":
 		fmt.Fprint(output, `Navigation and inspection:

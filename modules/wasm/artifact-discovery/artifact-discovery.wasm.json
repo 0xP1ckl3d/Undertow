@@ -1,0 +1,5 @@
+{
+  "description": "Find interesting file names and metadata under a chosen root.",
+  "usage": "artifact-discovery [ROOT]",
+  "help": "Optional ROOT is an agent-side path. Use --stdin FILE for extra file-name patterns."
+}

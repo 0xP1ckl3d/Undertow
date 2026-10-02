@@ -56,6 +56,14 @@ __declspec(dllexport) void BeaconDataParse(datap *parser, char *buffer, int size
     parser->original = buffer + 4; parser->buffer = buffer + 4;
     parser->length = (int)declared; parser->size = (int)declared;
 }
+__declspec(dllexport) char *BeaconDataPtr(datap *parser, int size) {
+    char *value;
+    if (!parser || !parser->buffer || size < 0 || size > parser->length) return NULL;
+    value = parser->buffer;
+    parser->buffer += size;
+    parser->length -= size;
+    return value;
+}
 __declspec(dllexport) int BeaconDataInt(datap *parser) {
     int value;
     if (!parser || parser->length < 4) return 0;

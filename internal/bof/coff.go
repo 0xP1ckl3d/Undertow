@@ -54,7 +54,7 @@ type Compatibility struct {
 
 var beaconNames = map[string]bool{
 	"BeaconPrintf": true, "BeaconOutput": true,
-	"BeaconDataParse": true, "BeaconDataInt": true, "BeaconDataShort": true, "BeaconDataExtract": true, "BeaconDataLength": true,
+	"BeaconDataParse": true, "BeaconDataPtr": true, "BeaconDataInt": true, "BeaconDataShort": true, "BeaconDataExtract": true, "BeaconDataLength": true,
 	"BeaconFormatAlloc": true, "BeaconFormatReset": true, "BeaconFormatFree": true, "BeaconFormatAppend": true,
 	"BeaconFormatPrintf": true, "BeaconFormatToString": true, "BeaconFormatInt": true,
 }
@@ -303,6 +303,15 @@ func ClassifyImport(name string) (Import, string, error) {
 	if ok && library != "" && export != "" && !strings.ContainsAny(library, "/\\.:\x00") && !strings.ContainsAny(export, "/\\$\x00") {
 		imp.Library = library + ".dll"
 		imp.Export = export
+		return imp, "windows", nil
+	}
+	// COFF does not record the import library for a plain __imp_FunctionName.
+	// These are the small, well-known loader functions commonly emitted by
+	// Windows SDK declarations. Other Windows APIs must use DLL$Export.
+	switch bare {
+	case "GetModuleHandleA", "LoadLibraryA", "GetProcAddress", "FreeLibrary":
+		imp.Library = "kernel32.dll"
+		imp.Export = bare
 		return imp, "windows", nil
 	}
 	return imp, "", fmt.Errorf("unsupported external symbol: %s", name)

@@ -76,6 +76,8 @@ No agent listens for children until `relay start` succeeds. The omitted bind def
 
 Agent numbers can change after connections change. Run `agents` again before selecting by number. Type `help` after `use` to see that agent's menu. Quote a path or argument containing spaces with single or double quotes. The console parses quotes; it does not expand shell variables or run shell syntax.
 
+At startup the console loads packaged BOFs, native modules, and WASM modules from the local `modules/` directory. Type `help` to see them, then `help bof-hello`, `help module-wininfo`, or `help wasm-triage` for usage. Loaded commands can run against any selected agent and can use trailing `--background`. See [local module bank](module-bank.md) for where to place additional artifacts and sidecar help files.
+
 When input is an interactive terminal, Up and Down recall commands. Help uses colour on supported terminals and honours `NO_COLOR`. Tab completes command names and local file paths for `run-script`, `run-wasm` (including `--stdin`), `run-native` (including `--data`), `upload`, and the local destination of `download`. Paths are read from the **console host**, not the agent; remote file arguments do not use local path completion. Tab can enter directories and complete quoted names containing spaces. `help TOPIC` and `route`/`relay` subcommands also complete. The consoles announce an agent connection or loss without flooding the prompt with routine transport logs. In the VPN client console, Ctrl+C asks for confirmation before stopping the VPN.
 
 ## Server console
@@ -106,6 +108,8 @@ background
 | `run-bof [--background] [--format FORMAT] OBJECT.o [ARGS]` | Selected Windows amd64 agent | Load a compatible BOF COFF object with Beacon API imports. Output streams live or enters `jobs`. |
 | `load bof FILE [NAME] [--format FORMAT]` | Any console menu | Register a BOF as a local command for this console session. |
 | `bofs`; `unload bof NAME` | Any console menu | List or remove local BOF commands. |
+| `load module FILE [NAME]`; `load wasm FILE [NAME]` | Any console menu | Register a native or WASM module as a local command. |
+| `modules`; `unload module|wasm NAME` | Any console menu | List all loaded artifacts or remove a native/WASM command. |
 | `job start PROGRAM [ARGS]` | Selected agent | Start a task that keeps running while you use or detach the console. |
 | `jobs` | Either menu | List numbered tasks; inside an agent, list that agent's tasks. |
 | `jobs NUMBER` | Either menu | Show a task from the last `jobs` list. |

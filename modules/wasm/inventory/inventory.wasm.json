@@ -1,0 +1,5 @@
+{
+  "description": "List processes, services, connections and neighbours.",
+  "usage": "inventory [FILTER]",
+  "help": "Optional FILTER narrows output lines, for example tcp."
+}

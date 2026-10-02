@@ -1,0 +1,5 @@
+{
+  "description": "Inspect domain environment, DNS and OS policy locations.",
+  "usage": "enterprise-posture",
+  "help": "Read-only enterprise posture report."
+}

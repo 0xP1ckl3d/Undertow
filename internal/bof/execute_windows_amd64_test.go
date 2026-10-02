@@ -19,6 +19,7 @@ func TestExecuteCorpus(t *testing.T) {
 		{"hello", "", nil, "hello BOF pid="},
 		{"arguments", "iszZb", []string{"123", "-7", "hello", "雪", "base64:AP8="}, "int=123 short=-7 ansi=hello wide0=96ea binary=2 remain=0"},
 		{"imports", "", nil, "imports pid="},
+		{"loaderimports", "i", []string{"0x01020304"}, "loader imports pid="},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			object := fixture(t, tc.name)

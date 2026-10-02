@@ -156,6 +156,12 @@ func bofCommand(args []string, output io.Writer) error {
 	for _, imp := range compat.BeaconImports {
 		fmt.Fprintln(output, imp.Name)
 	}
+	if len(compat.UnknownImports) > 0 {
+		fmt.Fprintln(output, "\nUnresolved Symbols\n------------------")
+		for _, imp := range compat.UnknownImports {
+			fmt.Fprintln(output, imp.Name)
+		}
+	}
 	if compat.Supported {
 		fmt.Fprintln(output, "\nCompatibility : Supported")
 	} else {

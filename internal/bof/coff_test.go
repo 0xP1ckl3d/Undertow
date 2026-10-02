@@ -11,14 +11,18 @@ import (
 
 func fixture(t *testing.T, name string) []byte {
 	t.Helper()
-	b, err := os.ReadFile(filepath.Join("..", "..", "examples", "bof", name+".o"))
+	path := filepath.Join("..", "..", "modules", "bof", name+".o")
+	if name == "unsupported_imports" {
+		path = filepath.Join("testdata", name+".o")
+	}
+	b, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return b
 }
 func TestParseCorpus(t *testing.T) {
-	for _, name := range []string{"hello", "arguments", "imports"} {
+	for _, name := range []string{"hello", "arguments", "imports", "loaderimports"} {
 		t.Run(name, func(t *testing.T) {
 			c, err := Parse(fixture(t, name))
 			if err != nil {
@@ -117,9 +121,20 @@ func TestImportCompatibility(t *testing.T) {
 	for _, tc := range []struct{ name, kind, want string }{
 		{"KERNEL32$GetCurrentProcessId", "windows", "kernel32.dll"},
 		{"__imp_ADVAPI32$OpenProcessToken", "windows", "advapi32.dll"},
+		{"__imp_NETAPI32$DsGetDcNameA", "windows", "netapi32.dll"},
+		{"__imp_KERNEL32$CreateFileW", "windows", "kernel32.dll"},
 		{"NETAPI32$NetUserEnum", "windows", "netapi32.dll"},
 		{"IPHLPAPI$GetAdaptersAddresses", "windows", "iphlpapi.dll"},
 		{"BeaconDataParse", "beacon", "BeaconDataParse"},
+		{"__imp_BeaconDataPtr", "beacon", "BeaconDataPtr"},
+		{"GetModuleHandleA", "windows", "kernel32.dll"},
+		{"__imp_GetModuleHandleA", "windows", "kernel32.dll"},
+		{"LoadLibraryA", "windows", "kernel32.dll"},
+		{"__imp_LoadLibraryA", "windows", "kernel32.dll"},
+		{"GetProcAddress", "windows", "kernel32.dll"},
+		{"__imp_GetProcAddress", "windows", "kernel32.dll"},
+		{"FreeLibrary", "windows", "kernel32.dll"},
+		{"__imp_FreeLibrary", "windows", "kernel32.dll"},
 	} {
 		imp, kind, err := ClassifyImport(tc.name)
 		if err != nil || kind != tc.kind {
@@ -132,12 +147,40 @@ func TestImportCompatibility(t *testing.T) {
 		if !strings.EqualFold(got, tc.want) {
 			t.Fatalf("%s: %s", tc.name, got)
 		}
+		if imp.Indirect != strings.HasPrefix(tc.name, "__imp_") {
+			t.Fatalf("%s: indirect=%t", tc.name, imp.Indirect)
+		}
+	}
+	if _, _, err := ClassifyImport("__imp_CreateFileW"); err == nil || !strings.Contains(err.Error(), "unsupported external") {
+		t.Fatalf("unknown plain indirect import: %v", err)
 	}
 	if _, _, err := ClassifyImport("BeaconMissing"); err == nil || !strings.Contains(err.Error(), "unsupported Beacon API") {
 		t.Fatalf("unsupported Beacon import: %v", err)
 	}
 	if _, _, err := ClassifyImport("missing_external"); err == nil || !strings.Contains(err.Error(), "unsupported external") {
 		t.Fatalf("unsupported external: %v", err)
+	}
+}
+
+func TestInspectReportsEveryUnsupportedExternal(t *testing.T) {
+	compat, err := Parse(fixture(t, "unsupported_imports"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if compat.Supported {
+		t.Fatal("unsupported fixture was accepted")
+	}
+	for _, symbol := range []string{"__imp_MissingPlainImport", "BeaconUnsupportedHelper", "OtherUnknownExternal"} {
+		found := false
+		for _, imp := range compat.UnknownImports {
+			if imp.Name == symbol {
+				found = true
+				break
+			}
+		}
+		if !found || !strings.Contains(strings.Join(compat.Errors, "\n"), symbol) {
+			t.Fatalf("missing %s in %+v", symbol, compat)
+		}
 	}
 }
 

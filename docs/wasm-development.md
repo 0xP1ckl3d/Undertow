@@ -1,21 +1,25 @@
 # Developing Undertow WASM modules
 
-Undertow runs a `wasip1/wasm` module in memory on the selected agent. The agent receives the compiled bytes through the Undertow session, instantiates them with wazero, and discards the instance when it exits. The target needs no Go toolchain, interpreter, module file, or native executable loader. Every module, including the [packaged examples](../examples/wasm/README.md), gets the same host imports. Host operations run with the operating system privileges of the agent process.
+Undertow runs a `wasip1/wasm` module in memory on the selected agent. The agent receives the compiled bytes through the Undertow session, instantiates them with wazero, and discards the instance when it exits. The target needs no Go toolchain, interpreter, module file, or native executable loader. Every module, including the [packaged examples](../modules/wasm/README.md), gets the same host imports. Host operations run with the operating system privileges of the agent process.
+
+For repeated use, place a `.wasm` file and optional help sidecar in the local [module bank](module-bank.md). The console preloads packaged WASM modules as commands such as `wasm-triage`; `load wasm FILE [NAME]` registers one during a session.
+
+For repeated use, place a `.wasm` file and optional help sidecar in the local [module bank](module-bank.md). The console preloads packaged WASM modules as commands such as `wasm-triage`; `load wasm FILE [NAME]` registers one during a session.
 
 ## Quick start
 
 From the repository root, build one example with Go 1.25 or later:
 
 ```sh
-GOOS=wasip1 GOARCH=wasm go build -trimpath -ldflags=-buildid= -o examples/wasm/triage/triage.wasm ./examples/wasm/triage
+GOOS=wasip1 GOARCH=wasm go build -trimpath -ldflags=-buildid= -o modules/wasm/triage/triage.wasm ./modules/wasm/triage
 ```
 
 In an Undertow server or VPN client console, select an agent and run:
 
 ```text
 use 1
-run-wasm examples/wasm/triage/triage.wasm
-run-wasm --background examples/wasm/triage/triage.wasm
+run-wasm modules/wasm/triage/triage.wasm
+run-wasm --background modules/wasm/triage/triage.wasm
 job output JOB_ID
 ```
 
@@ -107,14 +111,14 @@ The `windows.*` audit operations are read-only and Windows-only. Page through `w
 
 ## Write and build a custom module
 
-Go's WASI target offers a small way to use the ABI. From a clone of this repository, create `examples/wasm/my-audit/main.go`:
+Go's WASI target offers a small way to use the ABI. From a clone of this repository, create `modules/wasm/my-audit/main.go`:
 
 ```go
 package main
 
 import (
     "fmt"
-    "undertow/examples/wasm/hostapi"
+    "undertow/modules/wasm/hostapi"
 )
 
 func main() {
@@ -127,10 +131,10 @@ func main() {
 Build once on your development machine:
 
 ```sh
-GOOS=wasip1 GOARCH=wasm go build -trimpath -ldflags=-buildid= -o my-audit.wasm ./examples/wasm/my-audit
+GOOS=wasip1 GOARCH=wasm go build -trimpath -ldflags=-buildid= -o my-audit.wasm ./modules/wasm/my-audit
 ```
 
-The [Go wrapper source](../examples/wasm/hostapi/hostapi.go) shows the direct `//go:wasmimport` declarations and JSON buffer handling. A Rust module can import the same functions with `#[link(wasm_import_module = "undertow_host_v1")] extern "C"` and build for `wasm32-wasip1`; the two C signatures above are the language-neutral contract. Keep output buffers at or below 64 KiB and inspect negative returns. The `.wasm` artifact is portable across supported agent operating systems, though specific operations and examples can vary by platform.
+The [Go wrapper source](../modules/wasm/hostapi/hostapi.go) shows the direct `//go:wasmimport` declarations and JSON buffer handling. A Rust module can import the same functions with `#[link(wasm_import_module = "undertow_host_v1")] extern "C"` and build for `wasm32-wasip1`; the two C signatures above are the language-neutral contract. Keep output buffers at or below 64 KiB and inspect negative returns. The `.wasm` artifact is portable across supported agent operating systems, though specific operations and examples can vary by platform.
 
 For a local smoke test with an in-process Undertow agent, run:
 

@@ -1,0 +1,5 @@
+{
+  "description": "Show native module arguments, output, status and cancellation.",
+  "usage": "hello [ARGS...] [--wait] [--fail]",
+  "help": "Use --wait for a cancellable run or --fail to return status 7. Add --data FILE for binary input."
+}

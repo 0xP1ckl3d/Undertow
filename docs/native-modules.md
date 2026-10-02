@@ -2,6 +2,8 @@
 
 Native modules complement [WASM modules](wasm-development.md). WASM uses portable `wasip1/wasm` code and `undertow_host_v1` imports. Native modules target a specific OS and architecture, use ordinary platform APIs, and use `undertow_native_v1` only for Undertow output, arguments, cancellation, and run information. [BOF compatibility](bof-compatibility.md) is a third extension path for existing AMD64 COFF `.o` files with the Beacon ABI; those run with `run-bof`, while Undertow `.module` DLLs run with `run-native`. Native code has the agent process's privileges and shares its address space; use modules you trust. A native crash can terminate the agent process.
 
+For repeated use, place a `.module` file and optional help sidecar in the local [module bank](module-bank.md). The console preloads packaged native modules as commands such as `module-wininfo`; `load module FILE [NAME]` registers one during a session.
+
 ## Supported format and build
 
 The initial target is **Windows amd64**. The payload is an ordinary PE32+ x64 DLL. Undertow wraps it in a small `.module` container with explicit metadata. The format is `UTN1`, a little-endian `uint32` JSON metadata length (at most 4096), compact UTF-8 JSON metadata, then the complete DLL bytes. Metadata contains `name`, `version`, `runtime: "native"`, `os: "windows"`, `arch: "amd64"`, `abi: "undertow_native_v1"`, and optional `description`. The container size is at most 8 MiB. The same metadata fields leave room for Windows arm64 and Linux variants in the operator command without changing `run-native`.
@@ -9,7 +11,7 @@ The initial target is **Windows amd64**. The payload is an ordinary PE32+ x64 DL
 Use an x64 MSVC Developer PowerShell with the Windows SDK and Go 1.25 or newer:
 
 ```powershell
-./examples/native/build.ps1
+./modules/native/build.ps1
 ```
 
 The script compiles with `cl.exe /LD /MT /O2 /W4`, links `kernel32.lib`, then invokes `go run ./tools/nativepack` to produce the `.module` file. It removes intermediate DLL, object, export, and import-library files. A custom module can use the same pattern:
@@ -46,9 +48,9 @@ Arguments are deterministic and binary safe: little-endian `uint32 argc`, then f
 
 ```text
 use 1
-run-native examples/native/hello/hello.module one "two words"
-run-native --data payload.bin examples/native/hello/hello.module
-run-native --background examples/native/hello/hello.module --wait
+run-native modules/native/hello/hello.module one "two words"
+run-native --data payload.bin modules/native/hello/hello.module
+run-native --background modules/native/hello/hello.module --wait
 jobs
 job output 1
 job stop 1
@@ -62,4 +64,4 @@ The runtime writes the DLL to a private temporary directory, calls Windows `Load
 
 Useful errors include `invalid native module container`, `unsupported module architecture`, `unsupported native ABI`, `missing native entry point undertow_main`, `load native module`, `native module returned non-zero status`, and `native module: context canceled`. A malformed container fails before execution. Unsupported metadata OS, architecture and ABI fail on the agent before loading. A missing DLL import fails during `LoadLibraryEx`; an absent exported entry fails during `GetProcAddress`. The current compatibility subset is Windows x64 PE32+ DLLs built with MSVC x64 `/LD /MT`, standard System32 DLL imports, and a single exported entry point.
 
-See [the examples](../examples/native/README.md) for `hello`, `wininfo`, and `hostcheck`. The latter two demonstrate direct Windows APIs rather than extra Undertow host operations.
+See [the examples](../modules/native/README.md) for `hello`, `wininfo`, and `hostcheck`. The latter two demonstrate direct Windows APIs rather than extra Undertow host operations.

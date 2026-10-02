@@ -10,6 +10,8 @@ The console also supports `run-bof [--background] [--format FORMAT] [--manifest 
 
 `load bof FILE [NAME] [--format FORMAT]` registers a BOF as a command in the current interactive console process; `bofs` lists registrations and `unload bof NAME` removes one. A sidecar `FILE.o.json` or `FILE.json` supplies argument types and help automatically. After `use NUMBER`, invoke the loaded alias directly, with optional trailing `--background`. `help` and Tab completion include loaded commands. The same registration works with any selected agent and disappears when the console process exits.
 
+`load module FILE [NAME]` and `load wasm FILE [NAME]` register native and WASM commands in the same console session; `modules` lists all three kinds and `unload module|wasm NAME` removes one. Undertow automatically preloads runnable `.o`, `.module`, and `.wasm` files in the local `modules/` directory when the console starts. `UNDERTOW_MODULES_DIR` selects another bank. Packaged commands use names such as `bof-hello`, `module-wininfo`, and `wasm-triage`; type `help NAME` for their usage. See [local module bank](module-bank.md) for placement, sidecars, and naming rules.
+
 Run `undertow help` or `undertow help COMMAND` for terminal help. Linux binary: `./bin/undertow`; Windows binary: `.\bin\undertow.exe`. This page describes the current command line. Paths are relative to the process working directory unless absolute.
 
 Run `undertow examples` (or `undertow help examples`) for short commands by host covering server pivots, internal-only clients, VPN egress, combined routing, and a single TCP forward. For verification and cleanup, see the [quickstart](quickstart.md).

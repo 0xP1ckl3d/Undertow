@@ -39,7 +39,7 @@ func TestPackagedWASMExamplesOnAgent(t *testing.T) {
 	} {
 		name := tc.name
 		t.Run(name, func(t *testing.T) {
-			path := filepath.Join("..", "..", "examples", "wasm", name, name+".wasm")
+			path := filepath.Join("..", "..", "modules", "wasm", name, name+".wasm")
 			module, err := os.ReadFile(path)
 			if err != nil {
 				t.Fatal(err)

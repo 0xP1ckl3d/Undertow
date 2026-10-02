@@ -1,0 +1,5 @@
+{
+  "description": "Read Windows computer, process and memory information.",
+  "usage": "wininfo",
+  "help": "Uses ordinary Windows APIs. No arguments required."
+}

@@ -1,0 +1,5 @@
+{
+  "description": "Scan local or accessible network files using the packaged Sift rules.",
+  "usage": "sift local PATH [OPTIONS]",
+  "help": "Run sift --help for modes and options. See modules/native/sift/README.md."
+}

@@ -23,7 +23,7 @@ func (e *consoleEditor) complete() {
 		return
 	}
 	start, before, partial, quote := completionWords(e.line)
-	matches := consoleCompletions(before, partial, quote, e.selected, e.vpn, e.serverAttached, e.loadedBOFs)
+	matches := consoleCompletions(before, partial, quote, e.selected, e.vpn, e.serverAttached, e.loadedBOFs, e.loadedArtifacts)
 	if len(matches) == 0 {
 		return
 	}
@@ -99,17 +99,24 @@ func completionWords(line []rune) (start int, before []string, partial string, o
 	return start, before, string(word), openingQuote
 }
 
-func consoleCompletions(before []string, partial string, quote rune, selected, vpn, attached bool, registries ...*loadedBOFRegistry) []consoleCompletion {
+func consoleCompletions(before []string, partial string, quote rune, selected, vpn, attached bool, registries ...any) []consoleCompletion {
 	var registry *loadedBOFRegistry
-	if len(registries) > 0 {
-		registry = registries[0]
+	var artifacts *loadedArtifactRegistry
+	for _, item := range registries {
+		switch value := item.(type) {
+		case *loadedBOFRegistry:
+			registry = value
+		case *loadedArtifactRegistry:
+			artifacts = value
+		}
 	}
+	loadedNames := append(registry.names(), artifacts.names()...)
 	if len(before) == 0 {
-		if matches := wordCompletions(registry.names(), partial); len(matches) == 1 && partial != "" {
+		if matches := wordCompletions(loadedNames, partial); len(matches) == 1 && partial != "" {
 			return matches
 		}
-		commands := []string{"agents", "agent", "payload", "session", "use", "status", "routes", "help", "clear", "cls", "quit", "exit", "load", "unload", "bofs"}
-		commands = append(commands, registry.names()...)
+		commands := []string{"agents", "agent", "payload", "session", "use", "status", "routes", "help", "clear", "cls", "quit", "exit", "load", "unload", "bofs", "modules"}
+		commands = append(commands, loadedNames...)
 		if selected {
 			commands = append(commands, "show", "back", "route", "jobs", "job", "exec", "shell", "run-script", "run-wasm", "run-native", "run-bof", "pwd", "ls", "stat", "mkdir", "rm", "whoami", "ps", "privileges", "env", "interfaces", "dns", "route-table")
 		}
@@ -169,20 +176,29 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 		}
 	case "load":
 		if len(before) == 1 {
-			return wordCompletions([]string{"bof"}, partial)
+			return wordCompletions([]string{"bof", "module", "wasm"}, partial)
 		}
-		if len(before) == 2 && before[1] == "bof" {
+		if len(before) == 2 && (before[1] == "bof" || before[1] == "module" || before[1] == "wasm") {
 			return localPathCompletions(partial, quote, false)
 		}
-		if strings.HasPrefix(partial, "--") {
+		if before[1] == "bof" && strings.HasPrefix(partial, "--") {
 			return wordCompletions([]string{"--format"}, partial)
 		}
 	case "unload":
 		if len(before) == 1 {
-			return wordCompletions([]string{"bof"}, partial)
+			return wordCompletions([]string{"bof", "module", "wasm"}, partial)
 		}
 		if len(before) == 2 && before[1] == "bof" {
 			return wordCompletions(registry.names(), partial)
+		}
+		if len(before) == 2 && (before[1] == "module" || before[1] == "wasm") {
+			var names []string
+			for _, name := range artifacts.names() {
+				if artifacts.get(name).Kind == before[1] {
+					names = append(names, name)
+				}
+			}
+			return wordCompletions(names, partial)
 		}
 	case "vpn", "internal":
 		if vpn && len(before) == 1 {
@@ -206,8 +222,8 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 		}
 	case "help":
 		if len(before) == 1 {
-			topics := []string{"agents", "agent", "payload", "profile", "artifacts", "status", "route", "lifecycle", "clear", "load", "unload", "bofs"}
-			topics = append(topics, registry.names()...)
+			topics := []string{"agents", "agent", "payload", "profile", "artifacts", "status", "route", "lifecycle", "clear", "load", "unload", "bofs", "modules"}
+			topics = append(topics, loadedNames...)
 			if selected {
 				topics = append(topics, "shell", "exec", "run-script", "run-wasm", "run-native", "run-bof", "jobs", "host")
 			}

@@ -1,0 +1,14 @@
+{
+  "name": "loaderimports",
+  "description": "Exercise indirect runtime loader imports and BeaconDataPtr",
+  "usage": "loaderimports <number>",
+  "help": "The integer is read through BeaconDataPtr; the BOF also calls Windows loader APIs.",
+  "entrypoint": "go",
+  "arguments": [
+    {
+      "name": "number",
+      "type": "int",
+      "required": true
+    }
+  ]
+}

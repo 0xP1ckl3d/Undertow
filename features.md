@@ -295,7 +295,7 @@ Server console: run-script powershell ./audit.ps1
 
 ### In-process WebAssembly execution
 
-`run-wasm` sends a WASI module through Undertow and instantiates it directly from memory in the agent's pure-Go runtime. It needs no temporary module file. The console can supply arguments and optional stdin; stdout and stderr stream separately. Background WASM runs use the same job manager, including bounded retained output and cancellation. The independent `wasm` capability controls this operation. Agent limits are a 4 MiB module, 64 KiB stdin, 16 MiB guest linear memory, 4 MiB combined output, a two-minute runtime and two simultaneous runs. No filesystem is preopened and no WASI network socket is supplied to the guest. Any module can call the versioned `undertow_host_v1` imports for agent-side system, identity, process, filesystem, network and startup assessment. See the [WASM developer guide](docs/wasm-development.md) and [packaged examples](examples/wasm/README.md).
+`run-wasm` sends a WASI module through Undertow and instantiates it directly from memory in the agent's pure-Go runtime. It needs no temporary module file. The console can supply arguments and optional stdin; stdout and stderr stream separately. Background WASM runs use the same job manager, including bounded retained output and cancellation. The independent `wasm` capability controls this operation. Agent limits are a 4 MiB module, 64 KiB stdin, 16 MiB guest linear memory, 4 MiB combined output, a two-minute runtime and two simultaneous runs. No filesystem is preopened and no WASI network socket is supplied to the guest. Any module can call the versioned `undertow_host_v1` imports for agent-side system, identity, process, filesystem, network and startup assessment. See the [WASM developer guide](docs/wasm-development.md) and [packaged examples](modules/wasm/README.md).
 
 ```text
 VPN client console: use 1
@@ -308,12 +308,14 @@ Agent: undertow agent --transport quic --server SERVER_IP:443 --tls-insecure-ski
 
 ### Windows native modules
 
-`run-native` sends a `.module` container to a Windows amd64 agent and invokes its PE32+ DLL entry point through `undertow_native_v1`. The module uses ordinary Windows APIs and import libraries directly; Undertow supplies arguments, output, cancellation and run information. Foreground output and background jobs use the same console frames and job manager as WASM. `--data FILE` passes binary bytes alongside UTF-8 arguments. The independent `native` capability controls execution. The agent validates platform, architecture and ABI metadata, then uses the Windows loader to resolve System32 imports and relocations. See the [native module guide](docs/native-modules.md), [SDK](sdk/native/README.md), and [examples](examples/native/README.md).
+`run-native` sends a `.module` container to a Windows amd64 agent and invokes its PE32+ DLL entry point through `undertow_native_v1`. The module uses ordinary Windows APIs and import libraries directly; Undertow supplies arguments, output, cancellation and run information. Foreground output and background jobs use the same console frames and job manager as WASM. `--data FILE` passes binary bytes alongside UTF-8 arguments. The independent `native` capability controls execution. The agent validates platform, architecture and ABI metadata, then uses the Windows loader to resolve System32 imports and relocations. See the [native module guide](docs/native-modules.md), [SDK](sdk/native/README.md), and [examples](modules/native/README.md).
+
+The interactive console preloads `.o`, `.module`, and `.wasm` artifacts from its local [`modules/` bank](docs/module-bank.md) as session commands. `load bof|module|wasm FILE [NAME]` adds a command during the session; `help NAME` displays sidecar help and `modules` lists everything loaded. The same command can run on any selected compatible agent.
 
 ```text
 Server console: use 1
-Server console: run-native examples/native/wininfo/wininfo.module
-Server console: run-native --background examples/native/hello/hello.module --wait
+Server console: run-native modules/native/wininfo/wininfo.module
+Server console: run-native --background modules/native/hello/hello.module --wait
 Server console: jobs
 Server console: job stop 1
 ```

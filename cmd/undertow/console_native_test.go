@@ -15,7 +15,7 @@ import (
 )
 
 func TestSelectedAgentStartsNativeJob(t *testing.T) {
-	module, err := os.ReadFile(filepath.Join("..", "..", "examples", "native", "hello", "hello.module"))
+	module, err := os.ReadFile(filepath.Join("..", "..", "modules", "native", "hello", "hello.module"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,0 +1,5 @@
+{
+  "description": "Run a cancellable long-running BOF job.",
+  "usage": "loop",
+  "help": "No arguments. Start with --background and stop with job stop ID."
+}

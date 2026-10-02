@@ -24,7 +24,7 @@ import (
 
 func nativeExample(t *testing.T, name string) []byte {
 	t.Helper()
-	module, err := os.ReadFile(filepath.Join("..", "..", "examples", "native", name, name+".module"))
+	module, err := os.ReadFile(filepath.Join("..", "..", "modules", "native", name, name+".module"))
 	if err != nil {
 		t.Fatal(err)
 	}

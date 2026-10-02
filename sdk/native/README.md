@@ -8,4 +8,4 @@ The API table is borrowed for the duration of `undertow_main`. Its `context` is 
 
 Arguments use a little-endian binary buffer: `uint32 argc`, then `uint32 length` and UTF-8 bytes for each argument, followed by `uint32 length` and opaque bytes from `--data FILE`. Strings have no NUL terminator and may contain embedded NUL. The header's `undertow_native_arg` and `undertow_native_data` helpers validate lengths and return borrowed spans. C++ can include the header inside its normal build. Rust and Zig authors can declare this same `repr(C)`/extern ABI and parse the documented buffer.
 
-The reference build uses MSVC x64 with `/LD /MT`. See [the native module guide](../../docs/native-modules.md) and [example build script](../../examples/native/build.ps1).
+The reference build uses MSVC x64 with `/LD /MT`. See [the native module guide](../../docs/native-modules.md) and [example build script](../../modules/native/build.ps1).

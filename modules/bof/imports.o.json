@@ -1,0 +1,5 @@
+{
+  "description": "Exercise generic KERNEL32, ADVAPI32, NETAPI32 and IPHLPAPI imports.",
+  "usage": "imports",
+  "help": "No arguments. Demonstrates DLL$Export resolution."
+}

@@ -7,9 +7,10 @@ import (
 )
 
 type consoleHelpOptions struct {
-	agent      string
-	color      bool
-	loadedBOFs *loadedBOFRegistry
+	agent           string
+	color           bool
+	loadedBOFs      *loadedBOFRegistry
+	loadedArtifacts *loadedArtifactRegistry
 }
 
 type consoleMenu struct {
@@ -67,8 +68,12 @@ func printConsoleOverview(output io.Writer, vpnClient, selected, serverAttached 
 	m.row("help [TOPIC]", "Show detailed command help")
 	m.row("clear / cls", "Clear the screen")
 	m.row("load bof FILE [NAME]", "Register a local BOF command for this session")
+	m.row("load module FILE [NAME]", "Register a native module command")
+	m.row("load wasm FILE [NAME]", "Register a WASM command")
 	m.row("unload bof NAME", "Remove a loaded BOF command")
+	m.row("unload module|wasm NAME", "Remove a loaded module command")
 	m.row("bofs", "List loaded BOF commands")
+	m.row("modules", "List all loaded BOF, native and WASM commands")
 	m.section("PAYLOAD DEPLOYMENT")
 	m.row("payload", "Show the profile → build → host → run workflow")
 	m.row("payload profiles", "Find a reusable profile name")
@@ -176,6 +181,30 @@ func printConsoleOverview(output io.Writer, vpnClient, selected, serverAttached 
 				description := strings.SplitN(entry.Manifest.Description, "\n", 2)[0]
 				if description == "" {
 					description = "Windows AMD64 BOF"
+				}
+				m.row(name, description)
+			}
+		}
+	}
+	if opt.loadedArtifacts != nil {
+		for _, kind := range []string{"module", "wasm"} {
+			title := "Loaded Native Modules"
+			if kind == "wasm" {
+				title = "Loaded WASM Modules"
+			}
+			printed := false
+			for _, name := range opt.loadedArtifacts.names() {
+				entry := opt.loadedArtifacts.get(name)
+				if entry.Kind != kind {
+					continue
+				}
+				if !printed {
+					m.section(title)
+					printed = true
+				}
+				description := strings.SplitN(entry.Help.Description, "\n", 2)[0]
+				if description == "" {
+					description = kind + " module"
 				}
 				m.row(name, description)
 			}
