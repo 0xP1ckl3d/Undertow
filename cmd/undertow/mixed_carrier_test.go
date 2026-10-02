@@ -59,7 +59,7 @@ func TestMixedCarrierRouting(t *testing.T) {
 		}
 		agentMux := mux.New(ctx, connection, false)
 		defer agentMux.Close()
-		if err := control.SendInventory(ctx, agentMux, nil, pivot.DefaultCapabilities()); err != nil {
+		if err := sendIsolatedTestInventory(ctx, agentMux); err != nil {
 			t.Fatal(err)
 		}
 		go pivot.ServeAgentWithCapabilities(ctx, agentMux, pivot.DefaultCapabilities())

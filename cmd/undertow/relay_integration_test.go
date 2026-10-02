@@ -74,7 +74,7 @@ func TestNestedRelayAgents(t *testing.T) {
 	}
 	parentMux := mux.New(ctx, parent, false)
 	defer parentMux.Close()
-	if err := control.SendInventory(ctx, parentMux, nil, pivot.DefaultCapabilities()); err != nil {
+	if err := sendIsolatedTestInventory(ctx, parentMux); err != nil {
 		t.Fatal(err)
 	}
 	go pivot.ServeAgentWithCapabilities(ctx, parentMux, pivot.DefaultCapabilities())
@@ -94,7 +94,7 @@ func TestNestedRelayAgents(t *testing.T) {
 	}
 	childMux := mux.New(ctx, child, false)
 	defer childMux.Close()
-	if err := control.SendInventory(ctx, childMux, nil, pivot.DefaultCapabilities()); err != nil {
+	if err := sendIsolatedTestInventory(ctx, childMux); err != nil {
 		t.Fatal(err)
 	}
 	go pivot.ServeAgentWithCapabilities(ctx, childMux, pivot.DefaultCapabilities())
@@ -118,7 +118,7 @@ func TestNestedRelayAgents(t *testing.T) {
 	}
 	grandchildMux := mux.New(ctx, grandchild, false)
 	defer grandchildMux.Close()
-	if err := control.SendInventory(ctx, grandchildMux, nil, pivot.DefaultCapabilities()); err != nil {
+	if err := sendIsolatedTestInventory(ctx, grandchildMux); err != nil {
 		t.Fatal(err)
 	}
 	go pivot.ServeAgentWithCapabilities(ctx, grandchildMux, pivot.DefaultCapabilities())
