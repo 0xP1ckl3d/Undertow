@@ -10,68 +10,146 @@
                  ▀
 ```
 
-**Undertow is a remote access and network tunneling toolkit.** It connects an operator to remote hosts and networks through an authenticated server, outbound agents, and an optional VPN client. From one console you can run commands and modules on an agent, transfer files, reach services behind that agent, or route your own machine's traffic through the server.
+**Undertow is a remote access and network tunneling toolkit.** It lets you work on remote hosts and reach networks through them from one place. A **server** coordinates connections, an outbound **agent** runs on a host that can reach the target network, and an optional **client** routes traffic from your own machine. Use the consoles to run shells, commands, and modules on agents, transfer files, and set up routes or forwards.
 
-An agent runs on a host that can reach the network you need. It connects out to Undertow and uses ordinary sockets to reach targets, so it needs no inbound port, virtual adapter, elevated privileges, or changes to that host's routes. The optional client runs on your own machine and creates a tunnel for your applications. Use `--internal` for networks reachable through agents, `--vpn` for IPv4 Internet access through the server, or both together. The server can also create its own tunnel with `--tun` when applications on the server host need agent routes.
+The agent needs no inbound port, virtual adapter, elevated privileges, or changes to its host's routes. The client can use an agent's internal networks, send its IPv4 Internet traffic through the server, or do both. Undertow carries encrypted sessions over QUIC, HTTPS/WebSocket, or direct DNS.
 
-Undertow carries the same encrypted sessions over QUIC, HTTPS/WebSocket, or direct DNS. Agents can connect directly or through another agent acting as a relay. It runs on Linux and Windows; see the [platform and mode details](docs/cli-reference.md) for specific requirements.
+Start with the [complete first-run walkthrough](docs/getting-started.md) for a server, VPN client, and headless Windows agent. The [quickstart](docs/quickstart.md) covers other connection modes; the [feature catalogue](features.md) and [console guide](docs/console.md) show what you can do once connected.
 
-**New to Undertow?** Follow [Getting started](docs/getting-started.md). It walks through server initialization, a VPN client, a headless Windows agent, the first command and module, and an internal route.
+For remote deployment, the separate [configured thin agent](docs/agent-distribution.md) runs with no connection arguments and uses the same agent runtime. Build it from a prebuilt template, optionally host it through Undertow, and inspect its lifecycle from the server. Each artifact has its own embedded identity and enrollment credential; normal execution creates no endpoint state files. Authenticated client consoles can manage profiles and artifacts directly. The full `undertow agent` command remains available for manual operation.
 
-## What can it do?
+## What are you trying to do?
 
-| Need | Undertow provides | Guide |
+| Goal | Components | Start here |
 | --- | --- | --- |
-| Reach a service on a remote internal network | An outbound agent and an accepted route from the server or client; TCP, UDP, and ICMP traffic can use the agent's network | [Getting started](docs/getting-started.md#5-route-client-traffic-through-the-agent) · [Routing scenarios](docs/scenarios.md) |
-| Route your laptop's traffic | `client --internal` for agent networks, `client --vpn` for server Internet egress, or both | [Quickstart](docs/quickstart.md) |
-| Work on a remote host | Interactive shell, one-shot commands, built-in host operations, file transfer, and background jobs | [Console guide](docs/console.md) |
-| Run specialized tools | Stream scripts, run WASM modules, or run Windows native modules and BOFs through the agent | [Module bank](docs/module-bank.md) |
-| Deploy an unattended agent | Build a Windows or Linux payload with its own identity, host it over HTTPS, generate a verification script, or download it for your own delivery flow | [Payload deployment](docs/agent-distribution.md) |
-| Reach a network beyond the first agent | Start an explicit relay and connect another independent agent through it | [Topology and relays](docs/topology-and-relays.md) |
+| Reach an internal network from the server | Server + agent | `server --tun`, `agent`, `route add` |
+| Reach an internal network from a laptop, keeping its Internet route | Server + agent + client | `client --internal` |
+| Route a laptop's IPv4 Internet traffic through the server | Server + client | `client --vpn` |
+| Use server Internet egress and reach an internal network | Server + agent + client | `client --vpn --internal` |
+| Reach one internal TCP service | Server + agent | `server --forward` |
+| Expose a client service on an agent host | Server + agent + client | Client console `forward add` |
+| Reach a deeper network through another agent | Server + parent agent + child agent | Parent console `relay start` |
 
-## How the pieces fit
-
-```text
-Your machine                         Reachable server                   Remote network
-Undertow client  <── authenticated ──>  Undertow server  <──────────────>  Undertow agent ──> targets
-  --vpn: server Internet egress            │                                 outbound connection
-  --internal: agent networks               └── operator console and payload hosting
-```
-
-- **Server:** accepts and authenticates client and agent sessions, hosts deployment payloads, and coordinates commands and routes. Its own `--tun` is optional.
-- **Agent:** reaches targets from its host and runs the operations you allow. A configured payload can run headlessly with its connection settings and identity embedded.
-- **Client:** runs on the machine whose applications should use the tunnel. It owns its VPN and internal routes; an agent does not change the client machine's routes by itself.
-
-The server and client each have an interactive console. Once an agent connects, select it to run a command, open a shell, inspect its networks, or use a module. See the [full first-run workflow](docs/getting-started.md) for commands on each host, including the server fingerprint check.
-
-## Build and start
-
-Go 1.25 or newer is required. Build the operator binary **and agent templates** from source before creating deployment payloads:
+On **SERVER**, run `./bin/undertow init` once. Keep `identity.key` there, copy `token.key` to each **AGENT** or **CLIENT**, and record the printed fingerprint. Replace `SERVER_IP` and `FINGERPRINT` below. These are the minimal Linux commands for direct IP and the default temporary self-signed TLS certificate:
 
 ```sh
-# Linux
-sh tools/build-release.sh bin
-./bin/undertow init
-sudo ./bin/undertow server --tun
+# SERVER; accepts QUIC UDP/443, WebSocket TCP/443, DNS UDP/53
+sudo ./bin/undertow server
+
+# AGENT; only when an internal network is needed
+./bin/undertow agent --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify
+
+# CLIENT; choose --vpn, --internal, or both
+sudo ./bin/undertow client --vpn --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify
 ```
+
+The server accepts all three carriers by default; peers choose one independently. `--vpn` sends the client's IPv4 Internet traffic through the server and needs no agent. `--internal` routes only selected agent networks and keeps the client's normal Internet route. Combine them for both. The **server needs `--tun` only when applications on the server host itself need routed access through an agent**. Every client mode creates its own TUN and works without a server TUN. In a terminal, `server` and `client` each open a console. For an internal route, type `agents`, `use 1`, `show`, `routes`, then `route accept CIDR` or `route add CIDR` on the client. `background` detaches without stopping; `server attach` or `client attach` returns. See the [quickstart](docs/quickstart.md) for verification, stopping, and WebSocket/DNS alternatives.
+
+## How the pieces connect
+
+One server process shares its identity, console, routing and jobs across all enabled listeners. Agents can be direct or connect through an explicitly enabled relay on another agent.
+
+```mermaid
+flowchart LR
+  subgraph Operator["Operator / server host"]
+    Tools["curl · SSH · browser"] --> Route["OS route to internal subnet"]
+    Route --> ProxyTUN["Optional TUN / Wintun"]
+    ProxyTUN --> Stack["Userland network stack"]
+    Stack --> Selector["Agent route selector"]
+    Carrier["Shared Undertow server<br/>DNS UDP/53 · WebSocket TCP/443 · QUIC UDP/443"]
+    Control["Loopback status / route API"]
+    Selector --> Carrier
+  end
+
+  subgraph AgentHost["Internal-network host"]
+    Agent["Unprivileged undertow agent<br/>No adapter or host routes"] --> Sockets["TCP · UDP · ICMP sockets"]
+    Sockets --> Internal["Internal targets"]
+  end
+
+  subgraph VPNHost["Separate VPN client host"]
+    Apps["Client applications"] --> VPNRoute["IPv4 routes"]
+    VPNRoute --> ClientTUN["Local TUN / Wintun"]
+    ClientTUN --> VPN["Privileged client --vpn and/or --internal"]
+    Physical["Carrier path kept outside VPN routes"] --> VPN
+  end
+
+  Carrier <-->|"Authenticated session"| Agent
+  Agent <-->|"Explicit relay listener; child authenticates to server"| Child["Independent child agent"]
+  Child --> Deep["Deeper internal targets"]
+  VPN <-->|"Authenticated session"| Carrier
+  Carrier -->|"VPN Internet egress"| ServerSockets["Server-side Internet sockets"]
+  ServerSockets --> Internet["Public Internet"]
+  Carrier -->|"With --internal: configured pivot route"| Selector
+
+  Control -.-> Selector
+```
+
+| Mode | Use | Privilege |
+| --- | --- | --- |
+| `server` | Accept sessions; optional internal route interface | Binding UDP/53 or creating TUN may require elevation |
+| `agent` | Reach internal targets through ordinary sockets | None |
+| `client --vpn` | Route IPv4 Internet traffic through server sockets | Root/Administrator |
+| `client --internal` | Route configured/accepted internal prefixes through agents; keep the Internet route | Root/Administrator |
+| `client --vpn --internal` | VPN egress plus server configured agent routes | Root/Administrator |
+
+**Agent and client are different jobs.** Put an `agent` on a host that can reach an internal network; it lets the server open sockets from that host, but changes none of that host's routes. Put a `client` on a host whose *own* applications should use the tunnel. `--vpn` installs two IPv4 `/1` Internet routes and verifies public egress. `--internal` alone installs only internal routes, leaving the client's Internet route unchanged. Combine the flags for both behaviours. After connecting, select an agent in the client console and use `route accept CIDR` for an advertised network or `route add CIDR` for a manual route. No server route command is required for those client routes. `status` lists agents and clients separately.
+
+On the **VPN client host**, choose one mode using the QUIC client command above: `--vpn` for Internet egress, `--internal` for agent networks, or `--vpn --internal` for both. Keep `--transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify` for this direct-IP, self-signed setup.
+
+For internal-only setup, use the client console after the second command: `agents`, `use 1`, `routes`, then `route accept 10.20.0.0/16` (or `route add 10.20.0.0/16` for a reachable network the agent has not advertised).
+
+For interactive operation, start `undertow server` or `undertow client` in a terminal. Both open their consoles automatically. Type `agents`, then `use 1` to enter an agent and run `shell` for a live terminal, `exec` for one-shot execution, built-in host operations, `upload`, `download`, or route commands without copying its ID. Ctrl-] exits a live shell and returns to the Undertow menu. `help` shows a full command menu for the current level; agent actions appear after `use`. `help relay`, `help route`, and other topics show detailed usage. `clear` or `cls` clears the screen. Tab completes local module, script, and transfer paths. `back` returns to the main menu. The server console manages global routes. The client console manages its own accepted and manual routes, which persist across reconnects, and supports `vpn on|off|status` and `internal on|off|status` while running. On the server, `quit` detaches and `stop` shuts down; on the client, `quit` stops the VPN. Current agent capabilities are enabled by default; `agent --deny=exec,upload` still allows built-in host operations and live shells, while `--deny=hostops` and `--deny=interactive` block those separately. `status` shows supported and allowed operations. See [interactive scenarios](docs/scenarios.md#8-interactive-consoles-and-agent-commands).
+
+For a task that should run while you use the console, select an agent and enter `job start PROGRAM [ARGS]`. `jobs` shows numbered tasks; use `jobs 1` for details, `job output 1` to read output, or `job cancel 1` to stop one. Full job IDs work too. Tasks remain visible after client console detach/reattach while the agent stays connected; output is retained up to 256 KiB per job.
+
+Use `run-script bash ./check.sh` or `run-script powershell ./audit.ps1` in a selected-agent console to stream local source into that interpreter on the agent without creating a script file there. Add `--background` before the interpreter to create a job. The independent `scripts` capability can be disabled with `agent --deny=scripts`.
+
+Use `run-wasm ./tool.wasm` or `run-wasm --background ./long-task.wasm` to run a WASI module directly from memory on the selected agent. `--stdin FILE` provides bounded input and words after the module path become module arguments. The independent `wasm` capability controls this operation; the agent caps module size, execution time, guest memory, output and concurrent runs. Modules can use the public `undertow_host_v1` imports for agent-side host and network assessment. See the [WASM developer guide](docs/wasm-development.md) and [six packaged examples](modules/wasm/README.md).
+
+On Windows amd64 agents, `run-native modules/native/wininfo/wininfo.module` runs a native DLL module with direct Windows API access. `run-native --background` uses the same jobs system, and `--data FILE` passes opaque binary data. The independent `native` capability controls execution. See the [native module guide](docs/native-modules.md), [SDK](sdk/native/README.md), and [examples](modules/native/README.md).
+
+Existing Windows AMD64 BOFs can run directly as COFF `.o` files with `run-bof modules/bof/hello.o`, or be inspected locally with `undertow bof inspect modules/bof/hello.o`. `run-bof --background` uses the same jobs and `native` capability. Use `--format` or an optional sidecar manifest for Beacon arguments. See the [BOF compatibility guide](docs/bof-compatibility.md) and [examples](modules/bof/README.md). WASM, Undertow native modules, and BOFs are separate extension formats with shared agent transport and job output.
+
+The console automatically loads packaged `.o`, `.module`, and `.wasm` files from the local [`modules/` bank](docs/module-bank.md) on startup. Type `help` to see `bof-arguments`, `module-wininfo`, `wasm-triage`, and the other ready-to-run commands; `help NAME` shows each example's usage. Copy your own artifacts into that directory to preload them, or use `load bof|module|wasm FILE [NAME]` during a session. `modules` lists all loaded commands, `bofs` lists BOFs, and `unload bof|module|wasm NAME` removes one. Registrations stay local to that console process and are sent to an agent only when invoked. BOF sidecars supply typed arguments without repeated `--format` flags.
+
+Agent inventory includes IPv4 routes with gateways, interfaces, route sources, and a separate default route. In the client console, `routes` shows candidates; after `use 1`, enter `route accept 10.20.0.0/16` for a reported network or `route add 10.20.0.0/16` for a manually known path. No server route command is required for this client-owned setup.
+
+`status` gives a short multi-agent view. Select an agent and type `show`, or run `undertow agent show AGENT_ID` on the server, for connection, transport, route, capability, job, and forwarding details. Add `--json` to the CLI command for structured output.
+
+Uploads and downloads display transfer progress and rate in the client console, including after attach. Press Ctrl-] to cancel a transfer. Completion reports the verified byte count and SHA-256 digest.
+
+For real deployments, use token or password enrollment. With `server --auth none`, anyone who can reach the listener can join, access network paths, and run commands on agents that allow execution.
+
+## Build
+
+Go 1.25 or newer is required to build. Compiled files belong in the ignored `bin/` directory.
+
+Linux:
+
+```sh
+mkdir -p bin
+go build -buildvcs=false -o bin/undertow ./cmd/undertow
+```
+
+Windows PowerShell:
 
 ```powershell
-# Windows PowerShell
-.\tools\build-release.ps1
+New-Item -ItemType Directory -Force .\bin | Out-Null
+go build -buildvcs=false -o .\bin\undertow.exe .\cmd\undertow
+if ($LASTEXITCODE -ne 0) { throw 'Build failed; bin\undertow.exe may be an older version' }
+.\bin\undertow.exe help agent
 ```
 
-The release scripts produce `undertow` (or `undertow.exe`) and Windows/Linux agent templates in `bin/`. The server's `--tun` is needed when applications **on the server** must use routes through an agent; the client creates its own tunnel. Follow [Getting started](docs/getting-started.md) before connecting a client or deploying an agent: it covers enrollment, fingerprint verification, privileges, payload hosting, and a working end-to-end example.
+## Guides
 
-## Documentation
+- [Getting started: full server, client, and headless Windows agent workflow](docs/getting-started.md)
+- [Quickstart: alternate VPN and internal routing scenarios](docs/quickstart.md)
+- [Feature catalogue with commands by machine](features.md)
+- [Scenario commands: pivot, VPN, forwarding and lifecycle](docs/scenarios.md)
+- [Interactive console commands and examples](docs/console.md)
+- [Local module bank and preload rules](docs/module-bank.md)
+- [All commands and flags](docs/cli-reference.md)
+- [Protocol version 1](docs/protocol.md)
+- [Performance and reliability measurements](docs/benchmarks.md)
 
-| Start with | Then explore |
-| --- | --- |
-| [Getting started](docs/getting-started.md): complete server → client → Windows agent walkthrough | [Quickstart](docs/quickstart.md): other VPN modes and carrier choices |
-| [Console guide](docs/console.md): shells, jobs, transfers, routes, and commands | [Scenario guide](docs/scenarios.md): examples for routing, forwarding, and lifecycle |
-| [Payload deployment](docs/agent-distribution.md): profiles, builds, hosting, alternate delivery, and shutdown | [Topology and relays](docs/topology-and-relays.md): deeper agent networks |
-| [Module bank](docs/module-bank.md): ready-to-run tools | [BOF](docs/bof-compatibility.md), [native](docs/native-modules.md), and [WASM](docs/wasm-development.md) guides |
-| [Feature catalogue](features.md): capabilities by component | [CLI reference](docs/cli-reference.md): every command and flag |
-
-For implementation and measurements, see the [protocol](docs/protocol.md) and [benchmark guide](docs/benchmarks.md).
-
-Undertow is experimental. The Linux server, Linux VPN client, and Windows agent have been exercised over DNS, HTTPS/WebSocket, and QUIC with TCP, UDP, and ICMP traffic; results are in the [benchmark guide](docs/benchmarks.md). Windows client Wintun installation still needs an elevated live acceptance run. Undertow is [GPL-3.0-only](LICENSE); bundled third-party components retain their own licences.
+Undertow is experimental. A Linux server, Linux VPN client, and Windows agent have been exercised over DNS, HTTPS/WebSocket, and QUIC with TCP, UDP, and ICMP traffic. A matched live iodine comparison and a controlled DNS loss/RTT grid are recorded in [the benchmark guide](docs/benchmarks.md). Windows client Wintun installation still needs an elevated live acceptance run. This code is [GPL-3.0-only](LICENSE); bundled third-party components keep their own licences.
