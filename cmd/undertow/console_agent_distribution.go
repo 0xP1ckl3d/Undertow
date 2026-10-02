@@ -200,7 +200,7 @@ public static class ScopedArtifactTls {
 		} else {
 			fmt.Fprint(out, "  Invoke-WebRequest -Uri $url -OutFile $temp\n")
 		}
-		fmt.Fprint(out, "  $stream = [System.IO.File]::OpenRead($temp)\n  $sha256 = [System.Security.Cryptography.SHA256]::Create()\n  try { $actual = [System.BitConverter]::ToString($sha256.ComputeHash($stream)).Replace('-', '').ToLowerInvariant() }\n  finally { $sha256.Dispose(); $stream.Dispose() }\n  if ($actual -ne $expected) { throw 'Artifact SHA-256 mismatch' }\n  Move-Item -Force $temp $Destination\n  Start-Process -FilePath (Resolve-Path $Destination)\n} finally { Remove-Item -ErrorAction SilentlyContinue $temp }\n")
+		fmt.Fprint(out, "  $stream = [System.IO.File]::OpenRead($temp)\n  $sha256 = [System.Security.Cryptography.SHA256]::Create()\n  try { $actual = [System.BitConverter]::ToString($sha256.ComputeHash($stream)).Replace('-', '').ToLowerInvariant() }\n  finally { $sha256.Dispose(); $stream.Dispose() }\n  if ($actual -ne $expected) { throw 'Artifact SHA-256 mismatch' }\n  Move-Item -Force $temp $Destination\n  Start-Process -FilePath (Resolve-Path $Destination) -WindowStyle Hidden\n} finally { Remove-Item -ErrorAction SilentlyContinue $temp }\n")
 	case "shell":
 		curlFlags := "-fL"
 		if hosted.TLSSelfSigned {
