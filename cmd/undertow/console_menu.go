@@ -83,6 +83,7 @@ func printConsoleOverview(output io.Writer, vpnClient, selected, serverAttached 
 	m.row("payload host PAYLOAD_ID", "Enable HTTPS download")
 	m.row("payload url PAYLOAD_ID", "Reprint an existing download URL")
 	m.row("payload retrieval-path", "View or change the public download prefix")
+	m.row("payload retrieval-host", "Set the public HTTPS host for downloads")
 
 	if selected {
 		m.section("AGENT SESSION")

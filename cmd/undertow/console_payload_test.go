@@ -18,8 +18,14 @@ func TestPayloadConsoleWorkflowAndIdentifierGuidance(t *testing.T) {
 	hosted := hostedArtifactInfo{Artifact: info.Artifact, ServerPath: info.ServerPath, Retrieval: "https://example.com/download/opaque-token", RetrievalPath: "/download/opaque-token"}
 	encode := func(v any) []byte { b, _ := json.Marshal(v); return b }
 	publicPath := "/download/"
+	publicHost := ""
 	call := func(_ context.Context, method, path string, body any) ([]byte, error) {
 		switch method + " " + path {
+		case "GET /v1/payload-retrieval-host":
+			return encode(map[string]string{"host": publicHost}), nil
+		case "PUT /v1/payload-retrieval-host":
+			publicHost = body.(map[string]string)["host"]
+			return encode(map[string]string{"host": publicHost}), nil
 		case "GET /v1/payload-retrieval-path":
 			return encode(map[string]string{"path": publicPath}), nil
 		case "PUT /v1/payload-retrieval-path":
@@ -96,5 +102,12 @@ func TestPayloadConsoleWorkflowAndIdentifierGuidance(t *testing.T) {
 	out.Reset()
 	if err := runConsolePayload(context.Background(), &out, call, []string{"payload", "retrieval-path", "set", "/new/"}); err != nil || publicPath != "/new/" || !strings.Contains(out.String(), "earlier URLs no longer work") {
 		t.Fatalf("retrieval path change: %v %s", err, out.String())
+	}
+	if err := runConsolePayload(context.Background(), &out, call, []string{"payload", "retrieval-host", "set", "https://bad.example"}); err == nil || publicHost != "" {
+		t.Fatalf("invalid retrieval host accepted: %v", err)
+	}
+	out.Reset()
+	if err := runConsolePayload(context.Background(), &out, call, []string{"payload", "retrieval-host", "set", "downloads.example"}); err != nil || publicHost != "downloads.example" {
+		t.Fatalf("retrieval host change: %v %s", err, out.String())
 	}
 }

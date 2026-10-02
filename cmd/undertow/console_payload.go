@@ -17,7 +17,7 @@ import (
 // command namespace, even though older consoles used "agent" for both.
 func isPayloadSubcommand(value string) bool {
 	switch value {
-	case "profile", "profiles", "build", "list", "artifacts", "show", "host", "hosted", "url", "download", "unhost", "revoke", "delete", "deploy-script":
+	case "profile", "profiles", "build", "list", "artifacts", "show", "host", "hosted", "url", "download", "unhost", "revoke", "delete", "deploy-script", "retrieval-host":
 		return true
 	}
 	return false
@@ -46,6 +46,9 @@ NAME is a profile name. PAYLOAD_ID is the 24-character build ID shown by
 The server file path is where Undertow stores the build. The download URL is
 for the endpoint; choose the endpoint's install path when downloading.
 Path: payload retrieval-path | payload retrieval-path set /downloads/
+Host: payload retrieval-host | payload retrieval-host set SERVER_HOST
+Set the public HTTPS host separately when agents connect through a relay or
+another address that endpoints cannot use to download the payload.
 The public prefix is saved on the server. Changing it rotates download tokens,
 permanently invalidating old URLs;
 use "payload hosted" to retrieve the current URLs. A startup
@@ -61,6 +64,8 @@ func runConsolePayload(ctx context.Context, out io.Writer, call consoleCaller, a
 		return nil
 	}
 	switch args[1] {
+	case "retrieval-host":
+		return runPayloadRetrievalHost(ctx, out, call, args)
 	case "retrieval-path":
 		return runPayloadRetrievalPath(ctx, out, call, args)
 	case "profiles":
@@ -112,6 +117,42 @@ func runConsolePayload(ctx context.Context, out io.Writer, call consoleCaller, a
 		return printDeployScript(out, hosted, args[3])
 	}
 	return fmt.Errorf("unknown payload command %q; type payload help for the four-step workflow", args[1])
+}
+
+func runPayloadRetrievalHost(ctx context.Context, out io.Writer, call consoleCaller, args []string) error {
+	if len(args) == 2 {
+		data, err := call(ctx, http.MethodGet, "/v1/payload-retrieval-host", nil)
+		if err != nil {
+			return err
+		}
+		var current struct {
+			Host string `json:"host"`
+		}
+		if err := json.Unmarshal(data, &current); err != nil {
+			return err
+		}
+		if current.Host == "" {
+			fmt.Fprintln(out, "Public payload download host: inferred from each payload's server address. Set with: payload retrieval-host set SERVER_HOST")
+		} else {
+			fmt.Fprintf(out, "Public payload download host: %s\n", current.Host)
+		}
+		return nil
+	}
+	if len(args) != 4 || args[2] != "set" || !validRetrievalHost(args[3]) || args[3] == "" {
+		return errors.New("use payload retrieval-host set SERVER_HOST; give a DNS name or IP address without scheme or port")
+	}
+	data, err := call(ctx, http.MethodPut, "/v1/payload-retrieval-host", map[string]string{"host": args[3]})
+	if err != nil {
+		return fmt.Errorf("could not change public payload download host: %w", err)
+	}
+	var updated struct {
+		Host string `json:"host"`
+	}
+	if err := json.Unmarshal(data, &updated); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "Public payload download host set to %s. Run payload hosted to see current URLs; download tokens are unchanged.\n", updated.Host)
+	return nil
 }
 
 func runPayloadRetrievalPath(ctx context.Context, out io.Writer, call consoleCaller, args []string) error {

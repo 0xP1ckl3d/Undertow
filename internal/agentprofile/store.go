@@ -44,6 +44,7 @@ type persisted struct {
 	RetrievalTokens      map[string]string   `json:"retrieval_tokens,omitempty"`
 	EnrollmentSecrets    map[string]string   `json:"enrollment_secrets,omitempty"`
 	PayloadRetrievalPath string              `json:"payload_retrieval_path,omitempty"`
+	PayloadRetrievalHost string              `json:"payload_retrieval_host,omitempty"`
 }
 
 const templateManifestName = "undertow-agent-templates.json"
@@ -256,6 +257,27 @@ func (s *Store) SetPayloadRetrievalPath(path string) (bool, error) {
 	if err := s.save(); err != nil {
 		s.state.PayloadRetrievalPath = old
 		s.state.RetrievalTokens = oldTokens
+		return false, err
+	}
+	return true, nil
+}
+
+func (s *Store) PayloadRetrievalHost() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.state.PayloadRetrievalHost
+}
+
+func (s *Store) SetPayloadRetrievalHost(host string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	old := s.state.PayloadRetrievalHost
+	if old == host {
+		return false, nil
+	}
+	s.state.PayloadRetrievalHost = host
+	if err := s.save(); err != nil {
+		s.state.PayloadRetrievalHost = old
 		return false, err
 	}
 	return true, nil

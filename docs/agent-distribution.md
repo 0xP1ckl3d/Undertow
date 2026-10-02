@@ -36,6 +36,18 @@ On Windows the release template uses the GUI subsystem, so normal packaged opera
 
 Optional `payload deploy-script PAYLOAD_ID powershell|shell` prints a helper that downloads, verifies SHA-256, places, and launches a hosted binary. The PowerShell helper works with Windows PowerShell 5.1 and PowerShell 7+, scopes any self-signed certificate exception to its download HTTP client, and computes SHA-256 before installation. Manual retrieval and launch always work.
 
+## Public HTTPS download host
+
+By default, Undertow builds a hosted URL using the payload profile's `server` host and the server's active HTTPS listener port. A relay agent may instead connect to a parent at `127.0.0.1:8443` or an internal address that cannot serve public downloads. On the server console, set the external HTTPS host separately before printing its deploy script:
+
+```text
+payload retrieval-host set SERVER_IP
+payload url PAYLOAD_ID
+payload deploy-script PAYLOAD_ID powershell
+```
+
+Give only a DNS name or IP address, without a scheme or port. `payload retrieval-host` shows the current setting. It is saved in the server's distribution state and applies to all hosted payload URLs; the HTTPS listener supplies the port. Changing the host changes the displayed URL but does not rotate its opaque download token. Existing URLs still reach the same listener if their host remains reachable. The agent's embedded connection address does not change. For an unhosted build or your own delivery channel, use `payload download` instead.
+
 ## Inspect and manage lifecycle
 
 ```text

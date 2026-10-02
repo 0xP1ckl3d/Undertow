@@ -124,6 +124,26 @@ func TestAgentDistributionAPIAndRetrieval(t *testing.T) {
 	if hosted.RetrievalPath == "" || !strings.HasSuffix(hosted.Retrieval, hosted.RetrievalPath) || hosted.ServerPath != buildInfo.ServerPath {
 		t.Fatalf("hosted response does not distinguish retrieval and storage paths: %+v", hosted)
 	}
+	w = call(http.MethodPut, "/v1/payload-retrieval-host", map[string]string{"host": "https://bad.example"})
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("invalid public host accepted: %d %s", w.Code, w.Body.String())
+	}
+	w = call(http.MethodPut, "/v1/payload-retrieval-host", map[string]string{"host": "downloads.example"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("set public host: %d %s", w.Code, w.Body.String())
+	}
+	override, err := d.hostedInfo(a)
+	if err != nil || override.Retrieval != "https://downloads.example:443"+hosted.RetrievalPath || override.Artifact.Server != a.Server {
+		t.Fatalf("public host changed agent connection settings or token: %+v %v", override, err)
+	}
+	hostStore, err := agentprofile.OpenStore(filepath.Join(dir, "store"), templates, "test")
+	if err != nil || hostStore.PayloadRetrievalHost() != "downloads.example" {
+		t.Fatalf("public host did not persist: %v", err)
+	}
+	w = call(http.MethodPut, "/v1/payload-retrieval-host", map[string]string{"host": ""})
+	if w.Code != http.StatusOK {
+		t.Fatalf("clear public host: %d %s", w.Code, w.Body.String())
+	}
 	path := strings.TrimPrefix(hosted.Retrieval, "https://127.0.0.2:443")
 	_, tlsIdentity, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {

@@ -92,6 +92,8 @@ The server release includes thin-agent templates. A profile captures carrier and
 
 `payload download PAYLOAD_ID [OUTPUT]` is the alternate delivery path: it copies the built binary to the current console host over the authenticated control connection and verifies its SHA-256. It works before hosting and refuses to replace a file. A connected VPN client can list profiles and builds; downloading or changing them requires a server-granted `client distribution-admin SESSION_ID on`, which can be revoked with `off` and ends on disconnect. `payload unhost`, `payload revoke`, and `payload delete` separately disable public retrieval, future enrollment, and the server artifact. `agent events`, `session kill`, and `agent shutdown` cover a connected agent's lifecycle.
 
+For agents that connect through a relay or private address, `payload retrieval-host set PUBLIC_SERVER_HOST` sets the HTTPS download host independently of the embedded agent connection address. The setting persists on the server and applies to hosted URL display and deploy scripts; see [public download host](docs/agent-distribution.md#public-https-download-host).
+
 ## Routing and network traffic
 
 ### Full IPv4 VPN mode

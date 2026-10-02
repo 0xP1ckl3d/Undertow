@@ -154,9 +154,9 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 		}
 	case "payload":
 		if len(before) == 1 {
-			return wordCompletions([]string{"help", "retrieval-path", "profiles", "profile", "build", "list", "show", "host", "hosted", "url", "download", "unhost", "revoke", "delete", "deploy-script"}, partial)
+			return wordCompletions([]string{"help", "retrieval-path", "retrieval-host", "profiles", "profile", "build", "list", "show", "host", "hosted", "url", "download", "unhost", "revoke", "delete", "deploy-script"}, partial)
 		}
-		if len(before) == 2 && before[1] == "retrieval-path" {
+		if len(before) == 2 && (before[1] == "retrieval-path" || before[1] == "retrieval-host") {
 			return wordCompletions([]string{"set"}, partial)
 		}
 		if len(before) == 2 && before[1] == "profile" {

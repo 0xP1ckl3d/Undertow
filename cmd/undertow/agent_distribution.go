@@ -36,6 +36,27 @@ func validRetrievalPath(value string) bool {
 	return len(value) <= 128 && retrievalPathPattern.MatchString(value)
 }
 
+func validRetrievalHost(host string) bool {
+	if host == "" || net.ParseIP(host) != nil {
+		return true
+	}
+	if len(host) > 253 {
+		return false
+	}
+	for _, label := range strings.Split(host, ".") {
+		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for i := 0; i < len(label); i++ {
+			b := label[i]
+			if !(b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9' || b == '-') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func (d *agentDistribution) publicPath() string {
 	d.pathMu.RLock()
 	defer d.pathMu.RUnlock()
@@ -251,6 +272,29 @@ func (d *agentDistribution) apply(c agentruntime.Config, req profileRequest) (ag
 func (d *agentDistribution) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	switch {
+	case path == "/v1/payload-retrieval-host" && r.Method == http.MethodGet:
+		distributionJSON(w, http.StatusOK, map[string]string{"host": d.store.PayloadRetrievalHost()})
+	case path == "/v1/payload-retrieval-host" && r.Method == http.MethodPut:
+		var req struct {
+			Host string `json:"host"`
+		}
+		if err := decodeDistributionRequest(r, &req); err != nil {
+			distributionError(w, err)
+			return
+		}
+		if !validRetrievalHost(req.Host) {
+			distributionError(w, errors.New("payload retrieval host must be an IP address or DNS hostname without a port"))
+			return
+		}
+		changed, err := d.store.SetPayloadRetrievalHost(req.Host)
+		if err != nil {
+			distributionError(w, err)
+			return
+		}
+		distributionJSON(w, http.StatusOK, struct {
+			Host    string `json:"host"`
+			Changed bool   `json:"changed"`
+		}{Host: req.Host, Changed: changed})
 	case path == "/v1/payload-retrieval-path" && r.Method == http.MethodGet:
 		distributionJSON(w, http.StatusOK, struct {
 			Path string `json:"path"`
@@ -494,9 +538,13 @@ func (d *agentDistribution) hostedInfo(a agentprofile.Artifact) (hostedArtifactI
 		if err != nil {
 			continue
 		}
-		host, _, err := net.SplitHostPort(a.Server)
-		if err != nil {
-			break
+		host := d.store.PayloadRetrievalHost()
+		if host == "" {
+			var err error
+			host, _, err = net.SplitHostPort(a.Server)
+			if err != nil {
+				break
+			}
 		}
 		if host != "" {
 			return hostedArtifactInfo{Artifact: a, ServerPath: d.store.ArtifactPath(a), Retrieval: "https://" + net.JoinHostPort(host, port) + path, RetrievalPath: path, TLSSelfSigned: l.TLSMode == "self-signed"}, nil

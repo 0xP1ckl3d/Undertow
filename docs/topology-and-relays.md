@@ -28,6 +28,8 @@ The bind must be a numeric IPv4 address and port on that parent. Omit it for the
 
 Start the child with its **own** agent key and the original server's enrollment token and fingerprint:
 
+For a configured child payload, create a profile with `server=INTERNAL_IP:PORT transport=relay` after starting the parent listener. Set `payload retrieval-host set PUBLIC_SERVER_HOST` in the server console before hosting it, so the download URL points to the server's HTTPS listener rather than the child's relay address. The embedded relay address remains `INTERNAL_IP:PORT`. See [payload deployment](agent-distribution.md#public-https-download-host).
+
 ```sh
 undertow agent --transport relay --server 10.20.1.15:8443 \
   --fingerprint FINGERPRINT --token-file token.key --agent-key child.key
