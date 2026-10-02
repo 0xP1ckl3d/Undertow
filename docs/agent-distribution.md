@@ -10,6 +10,8 @@ The profile and artifact store defaults to `agent-distribution` beneath the serv
 
 ## Profile → build → host → run
 
+`payload download PAYLOAD_ID [OUTPUT]` saves a built binary to the console host over the authenticated control connection, even when it is not publicly hosted. The default is `payloads/FILENAME` beneath the console's working directory; this directory is ignored by Git. Pass a filename or an existing directory as `OUTPUT` to choose another location. The command creates parent directories, verifies SHA-256 before publishing the file, and refuses to replace an existing file. A VPN client needs a `distribution-admin` grant to download payload bytes.
+
 From the server console:
 
 ```text

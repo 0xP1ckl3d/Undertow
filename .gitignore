@@ -4,6 +4,7 @@
 /dist/
 jobs-output/
 job-downloads/
+payloads/
 /Plan.md
 /client-routes.json
 *.routes.json

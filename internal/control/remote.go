@@ -67,9 +67,9 @@ func (m *Manager) ServeRemote(ctx context.Context, token string, clientID uint64
 		writeRemoteResponse(stream, remoteResponse{Status: http.StatusBadRequest, Body: []byte("invalid API request")})
 		return
 	}
-	if !clientRequestAllowed(httpRequest, clientID) && !(m.ClientDistributionAllowed(clientID) && distributionRequest(httpRequest)) {
+	if !clientRequestAllowed(httpRequest, clientID) && !(m.ClientDistributionAllowed(clientID) && (distributionRequest(httpRequest) || payloadChunkRequest(httpRequest))) {
 		message := "server operator command unavailable from VPN client"
-		if distributionRequest(httpRequest) {
+		if distributionRequest(httpRequest) || payloadChunkRequest(httpRequest) {
 			message = fmt.Sprintf("distribution administration requires a server grant: client distribution-admin %d on", clientID)
 		}
 		writeRemoteResponse(stream, remoteResponse{Status: http.StatusForbidden, Body: []byte(message)})
@@ -137,6 +137,23 @@ func clientRequestAllowed(request *http.Request, clientID uint64) bool {
 func distributionRequest(request *http.Request) bool {
 	path := request.URL.EscapedPath()
 	return request.URL.RawQuery == "" && (path == "/v1/payload-retrieval-path" || path == "/v1/agent-profiles" || strings.HasPrefix(path, "/v1/agent-profiles/") || path == "/v1/agent-artifacts" || strings.HasPrefix(path, "/v1/agent-artifacts/"))
+}
+
+func payloadChunkRequest(request *http.Request) bool {
+	if request.Method != http.MethodGet {
+		return false
+	}
+	parts := strings.Split(request.URL.EscapedPath(), "/")
+	if len(parts) != 6 || parts[1] != "v1" || parts[2] != "agent-artifacts" || parts[3] == "" || parts[4] != "download" || parts[5] != "chunk" {
+		return false
+	}
+	query := request.URL.Query()
+	values := query["offset"]
+	if len(query) != 1 || len(values) != 1 {
+		return false
+	}
+	offset, err := strconv.ParseInt(values[0], 10, 64)
+	return err == nil && offset >= 0
 }
 
 func writeRemoteResponse(stream *mux.Stream, response remoteResponse) {

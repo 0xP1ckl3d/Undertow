@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -108,6 +109,14 @@ type profileRequest struct {
 type artifactInfo struct {
 	agentprofile.Artifact
 	ServerPath string `json:"server_path"`
+}
+
+const payloadDownloadChunkSize = 256 << 10
+
+type payloadDownloadChunk struct {
+	Offset int64  `json:"offset"`
+	Total  int64  `json:"total"`
+	Data   []byte `json:"data"`
 }
 
 func (d *agentDistribution) artifactInfo(a agentprofile.Artifact) artifactInfo {
@@ -359,8 +368,12 @@ func (d *agentDistribution) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(path, "/v1/agent-artifacts/"):
 		parts := strings.Split(strings.TrimPrefix(path, "/v1/agent-artifacts/"), "/")
 		id := parts[0]
-		if id == "" || len(parts) > 2 {
+		if id == "" || len(parts) > 3 {
 			http.NotFound(w, r)
+			return
+		}
+		if len(parts) == 3 && parts[1] == "download" && parts[2] == "chunk" && r.Method == http.MethodGet {
+			d.serveArtifactChunk(w, r, id)
 			return
 		}
 		if len(parts) == 1 {
@@ -529,6 +542,49 @@ func (d *agentDistribution) Retrieve(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Artifact-SHA256", a.SHA256)
 	w.Header().Set("Cache-Control", "no-store")
 	http.ServeContent(w, r, publicName, a.Created, f)
+}
+
+func (d *agentDistribution) serveArtifactChunk(w http.ResponseWriter, r *http.Request, id string) {
+	query := r.URL.Query()
+	values, ok := query["offset"]
+	if len(query) != 1 || !ok || len(values) != 1 {
+		http.Error(w, "offset is required", http.StatusBadRequest)
+		return
+	}
+	offset, err := strconv.ParseInt(values[0], 10, 64)
+	if err != nil || offset < 0 {
+		http.Error(w, "invalid offset", http.StatusBadRequest)
+		return
+	}
+	a, err := d.store.Artifact(id)
+	if err != nil {
+		distributionError(w, err)
+		return
+	}
+	file, err := os.Open(d.store.ArtifactPath(a))
+	if err != nil {
+		distributionError(w, err)
+		return
+	}
+	defer file.Close()
+	stat, err := file.Stat()
+	if err != nil {
+		distributionError(w, err)
+		return
+	}
+	if offset > stat.Size() {
+		http.Error(w, "offset exceeds artifact size", http.StatusBadRequest)
+		return
+	}
+	want := min(int64(payloadDownloadChunkSize), stat.Size()-offset)
+	data := make([]byte, want)
+	n, err := file.ReadAt(data, offset)
+	if err != nil || n != len(data) {
+		distributionError(w, io.ErrUnexpectedEOF)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	distributionJSON(w, http.StatusOK, payloadDownloadChunk{Offset: offset, Total: stat.Size(), Data: data})
 }
 
 func distributionJSON(w http.ResponseWriter, status int, v any) {

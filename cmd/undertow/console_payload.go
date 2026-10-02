@@ -17,7 +17,7 @@ import (
 // command namespace, even though older consoles used "agent" for both.
 func isPayloadSubcommand(value string) bool {
 	switch value {
-	case "profile", "profiles", "build", "list", "artifacts", "show", "host", "hosted", "url", "unhost", "revoke", "delete", "deploy-script":
+	case "profile", "profiles", "build", "list", "artifacts", "show", "host", "hosted", "url", "download", "unhost", "revoke", "delete", "deploy-script":
 		return true
 	}
 	return false
@@ -34,6 +34,8 @@ func printPayloadWorkflow(out io.Writer) {
   4. Download, verify SHA-256, and run the binary without arguments.
 
 Inspect: payload list | payload show PAYLOAD_ID | payload hosted | payload url PAYLOAD_ID
+Save:    payload download PAYLOAD_ID [OUTPUT]
+         Defaults to payloads/FILENAME in this console's working directory.
 Manage:  payload unhost PAYLOAD_ID | payload revoke PAYLOAD_ID | payload delete PAYLOAD_ID
 Helper:  payload deploy-script PAYLOAD_ID powershell|shell
 Profile: payload profile show|edit|delete NAME
@@ -49,6 +51,7 @@ permanently invalidating old URLs;
 use "payload hosted" to retrieve the current URLs. A startup
 --payload-retrieval-path flag overrides the saved prefix.
 Hosting, enrollment revocation, and stopping a running agent are separate.
+VPN clients need a distribution-admin grant to download payload bytes.
 `)
 }
 
@@ -79,6 +82,15 @@ func runConsolePayload(ctx context.Context, out io.Writer, call consoleCaller, a
 			return fmt.Errorf("use payload %s PAYLOAD_ID; run payload list to find an ID", args[1])
 		}
 		return runPayloadAction(ctx, out, call, args[1], args[2])
+	case "download":
+		if len(args) != 3 && len(args) != 4 {
+			return errors.New("use payload download PAYLOAD_ID [OUTPUT]; default: payloads/FILENAME")
+		}
+		outputPath := ""
+		if len(args) == 4 {
+			outputPath = args[3]
+		}
+		return runPayloadDownload(ctx, out, call, args[2], outputPath)
 	case "deploy-script":
 		if len(args) != 4 || args[3] != "powershell" && args[3] != "shell" {
 			return errors.New("use payload deploy-script PAYLOAD_ID powershell|shell; host the payload first")

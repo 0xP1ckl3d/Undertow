@@ -154,7 +154,7 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 		}
 	case "payload":
 		if len(before) == 1 {
-			return wordCompletions([]string{"help", "retrieval-path", "profiles", "profile", "build", "list", "show", "host", "hosted", "url", "unhost", "revoke", "delete", "deploy-script"}, partial)
+			return wordCompletions([]string{"help", "retrieval-path", "profiles", "profile", "build", "list", "show", "host", "hosted", "url", "download", "unhost", "revoke", "delete", "deploy-script"}, partial)
 		}
 		if len(before) == 2 && before[1] == "retrieval-path" {
 			return wordCompletions([]string{"set"}, partial)
@@ -164,6 +164,9 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 		}
 		if len(before) == 3 && before[1] == "deploy-script" {
 			return wordCompletions([]string{"powershell", "shell"}, partial)
+		}
+		if len(before) == 3 && before[1] == "download" {
+			return localPathCompletions(partial, quote, true)
 		}
 		if len(before) == 3 && before[1] == "build" {
 			return wordCompletions([]string{"windows", "linux"}, partial)

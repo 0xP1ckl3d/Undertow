@@ -20,7 +20,7 @@ See [getting started](getting-started.md) for enrollment, fingerprint, and privi
 
 ## Payload deployment
 
-Type `payload` for the four-step profile → build → host → run guide. Both consoles can read the server's profile and payload records. Server operators can change them; a connected client needs an explicit `client distribution-admin SESSION_ID on` grant for changes:
+Type `payload` for the four-step profile → build → host → run guide. Both consoles can read the server's profile and payload records. Server operators can change them; a connected client needs an explicit `client distribution-admin SESSION_ID on` grant for changes and for `payload download`:
 
 ```text
 payload profile create office server=SERVER_IP:443 transport=quic
@@ -30,6 +30,8 @@ payload profile edit office routes=10.20.0.0/16
 payload build office windows amd64
 payload list
 payload show PAYLOAD_ID
+payload download PAYLOAD_ID
+payload download PAYLOAD_ID ./staging/worker.exe
 payload host PAYLOAD_ID
 payload url PAYLOAD_ID
 payload hosted

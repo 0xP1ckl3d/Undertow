@@ -226,6 +226,30 @@ func TestVPNClientDistributionIsReadOnlyByDefault(t *testing.T) {
 	}
 }
 
+func TestPayloadChunkRequiresDistributionGrant(t *testing.T) {
+	request, err := http.NewRequest(http.MethodGet, "http://localhost/v1/agent-artifacts/abc/download/chunk?offset=0", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if clientRequestAllowed(request, 705) || distributionRequest(request) || !payloadChunkRequest(request) {
+		t.Fatal("payload bytes were exposed to a client without a distribution grant")
+	}
+	for _, path := range []string{
+		"/v1/agent-artifacts/abc/download/chunk",
+		"/v1/agent-artifacts/abc/download/chunk?offset=-1",
+		"/v1/agent-artifacts/abc/download/chunk?offset=0&extra=1",
+		"/v1/agent-artifacts/abc/download/chunk/other?offset=0",
+	} {
+		request, err := http.NewRequest(http.MethodGet, "http://localhost"+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if payloadChunkRequest(request) {
+			t.Fatalf("invalid payload chunk request accepted: %s", path)
+		}
+	}
+}
+
 func TestRemoteExecHelperProcess(t *testing.T) {
 	if os.Getenv("UNDERTOW_REMOTE_EXEC_HELPER") != "1" {
 		return

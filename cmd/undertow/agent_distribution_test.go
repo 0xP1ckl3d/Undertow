@@ -91,6 +91,18 @@ func TestAgentDistributionAPIAndRetrieval(t *testing.T) {
 	if buildInfo.ServerPath != store.ArtifactPath(a) || !filepath.IsAbs(buildInfo.ServerPath) {
 		t.Fatalf("build response lacks absolute server path: %+v", buildInfo)
 	}
+	artifactBytes, err := os.ReadFile(buildInfo.ServerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunkResponse := call(http.MethodGet, "/v1/agent-artifacts/"+a.ID+"/download/chunk?offset=0", nil)
+	if chunkResponse.Code != http.StatusOK {
+		t.Fatalf("unhosted payload chunk: %d %s", chunkResponse.Code, chunkResponse.Body.String())
+	}
+	var chunk payloadDownloadChunk
+	if err := json.Unmarshal(chunkResponse.Body.Bytes(), &chunk); err != nil || chunk.Offset != 0 || chunk.Total != int64(len(artifactBytes)) || !bytes.Equal(chunk.Data, artifactBytes[:min(len(artifactBytes), payloadDownloadChunkSize)]) {
+		t.Fatalf("unhosted payload chunk mismatch: %+v %v", chunk, err)
+	}
 	if a.ProfileFormatVersion != agentprofile.EmbeddedFormatVersion || a.UndertowVersion != "test" {
 		t.Fatalf("artifact version metadata missing: %+v", a)
 	}
