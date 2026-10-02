@@ -99,7 +99,9 @@ func printConsoleOverview(output io.Writer, vpnClient, selected, serverAttached 
 		m.row("jobs", "List this agent's numbered tasks")
 		m.row("jobs NUMBER", "Show one task")
 		m.row("job show NUMBER|ID", "Show task state and exit code")
-		m.row("job output NUMBER|ID", "Read retained task output")
+		m.row("job output NUMBER|ID", "Show small task output")
+		m.row("job save NUMBER|ID [FILE]", "Download complete task output")
+		m.row("job delete NUMBER|ID", "Remove a finished task and its server output")
 		m.row("job cancel NUMBER|ID", "Stop a running task")
 		m.row("job stop NUMBER|ID", "Stop a running task")
 

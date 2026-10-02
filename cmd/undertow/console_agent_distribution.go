@@ -160,7 +160,7 @@ func printDeployScript(out io.Writer, hosted hostedArtifactInfo, shell string) e
 	a := hosted.Artifact
 	switch shell {
 	case "powershell":
-		fmt.Fprintf(out, "param([string]$Destination = '%s')\n$ErrorActionPreference = 'Stop'\n$url = '%s'\n$expected = '%s'\n$temp = $Destination + '.download'\ntry {\n", psQuote(a.Filename), psQuote(hosted.Retrieval), a.SHA256)
+		fmt.Fprintf(out, "param([string]$Destination = '%s')\n$ErrorActionPreference = 'Stop'\n$url = '%s'\n$expected = '%s'\n$Destination = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Destination)\n$temp = $Destination + '.download'\ntry {\n", psQuote(a.Filename), psQuote(hosted.Retrieval), a.SHA256)
 		if hosted.TLSSelfSigned {
 			fmt.Fprint(out, `  Add-Type -AssemblyName System.Net.Http
   if (-not ('ScopedArtifactTls' -as [type])) {
@@ -200,7 +200,7 @@ public static class ScopedArtifactTls {
 		} else {
 			fmt.Fprint(out, "  Invoke-WebRequest -Uri $url -OutFile $temp\n")
 		}
-		fmt.Fprint(out, "  $stream = [System.IO.File]::OpenRead($temp)\n  $sha256 = [System.Security.Cryptography.SHA256]::Create()\n  try { $actual = [System.BitConverter]::ToString($sha256.ComputeHash($stream)).Replace('-', '').ToLowerInvariant() }\n  finally { $sha256.Dispose(); $stream.Dispose() }\n  if ($actual -ne $expected) { throw 'Artifact SHA-256 mismatch' }\n  Move-Item -Force $temp $Destination\n  Start-Process -FilePath (Resolve-Path $Destination) -WindowStyle Hidden\n} finally { Remove-Item -ErrorAction SilentlyContinue $temp }\n")
+		fmt.Fprint(out, "  $stream = [System.IO.File]::OpenRead($temp)\n  $sha256 = [System.Security.Cryptography.SHA256]::Create()\n  try { $actual = [System.BitConverter]::ToString($sha256.ComputeHash($stream)).Replace('-', '').ToLowerInvariant() }\n  finally { $sha256.Dispose(); $stream.Dispose() }\n  if ($actual -ne $expected) { throw 'Artifact SHA-256 mismatch' }\n  Move-Item -LiteralPath $temp -Destination $Destination -Force\n  Start-Process -FilePath $Destination -WindowStyle Hidden\n} finally { Remove-Item -LiteralPath $temp -ErrorAction SilentlyContinue }\n")
 	case "shell":
 		curlFlags := "-fL"
 		if hosted.TLSSelfSigned {

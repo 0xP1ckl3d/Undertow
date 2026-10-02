@@ -203,6 +203,9 @@ func serve(args []string) error {
 	controlListen := f.String("control-listen", "127.0.0.1:47889", "loopback operator control API")
 	controlTokenPath := f.String("control-token-file", "control.key", "local operator API token file")
 	agentStorePath := f.String("agent-store", "agent-distribution", "agent profile and artifact store directory")
+	jobOutputDir := f.String("job-output-dir", "jobs-output", "server directory for background job output, nested by agent")
+	jobOutputLimitMiB := f.Uint64("job-output-limit-mib", 512, "maximum output per background job in MiB")
+	jobOutputTotalMiB := f.Uint64("job-output-total-mib", 4096, "maximum stored job output across all agents in MiB")
 	agentTemplatePath := f.String("agent-templates", "", "directory containing prebuilt thin-agent templates (default: alongside undertow executable)")
 	payloadRetrievalPath := f.String("payload-retrieval-path", "/", "opaque payload download path prefix (default: /)")
 	var forwardValues forwards
@@ -313,6 +316,12 @@ func serve(args []string) error {
 		routeDevice = device
 	}
 	manager := control.NewManager(table, routeDevice, proxyNetwork, proxyPrefix.Addr())
+	if *jobOutputLimitMiB == 0 || *jobOutputTotalMiB < *jobOutputLimitMiB || *jobOutputTotalMiB > ^uint64(0)/(1<<20) {
+		return errors.New("invalid job output limits")
+	}
+	if err := manager.ConfigureJobOutput(*jobOutputDir, *jobOutputLimitMiB<<20, *jobOutputTotalMiB<<20); err != nil {
+		return err
+	}
 	templatePath := *agentTemplatePath
 	if templatePath == "" {
 		executable, err := os.Executable()

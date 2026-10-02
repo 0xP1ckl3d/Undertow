@@ -95,7 +95,7 @@ func serveBOF(ctx context.Context, stream *mux.Stream) {
 		writeNativeResult(stream, -1, err)
 		return
 	}
-	runCtx, cancel := context.WithTimeout(ctx, nativeRuntimeLimit)
+	runCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	go func() {
 		select {

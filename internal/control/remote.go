@@ -103,6 +103,9 @@ func clientRequestAllowed(request *http.Request, clientID uint64) bool {
 	if request.Method == http.MethodPost && strings.HasPrefix(path, "/v1/jobs/") && strings.HasSuffix(path, "/cancel") && request.URL.RawQuery == "" {
 		return true
 	}
+	if request.Method == http.MethodDelete && strings.HasPrefix(path, "/v1/jobs/") && request.URL.RawQuery == "" {
+		return true
+	}
 	clientPrefix := "/v1/clients/" + strconv.FormatUint(clientID, 10)
 	if request.Method == http.MethodGet && path == clientPrefix+"/forwards" && request.URL.RawQuery == "" {
 		return true

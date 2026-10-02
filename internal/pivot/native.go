@@ -17,8 +17,6 @@ import (
 
 const NativeDestination = "native.undertow.invalid:0"
 const NativeModuleLimit = nativemodule.MaxSize
-const nativeOutputLimit = 4 << 20
-const nativeRuntimeLimit = 2 * time.Minute
 
 var nativeSlots = make(chan struct{}, 2)
 
@@ -110,7 +108,7 @@ func serveNative(ctx context.Context, stream *mux.Stream) {
 		writeNativeResult(stream, -1, err)
 		return
 	}
-	runCtx, cancel := context.WithTimeout(ctx, nativeRuntimeLimit)
+	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	go func() {
 		select {

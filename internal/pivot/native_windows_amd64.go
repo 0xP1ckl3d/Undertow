@@ -32,9 +32,8 @@ type nativeAPI struct {
 }
 
 type nativeRun struct {
-	ctx    context.Context
-	write  func(byte, []byte) error
-	output atomic.Int64
+	ctx   context.Context
+	write func(byte, []byte) error
 }
 
 var nativeRuns = struct {
@@ -52,9 +51,6 @@ func nativeLookup(id uintptr) *nativeRun {
 func nativeWrite(kind byte, id, ptr, length uintptr) uintptr {
 	run := nativeLookup(id)
 	if run == nil || run.ctx.Err() != nil || length > 32<<10 || length > 0 && ptr == 0 {
-		return ^uintptr(0)
-	}
-	if run.output.Add(int64(length)) > nativeOutputLimit {
 		return ^uintptr(0)
 	}
 	if length == 0 {
@@ -135,9 +131,6 @@ func executeNative(ctx context.Context, dll, args []byte, write func(byte, []byt
 	}
 	result, _, _ := syscall.SyscallN(entry, apiAddress, argsAddress, uintptr(len(args)))
 	code := int(int32(result))
-	if run.output.Load() > nativeOutputLimit {
-		return -1, fmt.Errorf("native output exceeded 4 MiB")
-	}
 	if code != 0 {
 		return code, fmt.Errorf("native module returned non-zero status %d", code)
 	}

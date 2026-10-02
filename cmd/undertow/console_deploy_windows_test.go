@@ -40,7 +40,7 @@ func TestGeneratedPowerShellDeploymentAgainstSelfSignedHTTPS(t *testing.T) {
 		}
 		t.Run(shell, func(t *testing.T) {
 			for _, validHash := range []bool{true, false} {
-				name := "valid hash"
+				name := "default destination in working directory"
 				if !validHash {
 					name = "wrong hash"
 				}
@@ -61,14 +61,19 @@ func TestGeneratedPowerShellDeploymentAgainstSelfSignedHTTPS(t *testing.T) {
 					// This also catches a process-global certificate bypass.
 					script.WriteString("\nif ([System.Net.ServicePointManager]::ServerCertificateValidationCallback -ne $null) { throw 'global TLS callback changed' }\nWrite-Output 'DEPLOY_HELPER_OK'\n")
 					dir := t.TempDir()
-					path := filepath.Join(dir, "deploy.ps1")
-					dest := filepath.Join(dir, "downloaded.cmd")
+					path := filepath.Join(t.TempDir(), "deploy.ps1")
+					dest := filepath.Join(dir, "helper.cmd")
 					if err := os.WriteFile(path, script.Bytes(), 0600); err != nil {
 						t.Fatal(err)
 					}
 					ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 					defer cancel()
-					cmd := exec.CommandContext(ctx, shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", path, "-Destination", dest)
+					args := []string{"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", path}
+					if !validHash {
+						args = append(args, "-Destination", dest)
+					}
+					cmd := exec.CommandContext(ctx, shell, args...)
+					cmd.Dir = dir
 					out, err := cmd.CombinedOutput()
 					if ctx.Err() != nil {
 						t.Fatalf("helper timed out: %s", out)

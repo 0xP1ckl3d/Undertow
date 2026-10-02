@@ -1,7 +1,9 @@
 package control
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/netip"
 	"os"
@@ -144,6 +146,10 @@ func TestJobLifecycleOutputAndOwnership(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	defer cancel()
 	manager := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	outputRoot := t.TempDir()
+	if err := manager.ConfigureJobOutput(outputRoot, 1<<20, 2<<20); err != nil {
+		t.Fatal(err)
+	}
 	a, b := make(chan []byte, 256), make(chan []byte, 256)
 	serverAgent := mux.New(ctx, &remoteTestTransport{in: a, out: b, done: make(chan struct{})}, true)
 	agent := mux.New(ctx, &remoteTestTransport{in: b, out: a, done: make(chan struct{})}, false)
@@ -203,5 +209,104 @@ func TestJobLifecycleOutputAndOwnership(t *testing.T) {
 	}
 	if len(retained.Output) > jobOutputLimit || !retained.OutputTruncated || retained.OutputBytes <= jobOutputLimit {
 		t.Fatalf("unbounded output: size=%d total=%d truncated=%t", len(retained.Output), retained.OutputBytes, retained.OutputTruncated)
+	}
+	if retained.OutputFile != filepath.Join(outputRoot, "agent-a", large.ID+".out") {
+		t.Fatalf("output file=%q", retained.OutputFile)
+	}
+	contents, err := os.ReadFile(retained.OutputFile)
+	if err != nil || uint64(len(contents)) != retained.OutputBytes || !bytes.Contains(contents, []byte("job started")) || !bytes.Contains(contents, []byte("job finished")) {
+		t.Fatalf("spilled output size=%d read error=%v", len(contents), err)
+	}
+	chunk, err := manager.JobChunk(77, large.ID, 0)
+	if err != nil || len(chunk.Data) != jobOutputChunkSize || !bytes.Contains(chunk.Data, []byte("job started")) {
+		t.Fatalf("first chunk size=%d error=%v", len(chunk.Data), err)
+	}
+	if _, err := manager.JobChunk(88, large.ID, 0); err == nil {
+		t.Fatal("other client downloaded job output")
+	}
+}
+
+func TestJobOutputSpillsOnlyAfterMemoryLimitAndStopsAtQuota(t *testing.T) {
+	m := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	root := t.TempDir()
+	if err := m.ConfigureJobOutput(root, 300<<10, 400<<10); err != nil {
+		t.Fatal(err)
+	}
+	job := &jobState{info: JobInfo{ID: "abc123", AgentID: "agent-a"}}
+	m.jobs[job.info.ID] = job
+	first := []byte(strings.Repeat("a", 200<<10))
+	if err := m.appendJobOutput(job, first); err != nil || job.outputFile != nil {
+		t.Fatalf("small output created a file: %v", err)
+	}
+	chunk, err := m.JobChunk(0, job.info.ID, 0)
+	if err != nil || len(chunk.Data) != len(first) {
+		t.Fatalf("in-memory chunk size=%d error=%v", len(chunk.Data), err)
+	}
+	if err := m.appendJobOutput(job, []byte(strings.Repeat("b", 80<<10))); err != nil {
+		t.Fatal(err)
+	}
+	if job.outputFile == nil || job.info.OutputFile == "" {
+		t.Fatal("large output did not spill")
+	}
+	if err := m.appendJobOutput(job, []byte(strings.Repeat("c", 30<<10))); err == nil || !strings.Contains(err.Error(), "per job") {
+		t.Fatalf("quota error=%v", err)
+	}
+	if job.info.OutputBytes != 280<<10 {
+		t.Fatalf("quota wrote extra output: %d", job.info.OutputBytes)
+	}
+	if err := job.outputFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+	contents, err := os.ReadFile(job.info.OutputFile)
+	if err != nil || len(contents) != 280<<10 || string(contents[:len(first)]) != string(first) {
+		t.Fatalf("spilled content size=%d error=%v", len(contents), err)
+	}
+	second := &jobState{info: JobInfo{ID: "def456", AgentID: "agent-a"}}
+	if err := m.appendJobOutput(second, first); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.appendJobOutput(second, []byte(strings.Repeat("b", 80<<10))); err == nil || !strings.Contains(err.Error(), "storage limit") {
+		t.Fatalf("total quota error=%v", err)
+	}
+	if second.outputFile != nil {
+		t.Fatal("total quota created another output file")
+	}
+	if err := m.DeleteJob(0, job.info.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(job.info.OutputFile); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("deleted output still exists: %v", err)
+	}
+	if err := m.appendJobOutput(second, []byte(strings.Repeat("b", 80<<10))); err != nil {
+		t.Fatalf("quota was not released: %v", err)
+	}
+	if err := second.outputFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestJobOutputRemainsAvailableAfterSameKeyReconnect(t *testing.T) {
+	m := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	var keys security.Keys
+	same, err := session.New(2, keys, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := session.New(3, keys, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.clients[2] = &clientState{peer: &dns.Peer{Session: same, AgentID: "same-key"}}
+	m.clients[3] = &clientState{peer: &dns.Peer{Session: other, AgentID: "other-key"}}
+	m.jobs["saved"] = &jobState{owner: 1, ownerKey: "same-key", output: []byte("result"), info: JobInfo{ID: "saved", OutputBytes: 6}}
+	if _, err := m.Job(2, "saved", true); err != nil {
+		t.Fatalf("same key could not read job: %v", err)
+	}
+	chunk, err := m.JobChunk(2, "saved", 0)
+	if err != nil || string(chunk.Data) != "result" {
+		t.Fatalf("same key could not download job: %q, %v", chunk.Data, err)
+	}
+	if _, err := m.Job(3, "saved", true); err == nil {
+		t.Fatal("different key read job")
 	}
 }

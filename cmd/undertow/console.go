@@ -475,7 +475,20 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 			continue
 		}
 		if args[0] == "jobs" || args[0] == "job" {
-			if err := runConsoleJobCommand(ctx, output, call, args, selectedID, &jobSelection); err != nil {
+			var confirm func(string) bool
+			if editor != nil {
+				confirm = func(question string) bool {
+					editor.showPrompt(question, false)
+					select {
+					case answer := <-lines:
+						answer = strings.ToLower(strings.TrimSpace(answer))
+						return answer == "" || answer == "y" || answer == "yes"
+					case <-ctx.Done():
+						return false
+					}
+				}
+			}
+			if err := runConsoleJobCommand(ctx, output, call, args, selectedID, &jobSelection, confirm); err != nil {
 				fmt.Fprintln(output, "error:", err)
 			}
 			continue

@@ -19,7 +19,6 @@
 #define TAIL_BYTES (256u * 1024u)
 #define MAX_PATH_CHARS 4096
 #define MAX_EVIDENCE_BYTES 1024
-#define OUTPUT_BUDGET_BYTES (3u * 1024u * 1024u)
 
 #ifndef STYPE_MASK
 #define STYPE_MASK 0x000000FF
@@ -54,9 +53,7 @@ typedef struct sift_stats {
     int host_limit_hit;
 } sift_stats;
 
-static size_t output_bytes;
 static int output_limited;
-static size_t output_budget = OUTPUT_BUDGET_BYTES;
 
 static int api_cancelled(const undertow_native_api_v1 *api) {
     return api && api->cancelled && api->cancelled(api->context) != 0;
@@ -66,13 +63,10 @@ static void out_text(const undertow_native_api_v1 *api, int error, const char *t
     size_t n;
     if (!api || !text) return;
     n = strlen(text);
-    if (output_bytes + n > output_budget) { output_limited = 1; return; }
     if (error) {
-        if (api->write_error && api->write_error(api->context, text, n) == 0) output_bytes += n;
-        else output_limited = 1;
+        if (!api->write_error || api->write_error(api->context, text, n) != 0) output_limited = 1;
     } else {
-        if (api->write && api->write(api->context, text, n) == 0) output_bytes += n;
-        else output_limited = 1;
+        if (!api->write || api->write(api->context, text, n) != 0) output_limited = 1;
     }
 }
 
@@ -85,13 +79,10 @@ static void outf(const undertow_native_api_v1 *api, int error, const char *fmt, 
     va_end(args);
     if (n <= 0) return;
     if ((size_t)n >= sizeof(buffer)) n = (int)sizeof(buffer) - 1;
-    if (output_bytes + (size_t)n > output_budget) { output_limited = 1; return; }
     if (error) {
-        if (api->write_error && api->write_error(api->context, buffer, (size_t)n) == 0) output_bytes += (size_t)n;
-        else output_limited = 1;
+        if (!api->write_error || api->write_error(api->context, buffer, (size_t)n) != 0) output_limited = 1;
     } else {
-        if (api->write && api->write(api->context, buffer, (size_t)n) == 0) output_bytes += (size_t)n;
-        else output_limited = 1;
+        if (!api->write || api->write(api->context, buffer, (size_t)n) != 0) output_limited = 1;
     }
 }
 
@@ -597,7 +588,6 @@ static void run_domain(const undertow_native_api_v1 *api, const sift_options *o,
 }
 
 static void print_summary(const undertow_native_api_v1 *api, const sift_options *o, const sift_stats *s) {
-    output_budget = OUTPUT_BUDGET_BYTES + 4096u;
     if (o->json) {
         outf(api, 0,
             "{\"type\":\"summary\",\"roots\":%llu,\"hosts\":%llu,\"shares\":%llu,\"directories\":%llu,\"files\":%llu,\"bytes_read\":%llu,\"findings\":%llu,\"errors\":%llu,\"cancelled\":%s,\"finding_limit_hit\":%s,\"file_limit_hit\":%s,\"read_limit_hit\":%s,\"depth_limit_hit\":%s,\"host_limit_hit\":%s,\"output_limit_hit\":%s}\n",

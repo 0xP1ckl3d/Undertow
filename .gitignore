@@ -2,6 +2,8 @@
 /.local/
 /bin/
 /dist/
+jobs-output/
+job-downloads/
 /Plan.md
 /client-routes.json
 *.routes.json

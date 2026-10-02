@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +22,8 @@ import (
 type consoleJobSelection struct {
 	ids []string
 }
+
+const jobConsoleOutputLimit = 64 << 10
 
 func consoleJobs(ctx context.Context, call consoleCaller, agentID string) ([]control.JobInfo, error) {
 	path := "/v1/jobs"
@@ -37,9 +41,9 @@ func consoleJobs(ctx context.Context, call consoleCaller, agentID string) ([]con
 	return jobs, nil
 }
 
-func runConsoleJobCommand(ctx context.Context, output io.Writer, call consoleCaller, args []string, selectedAgentID string, selection *consoleJobSelection) error {
+func runConsoleJobCommand(ctx context.Context, output io.Writer, call consoleCaller, args []string, selectedAgentID string, selection *consoleJobSelection, confirmDownload ...func(string) bool) error {
 	if args[0] == "jobs" {
-		if len(args) >= 2 && (args[1] == "show" || args[1] == "output" || args[1] == "cancel" || args[1] == "stop") {
+		if len(args) >= 2 && (args[1] == "show" || args[1] == "output" || args[1] == "save" || args[1] == "delete" || args[1] == "cancel" || args[1] == "stop") {
 			args = append([]string{"job"}, args[1:]...)
 		} else if len(args) == 2 && (selectedAgentID != "" || isJobNumber(args[1])) {
 			args = []string{"job", "show", args[1]}
@@ -106,11 +110,11 @@ func runConsoleJobCommand(ctx context.Context, output io.Writer, call consoleCal
 		fmt.Fprintf(output, "Job %s started on %s. Use job output %s, or run jobs for a numbered list.\n", job.ID, shortAgentID(job.AgentID), job.ID)
 		return nil
 	}
-	if len(args) != 3 {
-		return errors.New("use job show|output|cancel|stop NUMBER|ID")
+	if len(args) != 3 && !(len(args) == 4 && args[1] == "save") {
+		return errors.New("use job show|output|save|delete|cancel|stop NUMBER|ID [LOCAL_FILE]")
 	}
-	if args[1] != "show" && args[1] != "output" && args[1] != "cancel" && args[1] != "stop" {
-		return errors.New("use job show|output|cancel|stop NUMBER|ID")
+	if args[1] != "show" && args[1] != "output" && args[1] != "save" && args[1] != "delete" && args[1] != "cancel" && args[1] != "stop" {
+		return errors.New("use job show|output|save|delete|cancel|stop NUMBER|ID [LOCAL_FILE]")
 	}
 	jobID := args[2]
 	if isJobNumber(jobID) {
@@ -143,6 +147,13 @@ func runConsoleJobCommand(ctx context.Context, output io.Writer, call consoleCal
 		}
 		return err
 	}
+	if args[1] == "delete" {
+		_, err := call(ctx, http.MethodDelete, path, nil)
+		if err == nil {
+			fmt.Fprintf(output, "Job %s and its server output deleted.\n", jobID)
+		}
+		return err
+	}
 	if args[1] == "output" {
 		path += "/output"
 	}
@@ -154,7 +165,22 @@ func runConsoleJobCommand(ctx context.Context, output io.Writer, call consoleCal
 	if err := json.Unmarshal(data, &job); err != nil {
 		return err
 	}
+	if args[1] == "save" {
+		localPath := ""
+		if len(args) == 4 {
+			localPath = args[3]
+		}
+		return saveJobOutput(ctx, output, call, job, localPath)
+	}
 	if args[1] == "output" {
+		if job.OutputBytes > jobConsoleOutputLimit {
+			question := fmt.Sprintf("Job output is %d bytes, too large for the console. Download the complete output to this client? [Y/n] ", job.OutputBytes)
+			if len(confirmDownload) > 0 && confirmDownload[0] != nil && confirmDownload[0](question) {
+				return saveJobOutput(ctx, output, call, job, "")
+			}
+			fmt.Fprintf(output, "Use job save %s [LOCAL_FILE] to download it.\n", job.ID)
+			return nil
+		}
 		if job.Output == "" && !job.OutputTruncated {
 			fmt.Fprintln(output, "[no output retained]")
 			return nil
@@ -172,7 +198,118 @@ func runConsoleJobCommand(ctx context.Context, output io.Writer, call consoleCal
 	if job.ExitCode != nil {
 		fmt.Fprintf(output, "Exit: %d\n", *job.ExitCode)
 	}
-	fmt.Fprintf(output, "Output: %d bytes (retained up to 256 KiB)\n", job.OutputBytes)
+	fmt.Fprintf(output, "Output: %d bytes\n", job.OutputBytes)
+	if job.OutputFile != "" {
+		fmt.Fprintf(output, "Server file: %s\n", job.OutputFile)
+	}
+	if job.OutputError != "" {
+		fmt.Fprintf(output, "Output error: %s\n", job.OutputError)
+	}
+	return nil
+}
+
+func saveJobOutput(ctx context.Context, output io.Writer, call consoleCaller, job control.JobInfo, destination string) error {
+	if destination == "" {
+		name := job.ID + ".out"
+		if job.State != "completed" {
+			name = job.ID + ".partial.out"
+		}
+		destination = filepath.Join("job-downloads", job.AgentID, name)
+	}
+	abs, err := filepath.Abs(destination)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(abs); err == nil {
+		return fmt.Errorf("output file already exists: %s", abs)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(abs), 0700); err != nil {
+		return err
+	}
+	temporary, err := os.CreateTemp(filepath.Dir(abs), ".undertow-job-*.partial")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(temporary.Name())
+	defer temporary.Close()
+	var offset uint64
+	var nextProgress uint64 = 8 << 20
+	if job.OutputBytes >= 8<<20 {
+		fmt.Fprintf(output, "Downloading %d bytes of job output...\n", job.OutputBytes)
+	}
+	for offset < job.OutputBytes {
+		data, err := call(ctx, http.MethodGet, "/v1/jobs/"+url.PathEscape(job.ID)+"/output/chunk?offset="+strconv.FormatUint(offset, 10), nil)
+		if err != nil {
+			return err
+		}
+		var chunk control.JobOutputChunk
+		if err := json.Unmarshal(data, &chunk); err != nil {
+			return err
+		}
+		if chunk.Offset != offset || len(chunk.Data) == 0 {
+			return errors.New("invalid or incomplete job output chunk")
+		}
+		if uint64(len(chunk.Data)) > job.OutputBytes-offset {
+			chunk.Data = chunk.Data[:job.OutputBytes-offset]
+		}
+		if _, err := temporary.Write(chunk.Data); err != nil {
+			return err
+		}
+		offset += uint64(len(chunk.Data))
+		if offset >= nextProgress && offset < job.OutputBytes {
+			fmt.Fprintf(output, "Downloaded %d / %d MiB\n", offset>>20, job.OutputBytes>>20)
+			nextProgress += 8 << 20
+		}
+	}
+	if err := temporary.Sync(); err != nil {
+		return err
+	}
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+	if err := publishJobDownload(temporary.Name(), abs); err != nil {
+		return err
+	}
+	fmt.Fprintf(output, "Saved %d bytes to %s\n", offset, abs)
+	if job.State != "completed" {
+		fmt.Fprintf(output, "Job state is %s; this is a snapshot of the output available now.\n", job.State)
+	}
+	return nil
+}
+
+func publishJobDownload(source, destination string) error {
+	if err := os.Link(source, destination); err == nil {
+		return nil
+	} else if _, statErr := os.Stat(destination); statErr == nil {
+		return fmt.Errorf("output file already exists: %s", destination)
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return statErr
+	}
+	input, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	defer input.Close()
+	output, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(output, input); err != nil {
+		_ = output.Close()
+		_ = os.Remove(destination)
+		return err
+	}
+	if err := output.Sync(); err != nil {
+		_ = output.Close()
+		_ = os.Remove(destination)
+		return err
+	}
+	if err := output.Close(); err != nil {
+		_ = os.Remove(destination)
+		return err
+	}
 	return nil
 }
 

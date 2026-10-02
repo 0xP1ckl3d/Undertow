@@ -176,6 +176,7 @@ type Manager struct {
 	clients           map[uint64]*clientState
 	forwards          map[string]*forwardState
 	jobs              map[string]*jobState
+	jobOutput         *jobOutputStore
 	routes            *routing.Table
 	device            RouteDevice
 	selected          string
