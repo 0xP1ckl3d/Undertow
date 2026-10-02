@@ -44,8 +44,8 @@ Profile fields: server, transport, domain, fingerprint, auth, token-file,
 password-file, payload-profile, websocket-path, tls-server-name,
 tls-insecure-skip-verify, deny, routes (comma-separated IPv4 CIDRs).
 If a listener binds 0.0.0.0 or ::, set server= to its reachable address.
-The server operator manages payloads; a VPN client needs a distribution-admin
-grant for changes. Profile and payload views never show enrollment secrets.
+Connected VPN clients can manage profiles and payloads through the authenticated
+control connection. Profile and payload views never show enrollment secrets.
 `)
 	case "agent":
 		fmt.Fprint(output, `Connected agents:

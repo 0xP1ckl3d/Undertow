@@ -140,7 +140,6 @@ func printConsoleOverview(output io.Writer, vpnClient, selected, serverAttached 
 			m.row("forward del BIND", "Close one forward")
 		}
 	} else {
-		m.row("client distribution-admin ID on|off", "Grant deployment management to one client")
 		m.section("SERVER ROUTING AND TOPOLOGY")
 		m.row("routes", "List server managed routes")
 		if selected {

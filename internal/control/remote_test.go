@@ -92,7 +92,7 @@ func TestConnectedVPNClientHasLimitedAPI(t *testing.T) {
 	}
 }
 
-func TestServerGrantControlsClientDistributionMutationsAndPayloadDownloads(t *testing.T) {
+func TestConnectedVPNClientCanManageAndDownloadPayloads(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	a, b := make(chan []byte, 256), make(chan []byte, 256)
@@ -120,37 +120,26 @@ func TestServerGrantControlsClientDistributionMutationsAndPayloadDownloads(t *te
 	go pivot.ServeVPNInteractive(ctx, server, manager.ResolveEgress, func() bool { return false }, func(ctx context.Context, stream *mux.Stream) {
 		manager.ServeRemote(ctx, "operator-secret", 704, stream)
 	})
-	if _, err := CallRemote(ctx, client, http.MethodPost, "/v1/agent-profiles", map[string]string{"name": "office"}); err == nil || !strings.Contains(err.Error(), "403") {
-		t.Fatalf("mutation without grant: %v", err)
-	}
 	chunkPath := "/v1/agent-artifacts/abc/download/chunk?offset=0"
-	if _, err := CallRemote(ctx, client, http.MethodGet, chunkPath, nil); err == nil || !strings.Contains(err.Error(), "403") {
-		t.Fatalf("payload download without grant: %v", err)
-	}
-	if calls.Load() != 0 {
-		t.Fatal("distribution handler was reached without a grant")
-	}
-	if err := manager.SetClientDistributionAdmin(704, true); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := CallRemote(ctx, client, http.MethodPost, "/v1/agent-profiles", map[string]string{"name": "office"}); err != nil {
-		t.Fatal(err)
-	}
-	if calls.Load() != 1 {
-		t.Fatal("granted mutation did not reach handler")
+	for _, request := range []struct {
+		method, path string
+		body         any
+	}{
+		{http.MethodPost, "/v1/agent-profiles", map[string]string{"name": "office"}},
+		{http.MethodPut, "/v1/agent-profiles/office", map[string]string{"name": "office"}},
+		{http.MethodPost, "/v1/agent-artifacts", map[string]string{"profile": "office"}},
+		{http.MethodPost, "/v1/agent-artifacts/abc/host", nil},
+		{http.MethodDelete, "/v1/agent-artifacts/abc/host", nil},
+	} {
+		if _, err := CallRemote(ctx, client, request.method, request.path, request.body); err != nil {
+			t.Fatalf("%s %s: %v", request.method, request.path, err)
+		}
 	}
 	if data, err := CallRemote(ctx, client, http.MethodGet, chunkPath, nil); err != nil || !strings.Contains(string(data), "YWJj") {
-		t.Fatalf("granted payload download failed: %v %s", err, data)
+		t.Fatalf("payload download failed: %v %s", err, data)
 	}
-	if calls.Load() != 2 {
-		t.Fatal("granted payload download did not reach handler")
-	}
-	manager.UnregisterClient(704, server)
-	if _, err := CallRemote(ctx, client, http.MethodPost, "/v1/agent-profiles", map[string]string{"name": "office"}); err == nil || !strings.Contains(err.Error(), "403") {
-		t.Fatalf("grant survived disconnect: %v", err)
-	}
-	if _, err := CallRemote(ctx, client, http.MethodGet, chunkPath, nil); err == nil || !strings.Contains(err.Error(), "403") {
-		t.Fatalf("payload grant survived disconnect: %v", err)
+	if got := calls.Load(); got != 6 {
+		t.Fatalf("distribution handler calls = %d, want 6", got)
 	}
 }
 
@@ -217,7 +206,7 @@ func TestVPNClientJobPathsAreScopedToJobAPI(t *testing.T) {
 	}
 }
 
-func TestVPNClientDistributionIsReadOnlyByDefault(t *testing.T) {
+func TestVPNClientDistributionManagementIsAllowed(t *testing.T) {
 	for _, tc := range []struct{ method, path string }{
 		{http.MethodGet, "/v1/agent-profiles"},
 		{http.MethodPost, "/v1/agent-profiles"},
@@ -238,20 +227,19 @@ func TestVPNClientDistributionIsReadOnlyByDefault(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		allowed := tc.method == http.MethodGet && !strings.HasSuffix(tc.path, "/host")
-		if clientRequestAllowed(req, 705) != allowed {
+		if !clientRequestAllowed(req, 705) {
 			t.Fatalf("unexpected distribution access: %s %s", tc.method, tc.path)
 		}
 	}
 }
 
-func TestPayloadChunkRequiresDistributionGrant(t *testing.T) {
+func TestPayloadChunkAllowedForConnectedClient(t *testing.T) {
 	request, err := http.NewRequest(http.MethodGet, "http://localhost/v1/agent-artifacts/abc/download/chunk?offset=0", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if clientRequestAllowed(request, 705) || distributionRequest(request) || !payloadChunkRequest(request) {
-		t.Fatal("payload bytes were exposed to a client without a distribution grant")
+	if !clientRequestAllowed(request, 705) || distributionRequest(request) || !payloadChunkRequest(request) {
+		t.Fatal("valid payload chunk request was denied")
 	}
 	for _, path := range []string{
 		"/v1/agent-artifacts/abc/download/chunk",

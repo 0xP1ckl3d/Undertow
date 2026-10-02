@@ -629,20 +629,6 @@ func runConsoleCommand(ctx context.Context, output io.Writer, call consoleCaller
 		fmt.Fprintf(output, "Session for %s closed; the agent may reconnect.\n", consoleAgentName(a))
 		return nil
 	}
-	if args[0] == "client" && len(args) == 4 && args[1] == "distribution-admin" {
-		if vpnClient {
-			return errors.New("only the server operator can grant distribution administration")
-		}
-		id, err := strconv.ParseUint(args[2], 10, 64)
-		if err != nil || (args[3] != "on" && args[3] != "off") {
-			return errors.New("use client distribution-admin SESSION_ID on|off")
-		}
-		_, err = call(ctx, http.MethodPost, "/v1/clients/"+strconv.FormatUint(id, 10)+"/distribution-admin", map[string]bool{"enabled": args[3] == "on"})
-		if err == nil {
-			fmt.Fprintf(output, "Client %d distribution administration %s.\n", id, args[3])
-		}
-		return err
-	}
 	if args[0] == "payload" {
 		return runConsolePayload(ctx, output, call, args)
 	}

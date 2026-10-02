@@ -83,24 +83,23 @@ type LifecycleEvent struct {
 }
 
 type ClientInfo struct {
-	ID                string          `json:"id"`
-	Transport         string          `json:"transport,omitempty"`
-	SessionID         uint64          `json:"session_id"`
-	Hostname          string          `json:"hostname,omitempty"`
-	Remote            string          `json:"remote"`
-	Internal          bool            `json:"internal"`
-	DistributionAdmin bool            `json:"distribution_admin,omitempty"`
-	AcceptedRoutes    []AcceptedRoute `json:"accepted_routes,omitempty"`
-	Connected         time.Time       `json:"connected"`
-	LastSeen          time.Time       `json:"last_seen"`
-	RTT               time.Duration   `json:"rtt_ns"`
-	RXBytes           uint64          `json:"rx_bytes"`
-	TXBytes           uint64          `json:"tx_bytes"`
-	Retransmits       uint64          `json:"retransmits"`
-	Streams           int             `json:"streams"`
-	InFlight          int             `json:"in_flight"`
-	Queued            int             `json:"queued"`
-	Window            int             `json:"congestion_window"`
+	ID             string          `json:"id"`
+	Transport      string          `json:"transport,omitempty"`
+	SessionID      uint64          `json:"session_id"`
+	Hostname       string          `json:"hostname,omitempty"`
+	Remote         string          `json:"remote"`
+	Internal       bool            `json:"internal"`
+	AcceptedRoutes []AcceptedRoute `json:"accepted_routes,omitempty"`
+	Connected      time.Time       `json:"connected"`
+	LastSeen       time.Time       `json:"last_seen"`
+	RTT            time.Duration   `json:"rtt_ns"`
+	RXBytes        uint64          `json:"rx_bytes"`
+	TXBytes        uint64          `json:"tx_bytes"`
+	Retransmits    uint64          `json:"retransmits"`
+	Streams        int             `json:"streams"`
+	InFlight       int             `json:"in_flight"`
+	Queued         int             `json:"queued"`
+	Window         int             `json:"congestion_window"`
 }
 
 type AcceptedRoute struct {
@@ -144,12 +143,11 @@ type TransportController interface {
 }
 
 type clientState struct {
-	peer              transport.Peer
-	mux               *mux.Mux
-	internal          bool
-	hostname          string
-	accepted          map[netip.Prefix]AcceptedRoute
-	distributionAdmin bool
+	peer     transport.Peer
+	mux      *mux.Mux
+	internal bool
+	hostname string
+	accepted map[netip.Prefix]AcceptedRoute
 }
 
 type agentState struct {
@@ -281,24 +279,6 @@ func (m *Manager) ClientInternal(sessionID uint64) bool {
 	return state != nil && state.internal
 }
 
-func (m *Manager) ClientDistributionAllowed(sessionID uint64) bool {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	state := m.clients[sessionID]
-	return state != nil && state.distributionAdmin
-}
-
-func (m *Manager) SetClientDistributionAdmin(sessionID uint64, enabled bool) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	state := m.clients[sessionID]
-	if state == nil {
-		return errors.New("VPN client is not connected")
-	}
-	state.distributionAdmin = enabled
-	return nil
-}
-
 func (m *Manager) SetClientInternal(sessionID uint64, enabled bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -408,7 +388,7 @@ func (m *Manager) ClientList() []ClientInfo {
 		}
 		sort.Slice(accepted, func(i, j int) bool { return accepted[i].Prefix < accepted[j].Prefix })
 		out = append(out, ClientInfo{
-			ID: p.AgentID, Transport: p.Carrier, SessionID: p.ID, Hostname: state.hostname, Remote: p.Remote, Internal: state.internal, DistributionAdmin: state.distributionAdmin,
+			ID: p.AgentID, Transport: p.Carrier, SessionID: p.ID, Hostname: state.hostname, Remote: p.Remote, Internal: state.internal,
 			AcceptedRoutes: accepted,
 			Connected:      p.Connected, LastSeen: p.LastSeen, RTT: p.Transport.RTT,
 			RXBytes: p.Transport.RXBytes, TXBytes: p.Transport.TXBytes,
@@ -1244,21 +1224,6 @@ func (m *Manager) handler(token string) http.Handler {
 			return
 		}
 		if err := m.SetClientInternal(id, body.Enabled); err != nil {
-			http.Error(w, err.Error(), http.StatusNotFound)
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
-	})
-	muxer.HandleFunc("POST /v1/clients/{id}/distribution-admin", func(w http.ResponseWriter, r *http.Request) {
-		id, err := strconv.ParseUint(r.PathValue("id"), 10, 64)
-		var body struct {
-			Enabled bool `json:"enabled"`
-		}
-		if err != nil || json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&body) != nil {
-			http.Error(w, "invalid client setting", http.StatusBadRequest)
-			return
-		}
-		if err := m.SetClientDistributionAdmin(id, body.Enabled); err != nil {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return
 		}

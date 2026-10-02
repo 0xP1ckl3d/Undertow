@@ -10,7 +10,7 @@ The profile and artifact store defaults to `agent-distribution` beneath the serv
 
 ## Profile → build → host → run
 
-`payload download PAYLOAD_ID [OUTPUT]` saves a built binary to the console host over the authenticated control connection, even when it is not publicly hosted. The default is `payloads/FILENAME` beneath the console's working directory; this directory is ignored by Git. Pass a filename or an existing directory as `OUTPUT` to choose another location. The command creates parent directories, verifies SHA-256 before publishing the file, and refuses to replace an existing file. A VPN client needs a `distribution-admin` grant to download payload bytes.
+`payload download PAYLOAD_ID [OUTPUT]` saves a built binary to the console host over the authenticated control connection, even when it is not publicly hosted. The default is `payloads/FILENAME` beneath the console's working directory; this directory is ignored by Git. Pass a filename or an existing directory as `OUTPUT` to choose another location. The command creates parent directories, verifies SHA-256 before publishing the file, and refuses to replace an existing file. Connected VPN clients can run this command directly.
 
 From the server console:
 
@@ -26,7 +26,7 @@ Typing `payload` in either console explains each step. The profile name (`office
 
 The build output's **Server file** is the path on the Undertow server where the binary is stored. It is not an installation path on the endpoint. Hosting prints an opaque **Download URL** for the endpoint and its **Download path** on the server's HTTPS listener. Choose the endpoint's own install path when downloading. `payload show PAYLOAD_ID` displays all of these again, while `payload url PAYLOAD_ID` reprints the URL, path, and hash. A stopped WebSocket HTTPS listener makes the URL unavailable until it starts again.
 
-The server fills in its known fingerprint, listener settings, and other safe defaults. If a listener binds `0.0.0.0` or `::`, give the reachable `server=HOST:PORT`. A client console can read profiles and payloads. To let one connected client create or change deployment state, the server operator runs `client distribution-admin SESSION_ID on`; the grant ends when that client disconnects. `off` removes it immediately. Agent execution and shutdown are operational permissions separate from distribution administration.
+The server fills in its known fingerprint, listener settings, and other safe defaults. If a listener binds `0.0.0.0` or `::`, give the reachable `server=HOST:PORT`. An authenticated client console can read, build, host, download, and manage profiles and payloads directly.
 
 New payloads have neutral filenames based on their full payload ID. `payload build office windows amd64 filename=worker.exe` selects another safe filename. A build is an immutable profile snapshot with its own Ed25519 agent identity and enrollment credential. Editing `office` leaves old binaries unchanged; building again from the same profile creates a new payload, identity, and credential. Copying one binary to multiple endpoints deliberately duplicates the same agent identity, so deploy separate builds when endpoints must be distinguishable.
 

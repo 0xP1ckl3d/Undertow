@@ -141,13 +141,6 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 		if len(before) == 1 {
 			return wordCompletions([]string{"kill"}, partial)
 		}
-	case "client":
-		if len(before) == 1 && !vpn {
-			return wordCompletions([]string{"distribution-admin"}, partial)
-		}
-		if len(before) == 3 && before[1] == "distribution-admin" && !vpn {
-			return wordCompletions([]string{"on", "off"}, partial)
-		}
 	case "agent":
 		if len(before) == 1 {
 			return wordCompletions([]string{"show", "shutdown", "events"}, partial)

@@ -29,8 +29,9 @@ type remoteResponse struct {
 	Body   []byte `json:"body"`
 }
 
-// ServeRemote exposes only client status, agent execution, and the caller's
-// own pivot setting. Server operator actions remain on the loopback API.
+// ServeRemote exposes client status, agent execution, deployment management,
+// and the caller's own pivot setting. Other server operator actions remain
+// on the loopback API.
 func (m *Manager) ServeRemote(ctx context.Context, token string, clientID uint64, stream *mux.Stream) {
 	defer stream.Close()
 	if err := stream.AcceptOpen(ctx); err != nil {
@@ -67,12 +68,8 @@ func (m *Manager) ServeRemote(ctx context.Context, token string, clientID uint64
 		writeRemoteResponse(stream, remoteResponse{Status: http.StatusBadRequest, Body: []byte("invalid API request")})
 		return
 	}
-	if !clientRequestAllowed(httpRequest, clientID) && !(m.ClientDistributionAllowed(clientID) && (distributionRequest(httpRequest) || payloadChunkRequest(httpRequest))) {
-		message := "server operator command unavailable from VPN client"
-		if distributionRequest(httpRequest) || payloadChunkRequest(httpRequest) {
-			message = fmt.Sprintf("distribution administration requires a server grant: client distribution-admin %d on", clientID)
-		}
-		writeRemoteResponse(stream, remoteResponse{Status: http.StatusForbidden, Body: []byte(message)})
+	if !clientRequestAllowed(httpRequest, clientID) {
+		writeRemoteResponse(stream, remoteResponse{Status: http.StatusForbidden, Body: []byte("server operator command unavailable from VPN client")})
 		return
 	}
 	httpRequest.Header.Set("Authorization", "Bearer "+token)
@@ -91,7 +88,7 @@ func clientRequestAllowed(request *http.Request, clientID uint64) bool {
 	if request.Method == http.MethodGet && path == "/v1/status" && request.URL.RawQuery == "" {
 		return true
 	}
-	if request.Method == http.MethodGet && distributionRequest(request) && !strings.HasSuffix(path, "/host") {
+	if distributionRequest(request) || payloadChunkRequest(request) {
 		return true
 	}
 	if request.Method == http.MethodGet && strings.HasPrefix(path, "/v1/agents/") && strings.HasSuffix(path, "/events") && request.URL.RawQuery == "" {

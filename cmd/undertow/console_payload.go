@@ -54,7 +54,7 @@ permanently invalidating old URLs;
 use "payload hosted" to retrieve the current URLs. A startup
 --payload-retrieval-path flag overrides the saved prefix.
 Hosting, enrollment revocation, and stopping a running agent are separate.
-VPN clients need a distribution-admin grant to download payload bytes.
+Connected VPN clients can manage and download payloads directly.
 `)
 }
 

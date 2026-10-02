@@ -251,9 +251,6 @@ func renderStatus(w io.Writer, data []byte) error {
 	fmt.Fprintf(w, "%-20s %-24s %-12s %-18s %-8s %8s %8s %7s %6s %6s %6s %8s\n", "Session", "Host", "Transport", "Remote", "Internal", "RX", "TX", "Streams", "Queued", "Flight", "CWND", "Retrans")
 	for _, c := range status.Clients {
 		fmt.Fprintf(w, "%-20d %-24s %-12s %-18s %-8t %8d %8d %7d %6d %6d %6d %8d\n", c.SessionID, c.Hostname, c.Transport, c.Remote, c.Internal, c.RXBytes, c.TXBytes, c.Streams, c.Queued, c.InFlight, c.Window, c.Retransmits)
-		if c.DistributionAdmin {
-			fmt.Fprintln(w, "  distribution administration enabled")
-		}
 		for _, route := range c.AcceptedRoutes {
 			fmt.Fprintf(w, "  accepted %s via %s\n", route.Prefix, agentRouteLabel(route.AgentID, status.Agents))
 		}

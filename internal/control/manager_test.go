@@ -101,12 +101,6 @@ func TestVPNClientAppearsInStatusAndIsRemoved(t *testing.T) {
 	streamMux := mux.New(ctx, &idleTransport{done: make(chan struct{})}, true)
 	peer := &dns.Peer{Session: s, AgentID: "client-id", Remote: "203.0.113.7:50000", Connected: time.Now(), LastSeen: time.Now()}
 	manager.RegisterClient(peer, streamMux, true, "vpn-host")
-	if manager.ClientDistributionAllowed(702) {
-		t.Fatal("client received distribution administration by default")
-	}
-	if err := manager.SetClientDistributionAdmin(702, true); err != nil || !manager.ClientDistributionAllowed(702) {
-		t.Fatal("server grant did not take effect")
-	}
 	request := httptest.NewRequest(http.MethodGet, "/v1/status", nil)
 	request.Header.Set("Authorization", "Bearer test-token")
 	response := httptest.NewRecorder()
@@ -126,9 +120,6 @@ func TestVPNClientAppearsInStatusAndIsRemoved(t *testing.T) {
 		t.Fatalf("interactive internal mode change failed: %v", err)
 	}
 	manager.UnregisterClient(702, streamMux)
-	if manager.ClientDistributionAllowed(702) {
-		t.Fatal("distribution grant survived client disconnect")
-	}
 	if got := manager.ClientList(); len(got) != 0 {
 		t.Fatalf("disconnected client remains in status: %+v", got)
 	}

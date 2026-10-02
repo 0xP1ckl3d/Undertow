@@ -20,7 +20,7 @@ See [getting started](getting-started.md) for enrollment, fingerprint, and privi
 
 ## Payload deployment
 
-Type `payload` for the four-step profile → build → host → run guide. Both consoles can read the server's profile and payload records. Server operators can change them; a connected client needs an explicit `client distribution-admin SESSION_ID on` grant for changes and for `payload download`:
+Type `payload` for the four-step profile → build → host → run guide. Both the server console and an authenticated client console can manage profiles and payloads, including downloading built binaries:
 
 ```text
 payload profile create office server=SERVER_IP:443 transport=quic
