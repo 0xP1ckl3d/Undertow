@@ -4,7 +4,22 @@ Undertow can run a compatible, already compiled Beacon Object File (BOF) directl
 
 For repeated use, put the `.o` and its optional help/argument sidecar in the local [module bank](module-bank.md). The console preloads packaged BOFs as commands such as `bof-hello` and `bof-arguments`. You can also use `load bof FILE [NAME] [--format FORMAT]` during a session.
 
-For repeated use, put the `.o` and its optional help/argument sidecar in the local [module bank](module-bank.md). The console preloads packaged BOFs as commands such as `bof-hello` and `bof-arguments`. You can also use `load bof FILE [NAME] [--format FORMAT]` during a session.
+## From object file to an agent run
+
+If you already have a compatible Windows AMD64 BOF, inspect it on the **console host**, then put the `.o` and optional `.json` argument sidecar under the local `modules/` bank. Start or reattach the console so it loads the command; no BOF file needs to be installed on the agent.
+
+```sh
+undertow bof inspect modules/bof/hello.o
+```
+
+```text
+modules
+help bof-hello
+use 1
+bof-hello
+```
+
+To build the packaged examples from source, run `./modules/bof/build.ps1` in an x64 MSVC Developer PowerShell before opening the console. For a one-off file run, use `run-bof modules/bof/hello.o` after selecting an agent. The [module bank](module-bank.md) explains naming and sidecars; the sections below describe supported COFF features and typed arguments.
 
 ## Supported subset
 

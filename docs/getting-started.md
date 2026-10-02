@@ -88,7 +88,7 @@ If no agent appears, check `status` and `agent events AGENT_ID` in the server co
 
 | Goal | Guide |
 | --- | --- |
-| Other VPN modes and carrier choices | [Quickstart](quickstart.md) and [scenarios](scenarios.md) |
+| Other VPN modes and carrier choices | [Networking modes](networking-modes.md) and [scenarios](scenarios.md) |
 | Profiles, downloads, hosting, and shutdown | [Payload deployment](agent-distribution.md) |
 | Shells, files, jobs, forwards, and console commands | [Console guide](console.md) |
 | BOF, native, and WASM tools | [Module bank](module-bank.md), [BOF](bof-compatibility.md), [native](native-modules.md), and [WASM](wasm-development.md) guides |
@@ -116,7 +116,7 @@ sudo undertow client --vpn --internal --transport quic --server SERVER_IP:443 --
 
 `--vpn` installs two IPv4 `/1` routes and verifies public egress. `--internal` alone pins the carrier server route and creates the TUN without changing the Internet/default route or requiring a public egress check. Once connected, type `agents`, `use 1`, and `routes` in the client console; use `route accept CIDR` for an advertised subnet or `route add CIDR` for another network reachable from that agent. This setup needs no server route command. Server configured routes are also supported when an operator wants global route management. Both flags provide VPN Internet egress and agent routes. At least one flag is required. See [deployment scenarios](scenarios.md) for tests.
 
-These examples use **QUIC UDP/443** with the server's automatic self-signed TLS certificate and a separately pinned Undertow fingerprint. The server also starts HTTPS/WebSocket TCP/443 and direct DNS UDP/53 by default; peers choose any active carrier independently. See [Quickstart transport choices](quickstart.md#choose-another-carrier). Allow the chosen port through the server firewall. UDP/53 and virtual interfaces commonly need elevated privileges.
+These examples use **QUIC UDP/443** with the server's automatic self-signed TLS certificate and a separately pinned Undertow fingerprint. The server also starts HTTPS/WebSocket TCP/443 and direct DNS UDP/53 by default; peers choose any active carrier independently. See [networking mode and carrier choices](networking-modes.md#choose-another-carrier). Allow the chosen port through the server firewall. UDP/53 and virtual interfaces commonly need elevated privileges.
 
 ## Manual agent alternative
 

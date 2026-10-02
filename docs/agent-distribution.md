@@ -10,9 +10,7 @@ The profile and artifact store defaults to `agent-distribution` beneath the serv
 
 ## Profile → build → host → run
 
-`payload download PAYLOAD_ID [OUTPUT]` saves a built binary to the console host over the authenticated control connection, even when it is not publicly hosted. The default is `payloads/FILENAME` beneath the console's working directory; this directory is ignored by Git. Pass a filename or an existing directory as `OUTPUT` to choose another location. The command creates parent directories, verifies SHA-256 before publishing the file, and refuses to replace an existing file. Connected VPN clients can run this command directly.
-
-From the server console:
+From the server or an authenticated VPN client console:
 
 ```text
 payload
@@ -20,6 +18,7 @@ payload profile create office server=undertow.example.com:443 transport=quic
 payload build office windows amd64
 payload host PAYLOAD_ID
 payload url PAYLOAD_ID
+payload deploy-script PAYLOAD_ID powershell
 ```
 
 Typing `payload` in either console explains each step. The profile name (`office`) identifies reusable connection settings. `payload build` prints a **24-character payload ID** for the newly built binary and its embedded **32-character agent ID**, which identifies the agent after it connects. Use the payload ID with `payload show`, `host`, `url`, `unhost`, `revoke`, and `delete`; use the agent ID, hostname, or current agent number with connected-agent commands. `payload profiles`, `payload list`, and `payload hosted` list profile names, full payload IDs, and active download URLs respectively. A unique payload ID prefix or exact server filename also works for payload commands, but the full ID is safest to copy.
@@ -35,6 +34,16 @@ New payloads have neutral filenames based on their full payload ID. `payload bui
 On Windows the release template uses the GUI subsystem, so normal packaged operation opens no console window. On Linux an interactive launch starts the long-running process in a separate session; launches under a service manager or other nonterminal supervisor remain under that supervisor. The agent uses bounded progressive reconnect delays, approximately 2, 5, 10, 30, 60, 120, then 300 seconds. A healthy session resets the schedule. Runtime cancellation interrupts the wait. The deployment scripts contain no watchdog or reconnect loop.
 
 Optional `payload deploy-script PAYLOAD_ID powershell|shell` prints a helper that downloads, verifies SHA-256, places, and launches a hosted binary. The PowerShell helper works with Windows PowerShell 5.1 and PowerShell 7+, scopes any self-signed certificate exception to its download HTTP client, and computes SHA-256 before installation. Manual retrieval and launch always work.
+
+## Download for your own delivery
+
+If you will wrap the binary or distribute it through another channel, save it to the **console host** before or after hosting:
+
+```text
+payload download PAYLOAD_ID ./staging/worker.exe
+```
+
+This uses the authenticated control connection, so an unhosted build can be downloaded too. The command verifies SHA-256 before publishing the file and refuses to replace an existing file. With no output argument, it saves to `payloads/FILENAME` under the console's working directory; this directory is ignored by Git. You can also pass a filename or an existing directory, and the command creates missing parent directories. Server and connected VPN client consoles can both download and manage payloads directly. See [Getting started](getting-started.md#3-build-host-and-deploy-a-headless-windows-agent) for the hosted PowerShell flow.
 
 ## Public HTTPS download host
 

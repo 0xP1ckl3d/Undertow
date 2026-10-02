@@ -1,6 +1,6 @@
 # Deployment scenarios
 
-These deeper deployment examples use DNS on agents and clients; the [Quickstart](quickstart.md) uses QUIC for the short path and explains WebSocket and DNS alternatives. The server starts DNS, WebSocket and QUIC listeners together by default, and each agent or client chooses independently. For child agents behind another agent, see [topology and relays](topology-and-relays.md). These commands use `undertow` as shorthand for `./bin/undertow` on Linux or `.\bin\undertow.exe` on Windows. Replace all uppercase placeholders. Use the same enrollment and fingerprint settings on both ends; [getting started](getting-started.md) explains token, password, open enrollment, and trust on first use. On Linux, prefix operator commands with `sudo` when an elevated server owns `control.key`.
+These deeper deployment examples use DNS on agents and clients; [Networking modes and transports](networking-modes.md) uses QUIC for the short path and explains WebSocket and DNS alternatives. The server starts DNS, WebSocket and QUIC listeners together by default, and each agent or client chooses independently. For child agents behind another agent, see [topology and relays](topology-and-relays.md). These commands use `undertow` as shorthand for `./bin/undertow` on Linux or `.\bin\undertow.exe` on Windows. Replace all uppercase placeholders. Use the same enrollment and fingerprint settings on both ends; [Getting started](getting-started.md) explains token, password, open enrollment, and trust on first use. On Linux, prefix operator commands with `sudo` when an elevated server owns `control.key`.
 
 ## 1. Confirm an unprivileged agent
 
@@ -10,15 +10,16 @@ On the server, run `undertow init`, then `sudo undertow server`. On an internal 
 undertow agent --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
 ```
 
-The agent needs no sudo, adapter, or route. On the server:
+The agent needs no sudo, adapter, or route. In the **server console** that opened with `server`:
 
-```sh
-undertow status
-undertow agent list
-undertow agent show AGENT_ID
+```text
+status
+agents
+use 1
+show
 ```
 
-The full agent ID, not its shortened display in the table, is in `undertow status --json` or `agent show`. A connected agent alone does not install a server route. Use scenario 2 or 3 to send traffic through it.
+`agents` gives each connection a number for the current console view; `show` displays its full ID, transport, capabilities, and reported networks. A connected agent alone does not install a server route. Use scenario 2 or 3 to send traffic through it. For scripts, `undertow status --json` and `undertow agent show AGENT_ID` provide the same information without the console.
 
 ## 2. Reach an internal subnet from the server
 
@@ -28,38 +29,37 @@ Start the server with `--tun` and choose a tunnel prefix that does not overlap a
 sudo undertow server --tun --tun-name undertow0 --tunnel-address 172.16.254.1/24
 ```
 
-Start the unprivileged agent as in scenario 1. On the server, choose the agent ID and add the internal prefix:
+Start the unprivileged agent as in scenario 1. In the **server console**, select it and add the internal prefix:
 
-```sh
-undertow status --json
-undertow route add 10.20.0.0/16 --via AGENT_ID
-undertow route list
-curl http://10.20.0.50/
-ping 10.20.0.50
+```text
+agents
+use 1
+show
+route add 10.20.0.0/16
+routes
 ```
 
-Use real destinations that the agent can reach. The server's OS route for that prefix feeds its TUN, then Undertow selects the named agent; the agent opens ordinary target sockets. TCP, UDP, and ICMP echo are supported. The route remains assigned to that agent and becomes inactive when it disconnects. `undertow route del 10.20.0.0/16` removes it. ICMP on Linux may use the system `ping` command when unprivileged ping sockets are unavailable.
+From a **separate server terminal**, test `curl http://10.20.0.50/` and `ping 10.20.0.50` using real destinations the agent can reach. The server's OS route for that prefix feeds its TUN, then Undertow selects the named agent; the agent opens ordinary target sockets. TCP, UDP, and ICMP echo are supported. The route remains assigned to that agent and becomes inactive when it disconnects. Use `route del 10.20.0.0/16` in the server console to remove it. ICMP on Linux may use the system `ping` command when unprivileged ping sockets are unavailable. For scripts, use `undertow route add 10.20.0.0/16 --via AGENT_ID`, `undertow route list`, and `undertow route del 10.20.0.0/16` on the server host.
 
 ## 3. Forward one local TCP port without a TUN
 
-Start an agent as in scenario 1, then start the server with a repeatable local forward:
+For this variant, start the server with a **server-local** forward, then connect the agent as in scenario 1. The forward is a startup flag:
 
 ```sh
-undertow server --forward 127.0.0.1:18080=10.20.0.50:80 --via-agent AGENT_ID
-curl http://127.0.0.1:18080/
+sudo undertow server --forward 127.0.0.1:18080=10.20.0.50:80
 ```
 
-The left address is the server listener, the right address is reached from the agent. Omit `--via-agent` only when exactly one agent is connected; specify it when several are connected. A forward requires no server TUN. If UDP/53 needs elevation, use sudo for that reason or choose an unprivileged test port on both sides.
+After the agent connects, run `curl http://127.0.0.1:18080/` in a **separate server terminal**. The left address is the server listener, and the right address is reached from the agent. With several agents, restart the server with `--via-agent AGENT_ID` to select one explicitly. A forward requires no server TUN.
 
 ## 4. Route a separate client's Internet traffic through the server
 
-The server can run without `--tun`; Internet egress uses server sockets. Start it with `undertow server`. On a different Linux host, with root privilege:
+The server can run without `--tun`; Internet egress uses server sockets. Start it with `sudo undertow server`. On a different Linux host, with root privilege:
 
 ```sh
 sudo undertow client --vpn --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
 ```
 
-On Windows, run PowerShell as Administrator and use `.\bin\undertow.exe client --vpn ...`. Confirm the log shows the server public egress address, then test `curl -4 https://api.ipify.org` and another HTTPS site. The client keeps a physical route to the server, adds two IPv4 `/1` routes through its adapter, and removes its owned routes on graceful stop or failed verification. The local adapter's `.1` address is a gateway address, not the public egress IP. Existing more specific LAN routes still take precedence. IPv6 is not routed by this mode.
+On Windows, run PowerShell as Administrator and use `.\bin\undertow.exe client --vpn ...`. In the client console, run `vpn status` to see the public egress check, then test `curl -4 https://api.ipify.org` and another HTTPS site from a separate terminal. The client keeps a physical route to the server, adds two IPv4 `/1` routes through its adapter, and removes its owned routes on graceful stop or failed verification. The local adapter's `.1` address is a gateway address, not the public egress IP. Existing more specific LAN routes still take precedence. IPv6 is not routed by this mode.
 
 Use `--verify-url https://YOUR_IP_SERVICE` to choose another public IPv4 check, or `--verify-url ''` to skip it. Skipping verification removes a useful failure signal.
 
@@ -84,29 +84,41 @@ For a network the agent can reach but has not advertised, use `route add 10.20.0
 
 ## 5. Combine VPN egress and internal routes
 
-Start an agent and configure a route on the server as in scenario 2. The server does not need its own `--tun` if only a separate VPN client needs the internal prefix; it still needs the configured route and a connected agent.
+Start a server and agent as in scenario 1. The server does not need its own `--tun` when only a separate VPN client needs the internal prefix. Start the client with both modes:
 
 ```sh
-undertow route add 10.20.0.0/16 --via AGENT_ID
 sudo undertow client --vpn --internal --server SERVER_IP:53 --fingerprint FINGERPRINT --token-file token.key
 ```
 
-On the VPN client, traffic for `10.20.0.0/16` uses the selected agent and ordinary Internet traffic exits through server sockets. Test both an internal target and `curl -4 https://api.ipify.org`. A more specific route already installed on the client can override its VPN route, so choose a nonlocal test prefix or adjust your test topology. `--vpn` alone, `--internal` alone, and this combined mode are the three supported routing choices.
+In the **client console**, select the agent and accept a reported route (or add a known reachable prefix manually):
+
+```text
+agents
+use 1
+routes
+route accept 10.20.0.0/16
+```
+
+Traffic for `10.20.0.0/16` now uses the selected agent and ordinary Internet traffic exits through server sockets. Test both an internal target and `curl -4 https://api.ipify.org` from a separate client terminal. A more specific route already installed on the client can override its VPN route, so choose a nonlocal test prefix. The client route belongs to this client; use a global server route only when other clients or the server host need the same path. `--vpn` alone, `--internal` alone, and this combined mode are the three supported routing choices.
 
 ## 6. Multiple agents and route ownership
 
-Give each agent a distinct `--agent-key` file so each has its own stable identity. On the server:
+Give each agent a distinct `--agent-key` file so each has its own stable identity. In the **server console**, select each connected agent before assigning its network:
 
-```sh
-undertow status --json
-undertow agent select AGENT_ID
-undertow route add 10.20.0.0/16 --via AGENT_ID
-undertow route add 10.30.0.0/16 --via OTHER_AGENT_ID
-undertow route list
-undertow session kill AGENT_ID
+```text
+agents
+use 1
+show
+route add 10.20.0.0/16
+back
+use 2
+show
+route add 10.30.0.0/16
+back
+routes
 ```
 
-Selection chooses the default agent for operations that permit it; an explicit `--via` is clearer when configuring routes. `session kill` disconnects that session, and a running agent may reconnect. Observe route activation in `route list`; routes are not silently reassigned to another identity.
+Check each agent's reported network in `show` before adding its route; the numbers may change after a reconnect. To disconnect one session for a reconnect test, select that agent and run `session kill`. Watch `routes` as it reconnects: a route becomes inactive while its agent is absent and is not silently reassigned. For automation, use the full IDs with `undertow route add CIDR --via AGENT_ID`, `undertow route list`, and `undertow session kill AGENT_ID` on the server host.
 
 ## 7. Foreground, background, and diagnostic probes
 

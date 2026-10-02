@@ -1,8 +1,14 @@
 # Local module bank
 
-The interactive Undertow console loads packaged BOFs, native modules, and WASM modules from `modules/` when that console process starts. These are local, session-scoped commands. Loading reads each artifact into the operator process; Undertow sends its bytes to the currently selected agent only when you run the command. A new console session scans the directory again.
+Use the module bank when you have a compiled tool and want to run it by name in the **server or VPN client console**. Undertow loads packaged BOFs, native modules, and WASM modules from `modules/` when that console process starts. These are local, session-scoped commands. Loading reads each artifact into the console process; Undertow sends its bytes to the selected agent only when you run the command.
 
-The repository ships runnable files in `modules/bof/`, `modules/native/`, and `modules/wasm/`. To add your own, copy a compatible `.o`, `.module`, or `.wasm` file anywhere below `modules/`, then start or reattach a console. Subdirectories are for organization only; the file extension determines the runtime. You may also set `UNDERTOW_MODULES_DIR` to an absolute directory before starting the console. Without that variable, Undertow looks for `modules/` in the current working directory, beside the Undertow executable, then in its parent directory (the usual `bin/undertow.exe` layout). Use the same module bank on the **operator/client host** where the console runs, not on the agent.
+| I want to... | Start here |
+| --- | --- |
+| Run a packaged tool | In the console, type `modules`, `help NAME`, `use NUMBER`, then `NAME` as shown below. |
+| Add a tool I already compiled | Put its artifact and optional JSON sidecar on the **console host** under `modules/`, then start or reattach the console. |
+| Build a new tool | Follow the [WASM](wasm-development.md), [native Windows module](native-modules.md), or [BOF](bof-compatibility.md) guide, then add the resulting file here. |
+
+The repository ships runnable files in `modules/bof/`, `modules/native/`, and `modules/wasm/`. To add your own, copy a compatible `.o`, `.module`, or `.wasm` file anywhere below `modules/`, then start or reattach a console. Subdirectories are for organization only; the file extension determines the runtime. You may also set `UNDERTOW_MODULES_DIR` to an absolute directory before starting the console. Without that variable, Undertow looks for `modules/` in the current working directory, beside the Undertow executable, then in its parent directory (the usual `bin/undertow.exe` layout). The artifact stays on the **console host**, not on the agent; no agent redeployment is needed for a new module file.
 
 ```text
 undertow> modules

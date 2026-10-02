@@ -59,4 +59,4 @@ Client --transport quic --internal
 
 The client selects B's advertised route in its console with `agents`, `use NUMBER`, `routes`, `route accept CIDR` (or `route add CIDR`). Verify with TCP, UDP or ICMP against a target that B can reach. The selected route belongs to B, not A. A's carrier, the client's carrier and the internal relay connection are independent.
 
-For normal operation, use the [Quickstart](quickstart.md). Standalone route commands and flags for automation are in the [CLI reference](cli-reference.md). The underlying framing is described in the [protocol reference](protocol.md).
+For the first server, client, and agent, use [Getting started](getting-started.md); for route choices, use [Networking modes and transports](networking-modes.md). Standalone route commands and flags for automation are in the [CLI reference](cli-reference.md). The underlying framing is described in the [protocol reference](protocol.md).

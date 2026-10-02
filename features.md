@@ -36,7 +36,7 @@ VPN client console: agents
 
 ### Transport choices and encrypted multiplexing
 
-The server starts DNS UDP/53, WebSocket TCP/443 and QUIC UDP/443 together by default. `--transport dns,quic` selects a subset and `--transport quic` keeps single-carrier startup. Each agent and client independently chooses one active carrier; mixed carriers share one server identity, enrollment policy, route table, job manager and console. The peer CLI defaults to DNS, so explicitly select `--transport quic` or `--transport websocket` when using those paths. DNS VPN is useful when direct UDP/53 is the available outbound path, including some restrictive or captive portal networks. WebSocket suits HTTPS and HTTP CONNECT proxy paths; QUIC uses UDP/443. WebSocket and QUIC use ephemeral self-signed TLS by default or explicit `--tls-cert`/`--tls-key` files. Peers verify TLS and independently pin the Undertow Ed25519 fingerprint. The server console can start and stop listeners with `transports`, `start transport NAME`, and `stop transport NAME [force]`. See [Quickstart transport choices](docs/quickstart.md#choose-another-carrier) and the [CLI reference](docs/cli-reference.md#transport-selection).
+The server starts DNS UDP/53, WebSocket TCP/443 and QUIC UDP/443 together by default. `--transport dns,quic` selects a subset and `--transport quic` keeps single-carrier startup. Each agent and client independently chooses one active carrier; mixed carriers share one server identity, enrollment policy, route table, job manager and console. The peer CLI defaults to DNS, so explicitly select `--transport quic` or `--transport websocket` when using those paths. DNS VPN is useful when direct UDP/53 is the available outbound path, including some restrictive or captive portal networks. WebSocket suits HTTPS and HTTP CONNECT proxy paths; QUIC uses UDP/443. WebSocket and QUIC use ephemeral self-signed TLS by default or explicit `--tls-cert`/`--tls-key` files. Peers verify TLS and independently pin the Undertow Ed25519 fingerprint. The server console can start and stop listeners with `transports`, `start transport NAME`, and `stop transport NAME [force]`. See [networking mode and carrier choices](docs/networking-modes.md#choose-another-carrier) and the [CLI reference](docs/cli-reference.md#transport-selection).
 
 The same authenticated session, mux, routing, jobs, file transfer, and console operations run over all three carriers. WebSocket uses a persistent TLS connection; QUIC uses a bidirectional stream over UDP/443. DNS keeps its own adaptive wire behavior.
 
@@ -136,7 +136,9 @@ VPN client: curl http://10.20.1.25/
 
 ```text
 Server: sudo undertow server --tun --tunnel-address 172.16.254.1/24 --identity identity.key --token-file token.key
-Server: sudo undertow route add 10.20.0.0/16 --via AGENT_ID
+Server console: agents
+Server console: use 1
+Server console: route add 10.20.0.0/16
 Server: curl http://10.20.1.25/
 ```
 
@@ -204,11 +206,15 @@ VPN client console: route del 10.50.0.0/16
 The server operator can configure a prefix for server-host pivots and for clients using the global internal mode. A route becomes inactive when its agent disconnects. Client-owned accepted routes remain separate.
 
 ```text
-Server: sudo undertow route add 10.20.0.0/16 --via AGENT_ID
-Server: sudo undertow route list
-Server: sudo undertow route del 10.20.0.0/16
+Server console: agents
+Server console: use 1
+Server console: route add 10.20.0.0/16
+Server console: routes
+Server console: route del 10.20.0.0/16
 VPN client console: internal on
 ```
+
+For scripts, use `undertow route add CIDR --via AGENT_ID`, `undertow route list`, and `undertow route del CIDR` on the server host.
 
 ### Server local TCP forwards
 
@@ -330,6 +336,17 @@ Server console: run-native modules/native/wininfo/wininfo.module
 Server console: run-native --background modules/native/hello/hello.module --wait
 Server console: jobs
 Server console: job stop 1
+```
+
+### Beacon Object Files
+
+On a Windows AMD64 agent, `run-bof` executes a compatible compiled COFF `.o` through the Beacon ABI. Inspect an object on the console host before use, or place it in the [module bank](docs/module-bank.md) to run it by name. BOF arguments can be typed with `--format` or a JSON sidecar. See [BOF compatibility](docs/bof-compatibility.md) for supported imports, build examples, argument formats, and limits.
+
+```text
+Server: undertow bof inspect modules/bof/hello.o
+Server console: modules
+Server console: use 1
+Server console: bof-hello
 ```
 
 ### Upload and download

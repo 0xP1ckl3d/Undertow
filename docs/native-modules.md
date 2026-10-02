@@ -4,7 +4,22 @@ Native modules complement [WASM modules](wasm-development.md). WASM uses portabl
 
 For repeated use, place a `.module` file and optional help sidecar in the local [module bank](module-bank.md). The console preloads packaged native modules as commands such as `module-wininfo`; `load module FILE [NAME]` registers one during a session.
 
-For repeated use, place a `.module` file and optional help sidecar in the local [module bank](module-bank.md). The console preloads packaged native modules as commands such as `module-wininfo`; `load module FILE [NAME]` registers one during a session.
+## From source to an agent run
+
+Build a native example on a Windows development machine with an x64 MSVC Developer PowerShell, then put the resulting `.module` and optional `.json` sidecar on the **console host** under `modules/`. Start or reattach the console so it scans the bank; the agent does not need the file installed locally.
+
+```powershell
+./modules/native/build.ps1
+```
+
+```text
+modules
+help module-wininfo
+use 1
+module-wininfo
+```
+
+`modules/native/build.ps1` creates the packaged examples in their module directories, so a console started from this repository can preload them directly. Use `run-native modules/native/wininfo/wininfo.module` for a one-off run. See [module bank placement and naming](module-bank.md) and the [console guide](console.md#running-an-agent-program-and-transferring-files) for selection, output, and jobs.
 
 ## Supported format and build
 

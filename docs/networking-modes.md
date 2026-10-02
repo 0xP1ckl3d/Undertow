@@ -1,28 +1,15 @@
-# Quickstart
+# Networking modes and transports
 
-For a complete first installation from `init` through a Linux client, hosted Windows payload, agent command, module, and route, follow [Getting started](getting-started.md). The sections below are short alternatives for particular traffic paths and carriers.
-
-## Payload deployment
-
-For your own packaging or delivery flow, `payload download PAYLOAD_ID [OUTPUT]` saves a hosted or unhosted build to the console host over the authenticated control connection and verifies its SHA-256. An authenticated VPN client can run it directly. See [payload deployment](agent-distribution.md) for output rules.
-
-Build the release binaries with `sh tools/build-release.sh bin` (or `tools/build-release.ps1` on Windows), then start the server. Its `bin` directory should contain the thin-agent templates. In the server console:
-
-```text
-payload profile create office server=SERVER_IP:443 transport=quic
-payload build office windows amd64
-payload host PAYLOAD_ID
-```
-
-Use the **payload ID** printed by `payload build` for the host command. The **server file** path is where the binary is stored on the server; the random **download URL** printed by `payload host` is for the endpoint. `payload show PAYLOAD_ID` displays both, and `payload url PAYLOAD_ID` reprints the URL. Verify the printed SHA-256, then run the binary on the target with **no agent arguments**. `payload deploy-script PAYLOAD_ID powershell` prints a download-and-run helper. Confirm with `agents`, `use 1`, and `show`. `session kill` permits reconnect; `agent shutdown` stops the connected process. `payload unhost` disables download, `payload revoke` blocks future enrollment, and `payload delete` removes the server-side record and file. Hosting requires the server's WebSocket HTTPS listener. Type `payload` in either console for the workflow, or see [payload deployment](agent-distribution.md).
+Use this guide when choosing what traffic the **client** should send through Undertow and which carrier can reach the server. For a complete first installation, follow [Getting started](getting-started.md). To build and deliver a headless agent, use [Payload deployment](agent-distribution.md).
 
 Use **QUIC on UDP/443** for these examples. The server also listens on WebSocket TCP/443 and DNS UDP/53 by default. Open UDP/443 in the server firewall. Run commands from each host's Undertow directory; `./bin/undertow` is the built Linux binary. On Windows, use `.\bin\undertow.exe`. Replace `SERVER_IP`, `FINGERPRINT`, and the example network with your values.
 
 ## One-time setup
 
-On **SERVER**, generate an identity and enrollment token:
+On **SERVER**, build the operator binary and agent templates, then generate an identity and enrollment token:
 
 ```sh
+sh tools/build-release.sh bin
 ./bin/undertow init
 ```
 
@@ -103,4 +90,4 @@ Keep `--fingerprint FINGERPRINT` with every carrier. A `--vpn` client using DNS 
 
 ## Scripts and further examples
 
-For automation, use `server --background` or `client --background`, `status --json`, and standalone commands such as `route add 10.20.0.0/16 --via AGENT_ID`. For a foreground worker under a service manager, use explicit `--foreground`. See the [CLI reference](cli-reference.md), [console guide](console.md), [deployment scenarios](scenarios.md), and [feature catalogue](../features.md) for forwarding, relays, capabilities, and more.
+The examples above use the consoles to inspect and accept routes. For automation, use `server --background` or `client --background`, `status --json`, and standalone commands such as `route add 10.20.0.0/16 --via AGENT_ID`. For a foreground worker under a service manager, use explicit `--foreground`. See the [CLI reference](cli-reference.md) for flags and scripting, the [console guide](console.md) for daily operation, and [deployment scenarios](scenarios.md) for forwarding and multi-agent routes.

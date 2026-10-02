@@ -4,8 +4,6 @@ Undertow runs a `wasip1/wasm` module in memory on the selected agent. The agent 
 
 For repeated use, place a `.wasm` file and optional help sidecar in the local [module bank](module-bank.md). The console preloads packaged WASM modules as commands such as `wasm-triage`; `load wasm FILE [NAME]` registers one during a session.
 
-For repeated use, place a `.wasm` file and optional help sidecar in the local [module bank](module-bank.md). The console preloads packaged WASM modules as commands such as `wasm-triage`; `load wasm FILE [NAME]` registers one during a session.
-
 ## Quick start
 
 From the repository root, build one example with Go 1.25 or later:
@@ -14,16 +12,18 @@ From the repository root, build one example with Go 1.25 or later:
 GOOS=wasip1 GOARCH=wasm go build -trimpath -ldflags=-buildid= -o modules/wasm/triage/triage.wasm ./modules/wasm/triage
 ```
 
-In an Undertow server or VPN client console, select an agent and run:
+Start or reattach a server or VPN client console after the build so it scans the local [module bank](module-bank.md). Inspect and run the preloaded command on a selected agent:
 
 ```text
+modules
+help wasm-triage
 use 1
-run-wasm modules/wasm/triage/triage.wasm
-run-wasm --background modules/wasm/triage/triage.wasm
+wasm-triage
+wasm-triage --background
 job output JOB_ID
 ```
 
-Run `run-wasm --stdin input.txt MODULE.wasm ARG1 ARG2` to pass a local input file and command-line arguments. The first guest argument is `undertow-module`, followed by the supplied arguments. The module's stdin, stdout, and stderr use standard WASI. Foreground stdout and stderr stream separately; a background job retains up to 256 KiB of combined output until it is removed. The agent's `wasm` capability gates the entire operation. `--deny=wasm` rejects all WASMs equally; `--deny=hostops`, `--deny=exec`, and other separate capabilities do not remove the WASM host imports. Anyone permitted to run WASM should be treated as having the agent process's read and outbound network privileges.
+For a one-off file run without loading a command, use `run-wasm modules/wasm/triage/triage.wasm`. Use `run-wasm --stdin input.txt MODULE.wasm ARG1 ARG2` to pass a local input file and command-line arguments. The first guest argument is `undertow-module`, followed by the supplied arguments. The module's stdin, stdout, and stderr use standard WASI. Foreground stdout and stderr stream separately; a background job retains up to 256 KiB of combined output until it is removed. The agent's `wasm` capability gates the entire operation. `--deny=wasm` rejects all WASMs equally; `--deny=hostops`, `--deny=exec`, and other separate capabilities do not remove the WASM host imports. Anyone permitted to run WASM should be treated as having the agent process's read and outbound network privileges.
 
 ## Runtime and compatibility
 
@@ -142,4 +142,4 @@ For a local smoke test with an in-process Undertow agent, run:
 UNDERTOW_WASM_TEST_MODULE=./my-audit.wasm go test ./internal/pivot -run '^TestCustomWASMOnAgent$' -v -count=1
 ```
 
-On PowerShell, set `$env:UNDERTOW_WASM_TEST_MODULE = 'C:\\path\\to\\my-audit.wasm'` before the same `go test` command. This exercises the real agent mux and WASM runtime. A plain WASI runtime cannot supply Undertow imports unless it implements this namespace. To run on a remote agent, use `run-wasm my-audit.wasm` in the selected-agent console. See [console commands](cli-reference.md) for server and client invocation.
+On PowerShell, set `$env:UNDERTOW_WASM_TEST_MODULE = 'C:\\path\\to\\my-audit.wasm'` before the same `go test` command. This exercises the real agent mux and WASM runtime. A plain WASI runtime cannot supply Undertow imports unless it implements this namespace. To deploy the module for operators, copy `my-audit.wasm` and an optional help sidecar to the console host's [module bank](module-bank.md), then start or reattach the console and invoke its loaded command on a selected agent. For a one-off run, use `run-wasm my-audit.wasm`. The compiled file is read from the console host; it need not be copied onto the agent. See the [console guide](console.md#running-an-agent-program-and-transferring-files) for agent selection and jobs.

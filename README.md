@@ -23,7 +23,7 @@ Undertow carries the same encrypted sessions over QUIC, HTTPS/WebSocket, or dire
 | Need | Undertow provides | Guide |
 | --- | --- | --- |
 | Reach a service on a remote internal network | An outbound agent and an accepted route from the server or client; TCP, UDP, and ICMP traffic can use the agent's network | [Getting started](docs/getting-started.md#5-route-client-traffic-through-the-agent) · [Routing scenarios](docs/scenarios.md) |
-| Route your laptop's traffic | `client --internal` for agent networks, `client --vpn` for server Internet egress, or both | [Quickstart](docs/quickstart.md) |
+| Route your laptop's traffic | `client --internal` for agent networks, `client --vpn` for server Internet egress, or both | [Networking modes](docs/networking-modes.md) |
 | Work on a remote host | Interactive shell, one-shot commands, built-in host operations, file transfer, and background jobs | [Console guide](docs/console.md) |
 | Reach or expose one service | Forward a TCP service through an agent without routing a whole subnet | [Forwarding scenarios](docs/scenarios.md) |
 | Run specialized tools | Stream scripts, run WASM modules, or run Windows native modules and BOFs through the agent | [Module bank](docs/module-bank.md) |

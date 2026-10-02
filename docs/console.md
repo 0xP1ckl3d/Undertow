@@ -1,6 +1,6 @@
 # Interactive consoles
 
-Undertow has two interactive consoles. Run `undertow server` in a terminal on the **server host** to start its worker and open the operator console. Run `undertow client --vpn --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify` on the **VPN client host** to start its worker and open the client console when using the server's default self-signed TLS certificate. Both consoles can select an agent, so commands inside its menu do not require a long agent ID. The client console manages only that client's accepted routes and internal routing mode. The server needs `--tun` only if applications on the server host itself need routed agent access.
+Undertow has two interactive consoles. Run `undertow server` in a terminal on the **server host** to start its worker and open the operator console. Run `undertow client --vpn --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify` on the **VPN client host** to start its worker and open the client console when using the server's default self-signed TLS certificate. Both consoles can select and operate agents and manage deployment payloads. The server console manages global routes and listeners; the client console manages that client's routes, VPN mode, and agent-side forwards. The server needs `--tun` only if applications on the server host itself need routed agent access.
 
 See [getting started](getting-started.md) for enrollment, fingerprint, and privilege setup. In the examples below, `undertow` means `./bin/undertow` on Linux or `.\bin\undertow.exe` on Windows. Use `sudo` for server console access if the elevated server owns `control.key`; a VPN client needs elevation to install routes.
 
@@ -117,7 +117,7 @@ background
 | `jobs NUMBER` | Either menu | Show a task from the last `jobs` list. |
 | `job show NUMBER|ID` | Either menu | Show task state, timestamps, exit status, and output size. |
 | `job output NUMBER|ID` | Either menu | Show small output; offer a download when it is too large for the console. |
-| `job save NUMBER|ID [LOCAL_FILE]` | Either menu | Download complete output to a client file. |
+| `job save NUMBER|ID [LOCAL_FILE]` | Either menu | Download complete output to a file on the console host. |
 | `job delete NUMBER|ID` | Either menu | Delete a finished job and its server output to free space. |
 | `job cancel NUMBER|ID` | Either menu | Stop a running task. |
 | `show` | Selected agent | Show detailed agent telemetry and discovered networks. |
@@ -130,16 +130,17 @@ background
 
 `route add` on the server affects server managed routing. The server's optional proxy TUN is needed for the server host to send ordinary IP traffic to that route. Agent selection in the interactive menu is local to the console; the separate `undertow agent select AGENT_ID` command changes the server's API selection.
 
-Each agent also reports structured IPv4 routes when available. The client console's `routes` command labels directly attached networks and networks reached through a gateway, including the interface and route source. It shows the agent's default route separately for information. Use `route accept CIDR` in the selected-agent menu for a reported candidate, or `route add CIDR` for another route you know that agent can reach. Both install only on this VPN client. A prefix overlapping this client's existing local networks is rejected.
-
 After detaching, run `sudo undertow server attach` to return. A server started with `--background` can be attached the same way. If startup used custom `--pid-file`, `--control-listen`, `--control-token-file`, or `--log-file` paths, supply the matching `--pid-file`, `--control`, `--control-token-file`, or `--log-file` on `server attach`. `undertow console` remains available to connect directly to a server's loopback API, including a `server --foreground` worker. The control credential stays on the server host and differs from the enrollment token shared with agents and clients.
 
 ## VPN client console
 
-A terminal launch of `client --internal` or `client --vpn` opens the console by default. Internal-only access can be configured entirely here after the agent connects; no server `route add` is required. For example:
+A terminal launch of `client --internal` or `client --vpn` opens the console by default. Internal-only access can be configured entirely here after the agent connects; no server `route add` is required. Start the client from its own terminal, then use the commands below at its prompt:
+
+```sh
+sudo undertow client --internal --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify
+```
 
 ```text
-sudo undertow client --internal --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify
 agents
 use 1
 routes
@@ -168,6 +169,8 @@ background
 | `background` | Either menu | Detach the console while the VPN and its routes keep running. |
 
 Accepted and manual routes are saved locally in `client-routes.json` by default and reapplied after reconnect. Change the path with `client --routes-file PATH`. The client can add a routed subnet that is reachable from an agent even if it is absent from that agent's directly attached subnet list. Make sure the agent actually has a route to the target subnet.
+
+Each agent also reports structured IPv4 routes when available. In the client console, `routes` labels directly attached networks and networks reached through a gateway, including the interface and route source. It shows the agent's default route separately for information. Use `route accept CIDR` in the selected-agent menu for a reported candidate, or `route add CIDR` for another route you know that agent can reach. Both install only on this VPN client. A prefix overlapping this client's existing local networks is rejected.
 
 `vpn on|off` changes only Undertow's Internet routes; accepted agent routes stay installed. `internal on|off` changes server configured routes for new flows. Both settings survive carrier reconnects while the client worker runs. Restarting the client uses the startup flags again.
 
