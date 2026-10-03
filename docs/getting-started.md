@@ -48,7 +48,7 @@ Save the PowerShell text printed by the last command as `deploy.ps1` on the **Wi
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\deploy.ps1 -Destination .\worker.exe
 ```
 
-The script downloads, verifies SHA-256, installs, and launches the binary hidden. The packaged agent needs **no connection arguments**, console window, Administrator rights, or inbound port. Its executable contains an enrollment credential, so protect both the executable and deploy script. Build once per endpoint if distinct agent identities are needed. The [payload guide](agent-distribution.md) covers manual download, profiles, hosted URL rotation, and lifecycle commands.
+The script downloads, verifies SHA-256, installs, and launches the binary hidden. The packaged agent needs **no connection arguments**, console window, Administrator rights, or inbound port. Its executable contains an enrollment credential, so protect both the executable and deploy script. Each running copy gets a distinct agent ID. The [payload guide](agent-distribution.md) covers manual download, profiles, hosted URL rotation, and lifecycle commands.
 
 **Alternate delivery:** if you need to wrap the executable or deliver it through your own channel, run `payload download PAYLOAD_ID ./staging/worker.exe` in either the server console or an authenticated client console. This retrieves the built binary over the control connection, verifies its SHA-256, and saves it locally even if it has never been hosted. The output file must not already exist. See [payload deployment](agent-distribution.md#profile--build--host--run) for details.
 

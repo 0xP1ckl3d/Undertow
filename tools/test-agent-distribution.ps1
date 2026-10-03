@@ -88,7 +88,7 @@ try {
     $profile = Invoke-RestMethod -Uri "$base/v1/agent-profiles" -Headers $headers -Method Post -ContentType application/json -Body $body
     $body = @{ profile = $name; platform = "windows"; architecture = "amd64" } | ConvertTo-Json
     $artifact = Invoke-RestMethod -Uri "$base/v1/agent-artifacts" -Headers $headers -Method Post -ContentType application/json -Body $body
-    if (-not $artifact.agent_id) { throw "Artifact did not record its embedded agent identity" }
+    if ($artifact.agent_id) { throw "Artifact unexpectedly embedded a fixed agent identity" }
     $hosted = Invoke-RestMethod -Uri "$base/v1/agent-artifacts/$($artifact.id)/host" -Headers $headers -Method Post
     if ($artifact.filename -notmatch "^$($artifact.id)(\.exe)?$" -or $hosted.retrieval.Contains($artifact.id) -or $hosted.retrieval.Contains($name) -or $hosted.retrieval -notmatch '/dl/[0-9a-f]{48}$') { throw "Artifact naming or retrieval URL exposed management metadata" }
     try { Invoke-WebRequest -Uri ($hosted.retrieval -replace '/dl/', '/.undertow/artifacts/') -SkipCertificateCheck -OutFile (Join-Path $root 'old-route.bin') | Out-Null; throw 'Product-labelled retrieval route remained active' } catch { if ($_.Exception.Message -eq 'Product-labelled retrieval route remained active') { throw } }
@@ -106,7 +106,7 @@ try {
       Start-Sleep -Milliseconds 200
     }
     if (-not $connected) { throw "Agent did not connect: $(Get-Content (Join-Path $root "$name.err") -Raw)" }
-    if ($connected.profile -ne $name -or $connected.id -ne $artifact.agent_id) { throw "Inventory metadata or embedded identity missing" }
+    if ($connected.profile -ne $name -or $connected.id -notmatch '^[0-9a-f]{32}$') { throw "Inventory metadata or runtime identity missing" }
     Assert-EndpointUnchanged $endpoint
     if ($connected.reconnect_policy -ne "progressive") { throw "Configured agent does not report progressive reconnect" }
     if (-not $connected.undertow_version -or -not $connected.profile_id) { throw "Artifact build metadata missing" }
