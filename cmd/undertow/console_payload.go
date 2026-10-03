@@ -35,7 +35,7 @@ func printPayloadWorkflow(out io.Writer) {
 
 Inspect: payload list | payload show PAYLOAD_ID | payload hosted | payload url PAYLOAD_ID
 Save:    payload download PAYLOAD_ID [OUTPUT]
-         Defaults to payloads/FILENAME in this console's working directory.
+         Defaults to outputs/downloads/payloads/FILENAME here.
 Manage:  payload unhost PAYLOAD_ID | payload revoke PAYLOAD_ID | payload delete PAYLOAD_ID
 Helper:  payload deploy-script PAYLOAD_ID powershell|shell
 Profile: payload profile show|edit|delete NAME
@@ -90,7 +90,7 @@ func runConsolePayload(ctx context.Context, out io.Writer, call consoleCaller, a
 		return runPayloadAction(ctx, out, call, args[1], args[2])
 	case "download":
 		if len(args) != 3 && len(args) != 4 {
-			return errors.New("use payload download PAYLOAD_ID [OUTPUT]; default: payloads/FILENAME")
+			return errors.New("use payload download PAYLOAD_ID [OUTPUT]; default: outputs/downloads/payloads/FILENAME")
 		}
 		outputPath := ""
 		if len(args) == 4 {

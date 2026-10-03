@@ -891,7 +891,7 @@ Quote arguments containing spaces. Commands run only when submitted.
 				if err != nil {
 					return err
 				}
-				if err := os.MkdirAll(filepath.Dir(request.LocalPath), 0700); err != nil {
+				if err := prepareClientOutputDirectory(filepath.Dir(request.LocalPath)); err != nil {
 					return err
 				}
 			}

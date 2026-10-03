@@ -46,7 +46,7 @@ func TestPayloadDownloadPathsAndHash(t *testing.T) {
 	for _, tc := range []struct {
 		name, output, expected string
 	}{
-		{"default", "", filepath.Join("payloads", "worker.exe")},
+		{"default", "", filepath.Join("outputs", "downloads", "payloads", "worker.exe")},
 		{"explicit file", filepath.Join("staging", "copy.exe"), filepath.Join("staging", "copy.exe")},
 		{"existing directory", "staging", filepath.Join("staging", "worker.exe")},
 	} {

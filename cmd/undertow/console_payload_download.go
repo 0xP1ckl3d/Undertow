@@ -25,7 +25,7 @@ func runPayloadDownload(ctx context.Context, out io.Writer, call consoleCaller, 
 		return errors.New("payload has an invalid filename")
 	}
 	if outputPath == "" {
-		outputPath = filepath.Join("payloads", a.Filename)
+		outputPath = filepath.Join("outputs", "downloads", "payloads", a.Filename)
 	} else if stat, err := os.Stat(outputPath); err == nil && stat.IsDir() || strings.HasSuffix(outputPath, "/") || strings.HasSuffix(outputPath, `\`) {
 		outputPath = filepath.Join(outputPath, a.Filename)
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -40,7 +40,7 @@ func runPayloadDownload(ctx context.Context, out io.Writer, call consoleCaller, 
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(destination), 0700); err != nil {
+	if err := prepareClientOutputDirectory(filepath.Dir(destination)); err != nil {
 		return err
 	}
 	temporary, err := os.CreateTemp(filepath.Dir(destination), ".undertow-payload-*.partial")
@@ -93,6 +93,10 @@ func runPayloadDownload(ctx context.Context, out io.Writer, call consoleCaller, 
 		return err
 	}
 	if err := publishJobDownload(temporary.Name(), destination); err != nil {
+		return err
+	}
+	if err := setLocalOutputOwner(destination); err != nil {
+		_ = os.Remove(destination)
 		return err
 	}
 	fmt.Fprintf(out, "Saved payload to %s (%d bytes, SHA-256 %s)\n", destination, offset, a.SHA256)

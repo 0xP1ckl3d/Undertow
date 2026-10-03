@@ -43,7 +43,7 @@ If you will wrap the binary or distribute it through another channel, save it to
 payload download PAYLOAD_ID ./staging/worker.exe
 ```
 
-This uses the authenticated control connection, so an unhosted build can be downloaded too. The command verifies SHA-256 before publishing the file and refuses to replace an existing file. With no output argument, it saves to `payloads/FILENAME` under the console's working directory; this directory is ignored by Git. You can also pass a filename or an existing directory, and the command creates missing parent directories. Server and connected VPN client consoles can both download and manage payloads directly. See [Getting started](getting-started.md#3-build-host-and-deploy-a-headless-windows-agent) for the hosted PowerShell flow.
+This uses the authenticated control connection, so an unhosted build can be downloaded too. The command verifies SHA-256 before publishing the file and refuses to replace an existing file. With no output argument, it saves to `outputs/downloads/payloads/FILENAME` under the console's working directory; the `outputs/` tree is ignored by Git. You can also pass a filename or an existing directory, and the command creates missing parent directories. Server and connected VPN client consoles can both download and manage payloads directly. See [Getting started](getting-started.md#3-build-host-and-deploy-a-headless-windows-agent) for the hosted PowerShell flow.
 
 ## Public HTTPS download host
 

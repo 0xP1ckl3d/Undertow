@@ -224,12 +224,15 @@ In the VPN client console, select a Windows agent and run `screens` to see its n
 
 ```text
 outputs/
-  downloads/AGENT_ID/    Default file downloads
+  downloads/AGENT_ID/    Default agent file downloads
+  downloads/payloads/    Default payload downloads
   screenshots/           Screen captures
   jobs/AGENT_ID/         Saved job output
 ```
 
 The agent needs an interactive Windows desktop session with accessible displays. A service in Session 0 or a locked or disconnected desktop may have no capturable screen; `screens` or `screenshot` reports that condition. Screen capture requires the agent's `hostops` and `download` capabilities. From the main menu, use `screens AGENT_ID` or `screenshot AGENT_ID [NUMBER] [--output DIRECTORY]`.
+
+When the Linux client runs through `sudo`, new output directories and saved files are owned by the user who invoked `sudo`, so they can review captures and downloads without switching to root.
 
 ## Built-in agent host operations
 

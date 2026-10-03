@@ -225,7 +225,7 @@ func saveJobOutput(ctx context.Context, output io.Writer, call consoleCaller, jo
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(abs), 0700); err != nil {
+	if err := prepareClientOutputDirectory(filepath.Dir(abs)); err != nil {
 		return err
 	}
 	temporary, err := os.CreateTemp(filepath.Dir(abs), ".undertow-job-*.partial")
@@ -270,6 +270,10 @@ func saveJobOutput(ctx context.Context, output io.Writer, call consoleCaller, jo
 		return err
 	}
 	if err := publishJobDownload(temporary.Name(), abs); err != nil {
+		return err
+	}
+	if err := setLocalOutputOwner(abs); err != nil {
+		_ = os.Remove(abs)
 		return err
 	}
 	fmt.Fprintf(output, "Saved %d bytes to %s\n", offset, abs)

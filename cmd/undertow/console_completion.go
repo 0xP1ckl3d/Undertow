@@ -117,12 +117,12 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 				return matches
 			}
 		}
-		commands := []string{"agents", "agent", "payload", "session", "use", "status", "routes", "help", "clear", "cls", "quit", "exit", "load", "unload", "bofs", "modules"}
+		commands := []string{"agents", "agent", "payload", "session", "use", "status", "routes", "help", "clear", "cls", "quit", "exit"}
 		if selected {
 			commands = append(commands, loadedNames...)
 		}
 		if selected {
-			commands = append(commands, "show", "back", "route", "jobs", "job", "exec", "shell", "run-script", "run-wasm", "run-native", "run-bof", "pwd", "ls", "stat", "mkdir", "rm", "whoami", "ps", "privileges", "env", "interfaces", "dns", "route-table", "screens")
+			commands = append(commands, "show", "back", "route", "jobs", "job", "exec", "shell", "run-script", "run-wasm", "run-native", "run-bof", "pwd", "ls", "stat", "mkdir", "rm", "whoami", "ps", "privileges", "env", "interfaces", "dns", "route-table", "screens", "load", "unload", "bofs", "modules")
 		}
 		if vpn {
 			commands = append(commands, "background", "internal", "vpn")

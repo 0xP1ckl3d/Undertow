@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -87,7 +86,7 @@ func runConsoleScreenshot(ctx context.Context, output io.Writer, call consoleCal
 			return fmt.Errorf("screen %d is unavailable; use screens to list displays", number)
 		}
 	}
-	if err := os.MkdirAll(outputDir, 0700); err != nil {
+	if err := prepareClientOutputDirectory(outputDir); err != nil {
 		return err
 	}
 	for _, screen := range screens {
