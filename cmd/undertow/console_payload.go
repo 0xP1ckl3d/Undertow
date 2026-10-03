@@ -42,7 +42,8 @@ Profile: payload profile show|edit|delete NAME
 
 NAME is a profile name. PAYLOAD_ID is the 24-character build ID shown by
 "payload build" and "payload list". A connected agent has a different,
-32-character agent ID; use "agents" and "agent events|shutdown" for it.
+32-character agent ID assigned when the payload process starts; use "agents"
+and "agent events|shutdown" for it. Copies of one payload get separate IDs.
 The server file path is where Undertow stores the build. The download URL is
 for the endpoint; choose the endpoint's install path when downloading.
 Path: payload retrieval-path | payload retrieval-path set /downloads/
@@ -332,7 +333,7 @@ func runPayloadBuild(ctx context.Context, out io.Writer, call consoleCaller, arg
 	if err := json.Unmarshal(data, &a); err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "Payload built\nPayload ID: %s (use this with payload host/show)\nProfile name: %s (settings snapshot)\nEmbedded agent ID: %s (appears in agents when connected)\nTarget: %s/%s\nServer file: %s\nSHA-256: %s\nDownload: not hosted\nNext: payload host %s\n", a.ID, a.Profile, a.AgentID, a.Platform, a.Architecture, a.ServerPath, a.SHA256, a.ID)
+	fmt.Fprintf(out, "Payload built\nPayload ID: %s (use this with payload host/show)\nProfile name: %s (settings snapshot)\nAgent ID: assigned when each process starts; see agents after connection\nTarget: %s/%s\nServer file: %s\nSHA-256: %s\nDownload: not hosted\nNext: payload host %s\n", a.ID, a.Profile, a.Platform, a.Architecture, a.ServerPath, a.SHA256, a.ID)
 	return nil
 }
 
@@ -516,7 +517,11 @@ func runPayloadAction(ctx context.Context, out io.Writer, call consoleCaller, ac
 }
 
 func printPayloadDetails(out io.Writer, a artifactInfo, hosted *hostedArtifactInfo) {
-	fmt.Fprintf(out, "Payload ID: %s (build record; use with payload commands)\nProfile name: %s (settings snapshot)\nEmbedded agent ID: %s (use with agent commands after connection)\nTarget: %s/%s\nServer file: %s (stored on the Undertow server)\nSHA-256: %s\n", a.ID, a.Profile, emptyDefault(a.AgentID, "legacy build; rebuild for a dedicated identity"), a.Platform, a.Architecture, a.ServerPath, a.SHA256)
+	agentIdentity := "assigned when each process starts; see agents after connection"
+	if a.ProfileFormatVersion < 4 {
+		agentIdentity = "legacy fixed identity; rebuild this payload before using copies on multiple hosts"
+	}
+	fmt.Fprintf(out, "Payload ID: %s (build record; use with payload commands)\nProfile name: %s (settings snapshot)\nAgent ID: %s\nTarget: %s/%s\nServer file: %s (stored on the Undertow server)\nSHA-256: %s\n", a.ID, a.Profile, agentIdentity, a.Platform, a.Architecture, a.ServerPath, a.SHA256)
 	if hosted == nil {
 		fmt.Fprintf(out, "Download: not hosted. Run payload host %s to enable an HTTPS URL.\n", a.ID)
 	} else {

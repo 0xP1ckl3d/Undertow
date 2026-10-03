@@ -26,16 +26,15 @@ type wireConfig struct {
 }
 
 type wireEmbedded struct {
-	ProfileID   string     `json:"p"`
-	ArtifactID  string     `json:"a"`
-	IdentityKey []byte     `json:"k"`
-	Config      wireConfig `json:"c"`
+	ProfileID  string     `json:"p"`
+	ArtifactID string     `json:"a"`
+	Config     wireConfig `json:"c"`
 }
 
 func encodeEmbedded(e Embedded) ([]byte, error) {
 	c := e.Config
 	return json.Marshal(wireEmbedded{ProfileID: e.ProfileID, ArtifactID: e.ArtifactID,
-		IdentityKey: e.IdentityKey, Config: wireConfig{
+		Config: wireConfig{
 			Server: c.Server, Transport: c.Transport, Domain: c.Domain,
 			Fingerprint: c.Fingerprint, Credential: c.Credential,
 			PayloadProfile: c.PayloadProfile, WebSocketPath: c.WebSocketPath,
@@ -56,7 +55,7 @@ func decodeEmbedded(payload []byte) (Embedded, error) {
 	}
 	c := w.Config
 	return Embedded{ProfileID: w.ProfileID, ArtifactID: w.ArtifactID,
-		IdentityKey: w.IdentityKey, Config: agent.Config{
+		Config: agent.Config{
 			Version: agent.ConfigVersion, Server: c.Server, Transport: c.Transport,
 			Domain: c.Domain, Fingerprint: c.Fingerprint, AuthMode: "artifact",
 			Credential: c.Credential, PayloadProfile: c.PayloadProfile,

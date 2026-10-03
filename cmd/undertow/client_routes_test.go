@@ -7,6 +7,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http"
 	"net/netip"
 	"path/filepath"
 	"reflect"
@@ -173,5 +175,131 @@ func TestClientRoutesPersistAcrossLoads(t *testing.T) {
 		if err != nil || !reflect.DeepEqual(got, want) {
 			t.Fatalf("routes=%+v err=%v", got, err)
 		}
+	}
+}
+
+func TestClientReassignsRouteFromDisconnectedAgent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "client-routes.json")
+	old := control.AcceptedRoute{Prefix: "10.10.10.0/24", AgentID: "old-agent"}
+	if err := saveClientRoutes(path, []control.AcceptedRoute{old}); err != nil {
+		t.Fatal(err)
+	}
+	device := &recordingRouteDevice{}
+	client := &liveClientConsole{
+		device: device, sessionID: 7, routeFile: path,
+		serverIP: netip.MustParseAddr("203.0.113.10"), tunnelPrefix: netip.MustParsePrefix("172.16.253.0/24"),
+		routes: []control.AcceptedRoute{old}, active: map[string]bool{old.Prefix: true}, global: make(map[string]bool),
+	}
+	posted := false
+	client.request = func(_ context.Context, method, path string, body any) ([]byte, error) {
+		switch {
+		case method == http.MethodGet && path == "/v1/status":
+			return json.Marshal(map[string]any{"agents": []control.AgentInfo{{ID: "new-agent", Hostname: "WS01"}}})
+		case method == http.MethodPost && path == "/v1/clients/7/routes":
+			route, ok := body.(control.AcceptedRoute)
+			if !ok || route.Prefix != old.Prefix || route.AgentID != "new-agent" {
+				t.Fatalf("unexpected reassignment body: %+v", body)
+			}
+			posted = true
+			return nil, nil
+		default:
+			return nil, fmt.Errorf("unexpected request %s %s", method, path)
+		}
+	}
+	var output bytes.Buffer
+	if err := client.routeCommand(context.Background(), []string{"route", "accept", old.Prefix, "new-agent"}, &output); err != nil {
+		t.Fatal(err)
+	}
+	got, err := loadClientRoutes(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !posted || len(got) != 1 || got[0].AgentID != "new-agent" || !reflect.DeepEqual(got, client.routes) || len(device.added) != 0 || len(device.deleted) != 0 || !strings.Contains(output.String(), "reassigned from old-agent to new-agent") {
+		t.Fatalf("reassignment: posted=%t saved=%+v current=%+v device=%+v output=%q", posted, got, client.routes, device, output.String())
+	}
+}
+
+func TestClientBlocksReassignmentFromConnectedAgent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "client-routes.json")
+	old := control.AcceptedRoute{Prefix: "10.10.10.0/24", AgentID: "old-agent"}
+	if err := saveClientRoutes(path, []control.AcceptedRoute{old}); err != nil {
+		t.Fatal(err)
+	}
+	client := &liveClientConsole{
+		routeFile: path, serverIP: netip.MustParseAddr("203.0.113.10"), tunnelPrefix: netip.MustParsePrefix("172.16.253.0/24"),
+		routes: []control.AcceptedRoute{old},
+	}
+	client.request = func(_ context.Context, method, path string, _ any) ([]byte, error) {
+		if method != http.MethodGet || path != "/v1/status" {
+			return nil, fmt.Errorf("unexpected request %s %s", method, path)
+		}
+		return json.Marshal(map[string]any{"agents": []control.AgentInfo{{ID: "old-agent", Hostname: "TALON"}, {ID: "new-agent", Hostname: "WS01"}}})
+	}
+	var output bytes.Buffer
+	err := client.routeCommand(context.Background(), []string{"route", "accept", old.Prefix, "new-agent"}, &output)
+	if err == nil || !strings.Contains(err.Error(), "owned by connected agent TALON (old-agent)") {
+		t.Fatalf("expected connected owner warning, got %v", err)
+	}
+	got, err := loadClientRoutes(path)
+	if err != nil || !reflect.DeepEqual(got, []control.AcceptedRoute{old}) || !reflect.DeepEqual(client.routes, got) {
+		t.Fatalf("route changed after rejection: saved=%+v current=%+v err=%v", got, client.routes, err)
+	}
+}
+
+func TestClientReassignmentFailureKeepsOldRoute(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "client-routes.json")
+	old := control.AcceptedRoute{Prefix: "10.10.10.0/24", AgentID: "old-agent"}
+	if err := saveClientRoutes(path, []control.AcceptedRoute{old}); err != nil {
+		t.Fatal(err)
+	}
+	client := &liveClientConsole{
+		sessionID: 7, routeFile: path, serverIP: netip.MustParseAddr("203.0.113.10"), tunnelPrefix: netip.MustParsePrefix("172.16.253.0/24"),
+		routes: []control.AcceptedRoute{old}, active: map[string]bool{old.Prefix: true},
+	}
+	client.request = func(_ context.Context, method, path string, _ any) ([]byte, error) {
+		if method == http.MethodGet && path == "/v1/status" {
+			return json.Marshal(map[string]any{"agents": []control.AgentInfo{{ID: "new-agent"}}})
+		}
+		return nil, errors.New("target agent rejected route")
+	}
+	var output bytes.Buffer
+	err := client.routeCommand(context.Background(), []string{"route", "accept", old.Prefix, "new-agent"}, &output)
+	if err == nil || !strings.Contains(err.Error(), "target agent rejected route") {
+		t.Fatalf("expected reassignment error, got %v", err)
+	}
+	got, err := loadClientRoutes(path)
+	if err != nil || !reflect.DeepEqual(got, []control.AcceptedRoute{old}) || !reflect.DeepEqual(client.routes, got) {
+		t.Fatalf("route changed after failure: saved=%+v current=%+v err=%v", got, client.routes, err)
+	}
+}
+
+func TestClientDeletesRouteOwnedByAnotherAgent(t *testing.T) {
+	for _, verb := range []string{"del", "delete"} {
+		t.Run(verb, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "client-routes.json")
+			old := control.AcceptedRoute{Prefix: "10.10.10.0/24", AgentID: "old-agent"}
+			if err := saveClientRoutes(path, []control.AcceptedRoute{old}); err != nil {
+				t.Fatal(err)
+			}
+			device := &recordingRouteDevice{}
+			client := &liveClientConsole{
+				device: device, sessionID: 7, routeFile: path,
+				routes: []control.AcceptedRoute{old}, active: map[string]bool{old.Prefix: true},
+			}
+			client.request = func(_ context.Context, method, requestPath string, _ any) ([]byte, error) {
+				if method != http.MethodDelete || requestPath != "/v1/clients/7/routes?prefix=10.10.10.0%2F24" {
+					return nil, fmt.Errorf("unexpected request %s %s", method, requestPath)
+				}
+				return nil, nil
+			}
+			var output bytes.Buffer
+			if err := client.routeCommand(context.Background(), []string{"route", verb, old.Prefix}, &output); err != nil {
+				t.Fatal(err)
+			}
+			got, err := loadClientRoutes(path)
+			if err != nil || len(got) != 0 || len(client.routes) != 0 || !reflect.DeepEqual(device.deleted, []string{old.Prefix}) {
+				t.Fatalf("deletion: saved=%+v current=%+v device=%+v err=%v", got, client.routes, device, err)
+			}
+		})
 	}
 }

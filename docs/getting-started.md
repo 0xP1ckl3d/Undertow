@@ -40,7 +40,7 @@ payload host PAYLOAD_ID
 payload deploy-script PAYLOAD_ID powershell
 ```
 
-Replace `PAYLOAD_ID` with the **24-character payload ID** from `payload build`. The build also prints a separate **32-character agent ID** for the connection. The profile stores the server address and carrier; the build stamps a fresh agent identity, enrollment credential, and server fingerprint into the executable. The server file path printed by the build is storage on the server, not a Windows install path. `payload host` creates an opaque HTTPS URL. Keep the URL private. `payload show PAYLOAD_ID` and `payload url PAYLOAD_ID` recover the details.
+Replace `PAYLOAD_ID` with the **24-character payload ID** from `payload build`. Each running copy creates its own **32-character agent ID** when it connects. The profile stores the server address and carrier; the build stamps an enrollment credential and server fingerprint into the executable. The server file path printed by the build is storage on the server, not a Windows install path. `payload host` creates an opaque HTTPS URL. Keep the URL private. `payload show PAYLOAD_ID` and `payload url PAYLOAD_ID` recover the details.
 
 Save the PowerShell text printed by the last command as `deploy.ps1` on the **Windows host**. Run it there:
 

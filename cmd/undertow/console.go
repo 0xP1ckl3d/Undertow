@@ -104,8 +104,9 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 	var jobSelection consoleJobSelection
 	known := make(map[string]control.AgentInfo)
 	type agentRefresh struct {
-		agents []control.AgentInfo
-		err    error
+		agents  []control.AgentInfo
+		err     error
+		started time.Time
 	}
 	refreshes := make(chan agentRefresh, 1)
 	refreshPending := false
@@ -114,15 +115,22 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 			return
 		}
 		refreshPending = true
+		started := time.Now()
 		go func() {
-			agents, err := consoleAgents(ctx, call)
+			refreshCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			defer cancel()
+			agents, err := consoleAgents(refreshCtx, call)
 			select {
-			case refreshes <- agentRefresh{agents: agents, err: err}:
+			case refreshes <- agentRefresh{agents: agents, err: err, started: started}:
 			case <-ctx.Done():
 			}
 		}()
 	}
-	ticker := time.NewTicker(15 * time.Second)
+	refreshInterval := 2 * time.Second
+	if vpnClient {
+		refreshInterval = 5 * time.Second
+	}
+	ticker := time.NewTicker(refreshInterval)
 	defer ticker.Stop()
 	lines := make(chan string)
 	scanDone := make(chan error, 1)
@@ -156,6 +164,40 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 		startRefresh()
 	}
 	promptShown := false
+	var lastApplied time.Time
+	applyAgents := func(agents []control.AgentInfo) {
+		next := make(map[string]control.AgentInfo, len(agents))
+		emitted := false
+		for _, agent := range agents {
+			next[agent.ID] = agent
+			if _, ok := known[agent.ID]; !ok {
+				if editor != nil {
+					editor.notice(fmt.Sprintf("Agent connected: %s (%s)", consoleAgentName(agent), shortAgentID(agent.ID)))
+				} else {
+					fmt.Fprintf(output, "\n[Agent connected: %s (%s)]\n", consoleAgentName(agent), shortAgentID(agent.ID))
+				}
+				emitted = true
+			}
+		}
+		for id, agent := range known {
+			if _, ok := next[id]; !ok {
+				if editor != nil {
+					editor.notice(fmt.Sprintf("Agent lost: %s (%s)", consoleAgentName(agent), shortAgentID(id)))
+				} else {
+					fmt.Fprintf(output, "\n[Agent lost: %s (%s)]\n", consoleAgentName(agent), shortAgentID(id))
+				}
+				emitted = true
+				if selectedID == id {
+					selectedID, selectedLabel = "", ""
+					jobSelection = consoleJobSelection{}
+				}
+			}
+		}
+		known = next
+		if emitted {
+			promptShown = false
+		}
+	}
 	for {
 		if !promptShown {
 			prompt := "undertow> "
@@ -203,40 +245,11 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 			continue
 		case refresh := <-refreshes:
 			refreshPending = false
-			if refresh.err != nil {
+			if refresh.err != nil || refresh.started.Before(lastApplied) {
 				continue
 			}
-			next := make(map[string]control.AgentInfo, len(refresh.agents))
-			emitted := false
-			for _, agent := range refresh.agents {
-				next[agent.ID] = agent
-				if _, ok := known[agent.ID]; !ok {
-					if editor != nil {
-						editor.notice(fmt.Sprintf("Agent connected: %s (%s)", consoleAgentName(agent), shortAgentID(agent.ID)))
-					} else {
-						fmt.Fprintf(output, "\n[Agent connected: %s (%s)]\n", consoleAgentName(agent), shortAgentID(agent.ID))
-					}
-					emitted = true
-				}
-			}
-			for id, agent := range known {
-				if _, ok := next[id]; !ok {
-					if editor != nil {
-						editor.notice(fmt.Sprintf("Agent lost: %s (%s)", consoleAgentName(agent), shortAgentID(id)))
-					} else {
-						fmt.Fprintf(output, "\n[Agent lost: %s (%s)]\n", consoleAgentName(agent), shortAgentID(id))
-					}
-					emitted = true
-					if selectedID == id {
-						selectedID, selectedLabel = "", ""
-						jobSelection = consoleJobSelection{}
-					}
-				}
-			}
-			known = next
-			if emitted {
-				promptShown = false
-			}
+			applyAgents(refresh.agents)
+			lastApplied = time.Now()
 			continue
 		}
 		args, err := splitConsoleCommand(line)
@@ -334,6 +347,8 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 				fmt.Fprintln(output, "error:", err)
 				continue
 			}
+			applyAgents(agents)
+			lastApplied = time.Now()
 			if args[0] == "agents" || len(args) == 1 {
 				printConsoleAgents(output, agents)
 				continue
@@ -414,8 +429,6 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 				}
 			case "route":
 				if len(args) == 3 && (args[1] == "add" || args[1] == "accept") {
-					args = append(args, selectedID)
-				} else if vpnClient && len(args) == 3 && args[1] == "del" {
 					args = append(args, selectedID)
 				}
 			case "routes":
@@ -780,7 +793,7 @@ Quote arguments containing spaces. Commands run only when submitted.
 			}
 			return err
 		}
-		if len(args) == 3 && args[1] == "del" {
+		if len(args) == 3 && (args[1] == "del" || args[1] == "delete") {
 			_, err := call(ctx, http.MethodDelete, "/v1/routes?prefix="+url.QueryEscape(args[2]), nil)
 			if err == nil {
 				fmt.Fprintln(output, "Route removed.")

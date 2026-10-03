@@ -104,7 +104,9 @@ The worker and current agent selection continue unchanged.
   routes                    Show available and accepted routes.
   route accept CIDR         Accept a selected agent's advertised route.
   route add CIDR            Use a selected agent for a manual route.
-  route del CIDR            Remove a locally saved route.
+  route del CIDR            Remove a locally saved route, regardless of owner.
+An offline route owner can be replaced with route accept/add through another
+agent. A connected owner must be removed first with route del CIDR.
 At the main menu, append AGENT_ID to route accept/add. --internal leaves
 ordinary Internet routing unchanged; --vpn also routes Internet via server.
 `)

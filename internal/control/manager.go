@@ -301,6 +301,9 @@ func (m *Manager) SetClientRoute(sessionID uint64, prefix netip.Prefix, agentID 
 	if client == nil {
 		return errors.New("VPN client is not connected")
 	}
+	if existing, ok := client.accepted[prefix]; ok && existing.AgentID != agentID && m.agents[existing.AgentID] != nil {
+		return fmt.Errorf("route %s is owned by connected agent %s; remove it before assigning another agent", prefix, existing.AgentID)
+	}
 	agent := m.agents[agentID]
 	if agent == nil {
 		return errors.New("agent is not connected")

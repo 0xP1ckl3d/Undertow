@@ -38,7 +38,6 @@ func main() {
 		os.Exit(1)
 	}
 	cfg := embedded.Config
-	cfg.IdentityKey = embedded.IdentityKey
 	cfg.Metadata = embedded.Identity()
 	cfg.Packaged = true
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

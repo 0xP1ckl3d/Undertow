@@ -2,7 +2,6 @@ package agentprofile
 
 import (
 	"bytes"
-	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
@@ -19,9 +18,9 @@ import (
 )
 
 const MaxProfileSize = 16 << 10
-const EmbeddedFormatVersion uint32 = 3
+const EmbeddedFormatVersion uint32 = 4
 
-var magic = [8]byte{0xd4, 0x93, 0xa8, 0x5f, 0x6c, 3, 0x0b, 0xe2}
+var magic = [8]byte{0xd4, 0x93, 0xa8, 0x5f, 0x6c, 4, 0x0b, 0xe2}
 var safeName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$`)
 
 type Profile struct {
@@ -33,10 +32,9 @@ type Profile struct {
 }
 
 type Embedded struct {
-	ProfileID   string
-	ArtifactID  string
-	IdentityKey ed25519.PrivateKey
-	Config      agent.Config
+	ProfileID  string
+	ArtifactID string
+	Config     agent.Config
 }
 
 func ID() (string, error) {
@@ -63,9 +61,6 @@ func (p Profile) Validate() error {
 func (e Embedded) Validate() error {
 	if e.ProfileID == "" || len(e.ProfileID) > 64 || e.ArtifactID == "" || len(e.ArtifactID) > 64 {
 		return errors.New("incomplete embedded agent artifact")
-	}
-	if len(e.IdentityKey) != ed25519.PrivateKeySize || !ed25519.NewKeyFromSeed(e.IdentityKey[:ed25519.SeedSize]).Equal(e.IdentityKey) {
-		return errors.New("invalid embedded identity")
 	}
 	if e.Config.AuthMode != "artifact" {
 		return errors.New("embedded authentication mode must be artifact-scoped")

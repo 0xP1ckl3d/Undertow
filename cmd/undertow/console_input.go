@@ -7,7 +7,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"sync"
+	"unicode"
 )
 
 type consoleEditor struct {
@@ -25,6 +27,10 @@ type consoleEditor struct {
 	historyAt       int
 	rawInput        chan byte
 	rawDetach       chan struct{}
+	columns         int // optional override for non-terminal output and tests
+	drawn           bool
+	drawnCursorRow  int
+	drawnColumns    int
 }
 
 func (e *consoleEditor) beginInteractive() (<-chan byte, <-chan struct{}) {
@@ -62,15 +68,72 @@ func (e *consoleEditor) showPrompt(prompt string, selected bool) {
 func (e *consoleEditor) notice(message string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	fmt.Fprintf(e.output, "\r\x1b[2K\n[%s]\n", message)
+	e.clearPrompt()
+	fmt.Fprintf(e.output, "[%s]\r\n", message)
 	e.redraw()
 }
 
-func (e *consoleEditor) redraw() {
-	fmt.Fprintf(e.output, "\r\x1b[2K%s%s", e.prompt, string(e.line))
-	if trailing := len(e.line) - e.cursor; trailing > 0 {
-		fmt.Fprintf(e.output, "\x1b[%dD", trailing)
+func (e *consoleEditor) clearPrompt() {
+	if !e.drawn {
+		return
 	}
+	if e.drawnCursorRow > 0 {
+		fmt.Fprintf(e.output, "\x1b[%dA", e.drawnCursorRow)
+	}
+	fmt.Fprint(e.output, "\r\x1b[J")
+	e.drawn = false
+}
+
+func (e *consoleEditor) displayColumns() int {
+	columns := e.columns
+	if columns <= 0 {
+		columns = 80
+		if file, ok := e.output.(*os.File); ok {
+			if width, _ := consoleSize(file); width > 1 {
+				columns = int(width)
+			}
+		}
+	}
+	return columns
+}
+
+func (e *consoleEditor) redraw() {
+	e.clearPrompt()
+	columns := e.displayColumns()
+	// Wrap explicitly before the final column. This avoids terminals' pending-wrap
+	// state and gives every cursor position a well-defined row and column.
+	span := max(1, columns-1)
+	visible := []rune(e.prompt + string(e.line))
+	cursorOffset := len([]rune(e.prompt)) + e.cursor
+	for i, char := range visible {
+		if i > 0 && i%span == 0 {
+			fmt.Fprint(e.output, "\r\n")
+		}
+		fmt.Fprint(e.output, string(char))
+	}
+	endRow := len(visible) / span
+	endCol := len(visible) % span
+	if len(visible) > 0 && endCol == 0 {
+		// The final row starts only when another character is printed.
+		endRow--
+		endCol = span
+	}
+	cursorRow := cursorOffset / span
+	cursorCol := cursorOffset % span
+	if cursorOffset > 0 && cursorCol == 0 {
+		cursorRow--
+		cursorCol = span
+	}
+	if endRow > cursorRow {
+		fmt.Fprintf(e.output, "\x1b[%dA", endRow-cursorRow)
+	}
+	fmt.Fprint(e.output, "\r")
+	if cursorCol > 0 {
+		fmt.Fprintf(e.output, "\x1b[%dC", cursorCol)
+	}
+	e.drawn = true
+	e.drawnCursorRow = cursorRow
+	e.drawnColumns = columns
 }
 
 func (e *consoleEditor) read(ctx context.Context, input io.Reader, lines chan<- string) error {
@@ -109,7 +172,13 @@ func (e *consoleEditor) read(ctx context.Context, input io.Reader, lines chan<- 
 				e.history = append(e.history, line)
 			}
 			e.historyAt = len(e.history)
+			if e.cursor != len(e.line) {
+				e.cursor = len(e.line)
+				e.redraw()
+			}
 			e.line, e.cursor = nil, 0
+			e.drawn = false
+			e.drawnCursorRow = 0
 			fmt.Fprint(e.output, "\r\n")
 			e.mu.Unlock()
 			select {
@@ -126,26 +195,7 @@ func (e *consoleEditor) read(ctx context.Context, input io.Reader, lines chan<- 
 		case '\t':
 			e.complete()
 		case 0x1b:
-			first, _, readErr := reader.ReadRune()
-			if readErr == nil && first == '[' {
-				key, _, readErr := reader.ReadRune()
-				if readErr == nil {
-					switch key {
-					case 'A':
-						e.recall(-1)
-					case 'B':
-						e.recall(1)
-					case 'C':
-						if e.cursor < len(e.line) {
-							e.cursor++
-						}
-					case 'D':
-						if e.cursor > 0 {
-							e.cursor--
-						}
-					}
-				}
-			}
+			e.readEscape(reader)
 		case 0x04:
 			if len(e.line) == 0 {
 				e.mu.Unlock()
@@ -175,6 +225,18 @@ func (e *consoleEditor) read(ctx context.Context, input io.Reader, lines chan<- 
 			}
 		default:
 			if char >= ' ' {
+				if e.cursor == len(e.line) && e.drawn && e.drawnColumns == e.displayColumns() {
+					span := max(1, e.drawnColumns-1)
+					if (len([]rune(e.prompt))+len(e.line))%span == 0 {
+						fmt.Fprint(e.output, "\r\n")
+						e.drawnCursorRow++
+					}
+					fmt.Fprint(e.output, string(char))
+					e.line = append(e.line, char)
+					e.cursor++
+					e.mu.Unlock()
+					continue
+				}
 				e.line = append(e.line, 0)
 				copy(e.line[e.cursor+1:], e.line[e.cursor:])
 				e.line[e.cursor] = char
@@ -201,4 +263,80 @@ func (e *consoleEditor) recall(direction int) {
 		e.line = []rune(e.history[next])
 	}
 	e.cursor = len(e.line)
+}
+
+func (e *consoleEditor) readEscape(reader *bufio.Reader) {
+	first, _, err := reader.ReadRune()
+	if err != nil {
+		return
+	}
+	if first == 'O' {
+		key, _, err := reader.ReadRune()
+		if err == nil {
+			e.handleEscape("", key)
+		}
+		return
+	}
+	if first != '[' {
+		return
+	}
+	var params []rune
+	for len(params) < 32 {
+		key, _, err := reader.ReadRune()
+		if err != nil {
+			return
+		}
+		if key >= 0x40 && key <= 0x7e {
+			e.handleEscape(string(params), key)
+			return
+		}
+		params = append(params, key)
+	}
+}
+
+func (e *consoleEditor) handleEscape(params string, key rune) {
+	modified := params == "1;5" || params == "5"
+	switch key {
+	case 'A':
+		e.recall(-1)
+	case 'B':
+		e.recall(1)
+	case 'C':
+		if modified {
+			for e.cursor < len(e.line) && !unicode.IsSpace(e.line[e.cursor]) {
+				e.cursor++
+			}
+			for e.cursor < len(e.line) && unicode.IsSpace(e.line[e.cursor]) {
+				e.cursor++
+			}
+		} else if e.cursor < len(e.line) {
+			e.cursor++
+		}
+	case 'D':
+		if modified {
+			for e.cursor > 0 && unicode.IsSpace(e.line[e.cursor-1]) {
+				e.cursor--
+			}
+			for e.cursor > 0 && !unicode.IsSpace(e.line[e.cursor-1]) {
+				e.cursor--
+			}
+		} else if e.cursor > 0 {
+			e.cursor--
+		}
+	case 'H':
+		e.cursor = 0
+	case 'F':
+		e.cursor = len(e.line)
+	case '~':
+		switch params {
+		case "3":
+			if e.cursor < len(e.line) {
+				e.line = append(e.line[:e.cursor], e.line[e.cursor+1:]...)
+			}
+		case "1", "7":
+			e.cursor = 0
+		case "4", "8":
+			e.cursor = len(e.line)
+		}
+	}
 }

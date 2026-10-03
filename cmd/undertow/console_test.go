@@ -31,6 +31,23 @@ func TestConsoleSplitsQuotedExecutableArguments(t *testing.T) {
 	}
 }
 
+func TestAgentsCommandAnnouncesNewConnectionImmediately(t *testing.T) {
+	call := func(_ context.Context, method, path string, _ any) ([]byte, error) {
+		if method != http.MethodGet || path != "/v1/status" {
+			return nil, fmt.Errorf("unexpected request %s %s", method, path)
+		}
+		return []byte(`{"agents":[{"id":"0123456789abcdef0123456789abcdef","hostname":"WS01"}]}`), nil
+	}
+	var output bytes.Buffer
+	if err := runConsole(context.Background(), strings.NewReader("agents\nquit\n"), &output, call, nil, nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	text := output.String()
+	if strings.Count(text, "Agent connected: WS01") != 1 || !strings.Contains(text, "Connected agents (1)") {
+		t.Fatalf("connection alert did not accompany agents output: %s", text)
+	}
+}
+
 func TestConsoleHistoryAndTabCompletion(t *testing.T) {
 	var output bytes.Buffer
 	editor := newConsoleEditor(&output, true)
@@ -402,6 +419,32 @@ func TestInteractiveClientAgentContext(t *testing.T) {
 	}
 	if !reflect.DeepEqual(routeArgs, []string{"route", "add", "10.10.0.0/16", "agent-long-id"}) {
 		t.Fatalf("route args=%q", routeArgs)
+	}
+}
+
+func TestSelectedAgentCanDeleteRouteOwnedByAnotherAgent(t *testing.T) {
+	for _, command := range []string{"route del 10.10.10.0/24", "route delete 10.10.10.0/24"} {
+		t.Run(command, func(t *testing.T) {
+			var routeArgs []string
+			caller := func(_ context.Context, _, path string, _ any) ([]byte, error) {
+				if path == "/v1/status" {
+					return json.Marshal(map[string]any{"agents": []control.AgentInfo{{ID: "new-agent", Hostname: "WS01"}}})
+				}
+				return nil, nil
+			}
+			route := func(_ context.Context, args []string, _ io.Writer) error {
+				routeArgs = append([]string(nil), args...)
+				return nil
+			}
+			var output bytes.Buffer
+			if err := runConsole(context.Background(), strings.NewReader("use 1\n"+command+"\nquit\n"), &output, caller, func() uint64 { return 704 }, nil, route, nil); err != nil {
+				t.Fatal(err)
+			}
+			want := strings.Fields(command)
+			if !reflect.DeepEqual(routeArgs, want) {
+				t.Fatalf("route args=%q, want %q; output=%q", routeArgs, want, output.String())
+			}
+		})
 	}
 }
 

@@ -3,9 +3,11 @@ package control
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -21,6 +23,41 @@ import (
 type routeDevice struct {
 	mu     sync.Mutex
 	routes map[string]bool
+}
+
+func TestTwoAgentsFromOnePayloadRemainConnected(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	manager := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	manager.SetArtifactLookup(func(id string) (string, string, bool) {
+		if id != "payload-one" {
+			return "", "", false
+		}
+		return "office", "test", true
+	})
+	for i, id := range []string{"agent-one", "agent-two"} {
+		a, b := make(chan []byte, 256), make(chan []byte, 256)
+		serverMux := mux.New(ctx, &remoteTestTransport{in: a, out: b, done: make(chan struct{})}, true)
+		agentMux := mux.New(ctx, &remoteTestTransport{in: b, out: a, done: make(chan struct{})}, false)
+		defer serverMux.Close()
+		defer agentMux.Close()
+		var keys security.Keys
+		sess, err := session.New(uint64(100+i), keys, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		manager.Register(&dns.Peer{Session: sess, AgentID: id, EnrollmentArtifactID: "payload-one", Connected: time.Now()}, serverMux)
+		manager.UpdateInventory(id, serverMux, []byte(fmt.Sprintf(`{"hostname":"host-%d","artifact_id":"payload-one"}`, i)))
+	}
+	agents := manager.AgentList()
+	if len(agents) != 2 || agents[0].ID == agents[1].ID || agents[0].VirtualIP == agents[1].VirtualIP {
+		t.Fatalf("copies of one payload displaced each other: %+v", agents)
+	}
+	for _, agent := range agents {
+		if agent.ArtifactID != "payload-one" || agent.Profile != "office" {
+			t.Fatalf("artifact metadata lost: %+v", agent)
+		}
+	}
 }
 
 func TestPayloadRetrievalHostRoutesToDistributionHandler(t *testing.T) {
@@ -174,6 +211,50 @@ func TestAcceptedRoutesStayLocalToVPNClient(t *testing.T) {
 	}
 	if got, ok := manager.ResolveClientEgress(802, netip.MustParseAddr("10.10.4.9")); ok || got != nil {
 		t.Fatal("removed client route still resolves")
+	}
+}
+
+func TestClientRouteOwnershipRequiresOldAgentToDisconnect(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	manager := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	var keys security.Keys
+	for i, id := range []string{"old-agent", "new-agent"} {
+		streamMux := mux.New(ctx, &idleTransport{done: make(chan struct{})}, true)
+		defer streamMux.Close()
+		sess, err := session.New(uint64(900+i), keys, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		manager.Register(&dns.Peer{Session: sess, AgentID: id, Connected: time.Now()}, streamMux)
+		manager.UpdateInventory(id, streamMux, []byte(`{"capabilities":{"allowed":["pivot"]}}`))
+	}
+	clientMux := mux.New(ctx, &idleTransport{done: make(chan struct{})}, true)
+	defer clientMux.Close()
+	clientSession, err := session.New(902, keys, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.RegisterClient(&dns.Peer{Session: clientSession, AgentID: "client", Connected: time.Now()}, clientMux, false, "")
+	prefix := netip.MustParsePrefix("10.10.10.0/24")
+	if err := manager.SetClientRoute(902, prefix, "old-agent", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.SetClientRoute(902, prefix, "new-agent", true); err == nil || !strings.Contains(err.Error(), "owned by connected agent old-agent") {
+		t.Fatalf("connected owner was replaced: %v", err)
+	}
+	if got := manager.ClientList()[0].AcceptedRoutes; len(got) != 1 || got[0].AgentID != "old-agent" {
+		t.Fatalf("owner changed after rejection: %+v", got)
+	}
+	manager.mu.RLock()
+	oldMux := manager.agents["old-agent"].mux
+	manager.mu.RUnlock()
+	manager.Unregister("old-agent", oldMux)
+	if err := manager.SetClientRoute(902, prefix, "new-agent", true); err != nil {
+		t.Fatal(err)
+	}
+	if got := manager.ClientList()[0].AcceptedRoutes; len(got) != 1 || got[0].AgentID != "new-agent" {
+		t.Fatalf("offline owner was not replaced: %+v", got)
 	}
 }
 

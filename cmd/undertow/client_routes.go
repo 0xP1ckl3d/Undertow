@@ -342,9 +342,26 @@ func (c *liveClientConsole) routeCommand(ctx context.Context, args []string, out
 				return fmt.Errorf("route %s conflicts with local network %s", prefix, local)
 			}
 		}
-		for _, existing := range c.routes {
+		for i, existing := range c.routes {
 			if existing.Prefix == prefix.String() {
-				return errors.New("route is already accepted")
+				if existing.AgentID == args[3] {
+					return fmt.Errorf("route %s is already accepted via this agent", prefix)
+				}
+				agents, err := consoleAgents(ctx, c.call)
+				if err != nil {
+					return fmt.Errorf("check current route owner: %w", err)
+				}
+				for _, agent := range agents {
+					if agent.ID == existing.AgentID {
+						return fmt.Errorf("route %s is owned by connected agent %s (%s); remove it with route del %s before assigning another agent", prefix, consoleAgentName(agent), agent.ID, prefix)
+					}
+				}
+				replacement := control.AcceptedRoute{Prefix: prefix.String(), AgentID: args[3], Manual: args[1] == "add"}
+				if err := c.replaceAcceptedRoute(ctx, i, replacement); err != nil {
+					return err
+				}
+				fmt.Fprintf(output, "Local route %s reassigned from %s to %s and saved.\n", prefix, existing.AgentID, replacement.AgentID)
+				return nil
 			}
 		}
 		if len(c.routes) >= 64 {
@@ -372,7 +389,7 @@ func (c *liveClientConsole) routeCommand(ctx context.Context, args []string, out
 		fmt.Fprintf(output, "Local route %s via %s accepted and saved.\n", route.Prefix, label)
 		return nil
 	}
-	if (len(args) == 3 || len(args) == 4) && args[0] == "route" && args[1] == "del" {
+	if (len(args) == 3 || len(args) == 4) && args[0] == "route" && (args[1] == "del" || args[1] == "delete") {
 		prefix, err := netip.ParsePrefix(args[2])
 		if err != nil || !prefix.Addr().Is4() {
 			return errors.New("route del requires an IPv4 CIDR")
@@ -402,7 +419,40 @@ func (c *liveClientConsole) routeCommand(ctx context.Context, args []string, out
 		}
 		return errors.New("route is not accepted by this client")
 	}
-	return errors.New("use routes, route accept CIDR AGENT_ID, route add CIDR AGENT_ID, or route del CIDR")
+	return errors.New("use routes, route accept CIDR AGENT_ID, route add CIDR AGENT_ID, or route del CIDR (delete is an alias)")
+}
+
+// The caller holds routeMu. Reuse an installed local route while changing its
+// server-side owner, and restore the saved route if the new owner is rejected.
+func (c *liveClientConsole) replaceAcceptedRoute(ctx context.Context, index int, replacement control.AcceptedRoute) error {
+	previous := c.routes[index]
+	updated := append([]control.AcceptedRoute(nil), c.routes...)
+	updated[index] = replacement
+	if err := saveClientRoutes(c.routeFile, updated); err != nil {
+		return fmt.Errorf("save client route: %w", err)
+	}
+	var err error
+	if c.active[previous.Prefix] {
+		c.mu.RLock()
+		id := c.sessionID
+		c.mu.RUnlock()
+		if id == 0 {
+			err = errors.New("VPN client is not connected")
+		} else {
+			path := fmt.Sprintf("/v1/clients/%d/routes", id)
+			_, err = c.call(ctx, http.MethodPost, path, replacement)
+		}
+	} else {
+		err = c.activateRoute(ctx, replacement)
+	}
+	if err != nil {
+		if rollbackErr := saveClientRoutes(c.routeFile, c.routes); rollbackErr != nil {
+			return fmt.Errorf("reassign route: %w (restore saved route: %v)", err, rollbackErr)
+		}
+		return err
+	}
+	c.routes = updated
+	return nil
 }
 
 // The caller holds routeMu.

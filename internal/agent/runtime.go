@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -43,7 +44,6 @@ type Config struct {
 	AdvertisedRoutes      []string                 `json:"advertised_routes,omitempty"`
 	DeniedCapabilities    string                   `json:"denied_capabilities,omitempty"`
 	IdentityPath          string                   `json:"-"`
-	IdentityKey           ed25519.PrivateKey       `json:"-"`
 	Metadata              control.ArtifactIdentity `json:"-"`
 	Packaged              bool                     `json:"-"`
 }
@@ -141,21 +141,9 @@ func Run(ctx context.Context, c Config, ready func() error) error {
 	if err := c.Validate(); err != nil {
 		return err
 	}
-	var key ed25519.PrivateKey
-	if c.Packaged {
-		if len(c.IdentityKey) != ed25519.PrivateKeySize || !ed25519.NewKeyFromSeed(c.IdentityKey[:ed25519.SeedSize]).Equal(c.IdentityKey) {
-			return errors.New("invalid embedded identity")
-		}
-		key = append(ed25519.PrivateKey(nil), c.IdentityKey...)
-	} else {
-		if c.IdentityPath == "" {
-			return errors.New("manual agent identity path is required")
-		}
-		var err error
-		key, err = security.LoadOrCreateKey(c.IdentityPath)
-		if err != nil {
-			return err
-		}
+	key, err := loadIdentity(c)
+	if err != nil {
+		return err
 	}
 	caps, err := pivot.ParseDenied(c.DeniedCapabilities)
 	if err != nil {
@@ -215,6 +203,17 @@ func Run(ctx context.Context, c Config, ready func() error) error {
 		}
 		failures++
 	}
+}
+
+func loadIdentity(c Config) (ed25519.PrivateKey, error) {
+	if c.Packaged {
+		_, generated, err := ed25519.GenerateKey(rand.Reader)
+		return generated, err
+	}
+	if c.IdentityPath == "" {
+		return nil, errors.New("manual agent identity path is required")
+	}
+	return security.LoadOrCreateKey(c.IdentityPath)
 }
 
 var progressiveDelays = [...]time.Duration{2, 5, 10, 30, 60, 120, 300}

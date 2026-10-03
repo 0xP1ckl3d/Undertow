@@ -13,8 +13,7 @@ import (
 
 func TestPayloadConsoleWorkflowAndIdentifierGuidance(t *testing.T) {
 	id := strings.Repeat("a", 24)
-	agentID := strings.Repeat("b", 32)
-	info := artifactInfo{Artifact: agentprofile.Artifact{ID: id, AgentID: agentID, Profile: "office", Platform: "windows", Architecture: "amd64", Filename: id + ".exe", SHA256: strings.Repeat("c", 64), Hosted: true}, ServerPath: `/srv/builds/` + id + `.exe`}
+	info := artifactInfo{Artifact: agentprofile.Artifact{ID: id, Profile: "office", Platform: "windows", Architecture: "amd64", Filename: id + ".exe", SHA256: strings.Repeat("c", 64), Hosted: true, ProfileFormatVersion: agentprofile.EmbeddedFormatVersion}, ServerPath: `/srv/builds/` + id + `.exe`}
 	hosted := hostedArtifactInfo{Artifact: info.Artifact, ServerPath: info.ServerPath, Retrieval: "https://example.com/download/opaque-token", RetrievalPath: "/download/opaque-token"}
 	encode := func(v any) []byte { b, _ := json.Marshal(v); return b }
 	publicPath := "/download/"
@@ -52,9 +51,9 @@ func TestPayloadConsoleWorkflowAndIdentifierGuidance(t *testing.T) {
 		want []string
 	}{
 		{[]string{"payload"}, []string{"profile name", "PAYLOAD_ID", "agent ID", "server file path", "download URL"}},
-		{[]string{"payload", "build", "office", "windows", "amd64"}, []string{"Payload ID: " + id, "Embedded agent ID: " + agentID, "Server file: " + info.ServerPath, "Next: payload host " + id}},
+		{[]string{"payload", "build", "office", "windows", "amd64"}, []string{"Payload ID: " + id, "Agent ID: assigned when each process starts", "Server file: " + info.ServerPath, "Next: payload host " + id}},
 		{[]string{"payload", "list"}, []string{id, "office", "hosted"}},
-		{[]string{"payload", "show", id[:8]}, []string{"Payload ID: " + id, "Embedded agent ID: " + agentID, "Server file: " + info.ServerPath, "Download URL: " + hosted.Retrieval, "Download path: " + hosted.RetrievalPath}},
+		{[]string{"payload", "show", id[:8]}, []string{"Payload ID: " + id, "Agent ID: assigned when each process starts", "Server file: " + info.ServerPath, "Download URL: " + hosted.Retrieval, "Download path: " + hosted.RetrievalPath}},
 		{[]string{"payload", "url", id}, []string{"Download URL: " + hosted.Retrieval, "Download path: " + hosted.RetrievalPath, "SHA-256:"}},
 		{[]string{"payload", "hosted"}, []string{id, hosted.Retrieval, hosted.RetrievalPath}},
 		{[]string{"agent", "host", id}, []string{"Payload ID: " + id, hosted.Retrieval}},
@@ -79,7 +78,7 @@ func TestPayloadConsoleWorkflowAndIdentifierGuidance(t *testing.T) {
 		ref, want string
 	}{
 		{"office", "profile name"},
-		{agentID, "connected agent ID"},
+		{strings.Repeat("b", 32), "connected agent ID"},
 		{"https://example.com/download/opaque-token", "download URL or file path"},
 		{"missing", "payload list"},
 	} {

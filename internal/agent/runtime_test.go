@@ -2,9 +2,26 @@ package agent
 
 import (
 	"context"
+	"crypto/ed25519"
 	"testing"
 	"time"
+
+	"undertow/internal/security"
 )
+
+func TestPackagedIdentityIsUniquePerProcess(t *testing.T) {
+	first, err := loadIdentity(Config{Packaged: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := loadIdentity(Config{Packaged: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first) != ed25519.PrivateKeySize || len(second) != ed25519.PrivateKeySize || security.Fingerprint(first) == security.Fingerprint(second) {
+		t.Fatal("two packaged processes received the same agent identity")
+	}
+}
 
 func TestProgressiveReconnectScheduleAndCancellation(t *testing.T) {
 	want := []time.Duration{2, 5, 10, 30, 60, 120, 300, 300, 300}

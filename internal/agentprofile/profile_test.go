@@ -21,13 +21,9 @@ func testProfile() Profile {
 
 func testEmbedded(t *testing.T) Embedded {
 	t.Helper()
-	_, key, err := ed25519.GenerateKey(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
 	cfg := testProfile().Config
 	cfg.AuthMode = "artifact"
-	return Embedded{ProfileID: testProfile().ID, ArtifactID: "artifact-1", IdentityKey: key, Config: cfg}
+	return Embedded{ProfileID: testProfile().ID, ArtifactID: "artifact-1", Config: cfg}
 }
 
 func TestStampedProfileValidation(t *testing.T) {
@@ -52,26 +48,26 @@ func TestStampedProfileValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if read.ArtifactID != e.ArtifactID || read.Config.Server != e.Config.Server || !bytes.Equal(read.IdentityKey, e.IdentityKey) || read.Config.AuthMode != "artifact" {
+	if read.ArtifactID != e.ArtifactID || read.Config.Server != e.Config.Server || read.Config.AuthMode != "artifact" {
 		t.Fatalf("wrong profile: %+v", read)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, management := range [][]byte{[]byte(`"name"`), []byte(`"platform"`), []byte(`"architecture"`), []byte(`"undertow_version"`), []byte(`"profile_id"`), []byte(`"artifact_id"`), []byte(`"identity_key"`), []byte(`"auth_mode"`)} {
+	for _, management := range [][]byte{[]byte(`"name"`), []byte(`"platform"`), []byte(`"architecture"`), []byte(`"undertow_version"`), []byte(`"profile_id"`), []byte(`"artifact_id"`), []byte(`"identity_key"`), []byte(`"k":`), []byte(`"auth_mode"`)} {
 		if bytes.Contains(data, management) {
 			t.Fatalf("management metadata embedded: %s", management)
 		}
 	}
-	data[len(data)-3] = 4
+	data[len(data)-3] = 5
 	if err := os.WriteFile(path, data, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Read(path); err == nil || !strings.Contains(err.Error(), "unsupported embedded format version 4") {
+	if _, err := Read(path); err == nil || !strings.Contains(err.Error(), "unsupported embedded format version 5") {
 		t.Fatalf("expected format version error, got %v", err)
 	}
-	data[len(data)-3] = 3
+	data[len(data)-3] = 4
 	data[len(data)-45] ^= 1
 	if err := os.WriteFile(path, data, 0600); err != nil {
 		t.Fatal(err)
@@ -145,10 +141,10 @@ func TestStoreImmutableArtifactSnapshots(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a.ID == b.ID || a.AgentID == b.AgentID || a.SHA256 == b.SHA256 {
+	if a.ID == b.ID || a.SHA256 == b.SHA256 {
 		t.Fatal("artifacts are not distinct")
 	}
-	if b.ID == c.ID || b.AgentID == c.AgentID || b.SHA256 == c.SHA256 {
+	if b.ID == c.ID || b.SHA256 == c.SHA256 {
 		t.Fatal("rebuilding an unchanged profile reused an artifact identity")
 	}
 	old, err := Read(filepath.Join(dir, "store", "artifacts", a.Filename))
@@ -166,31 +162,43 @@ func TestStoreImmutableArtifactSnapshots(t *testing.T) {
 	if old.Config.Server != "127.0.0.1:443" || newer.Config.Server != "127.0.0.2:443" {
 		t.Fatal("profile edit mutated an artifact")
 	}
-	if bytes.Equal(old.Config.Credential, p.Config.Credential) || bytes.Equal(old.Config.Credential, newer.Config.Credential) || bytes.Equal(newer.Config.Credential, rebuilt.Config.Credential) || bytes.Equal(old.IdentityKey, newer.IdentityKey) || bytes.Equal(newer.IdentityKey, rebuilt.IdentityKey) || security.Fingerprint(old.IdentityKey)[:32] != a.AgentID || security.Fingerprint(newer.IdentityKey)[:32] != b.AgentID || security.Fingerprint(rebuilt.IdentityKey)[:32] != c.AgentID {
+	if bytes.Equal(old.Config.Credential, p.Config.Credential) || bytes.Equal(old.Config.Credential, newer.Config.Credential) || bytes.Equal(newer.Config.Credential, rebuilt.Config.Credential) {
 		t.Fatal("artifact credentials are not independent")
 	}
 	transcript := []byte("test transcript")
-	oldProof := security.MakeAuth(old.Config.Credential, old.IdentityKey, transcript)
-	if _, artifactID, err := s.VerifyEnrollment(p.Config.Credential, oldProof, transcript); err != nil || artifactID != a.ID {
+	_, firstKey, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, secondKey, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldProof := security.MakeAuth(old.Config.Credential, firstKey, transcript)
+	firstID, artifactID, err := s.VerifyEnrollment(p.Config.Credential, oldProof, transcript)
+	if err != nil || artifactID != a.ID {
 		t.Fatalf("old enrollment: %s %v", artifactID, err)
 	}
-	newProof := security.MakeAuth(newer.Config.Credential, newer.IdentityKey, transcript)
+	secondCopyProof := security.MakeAuth(old.Config.Credential, secondKey, transcript)
+	if secondID, artifactID, err := s.VerifyEnrollment(p.Config.Credential, secondCopyProof, transcript); err != nil || artifactID != a.ID || secondID == firstID {
+		t.Fatalf("second copy enrollment: %s %v", artifactID, err)
+	}
+	newProof := security.MakeAuth(newer.Config.Credential, secondKey, transcript)
 	if _, artifactID, err := s.VerifyEnrollment(p.Config.Credential, newProof, transcript); err != nil || artifactID != b.ID {
 		t.Fatalf("new enrollment: %s %v", artifactID, err)
 	}
-	manualProof := security.MakeAuth(p.Config.Credential, old.IdentityKey, transcript)
+	manualProof := security.MakeAuth(p.Config.Credential, firstKey, transcript)
 	if _, artifactID, err := s.VerifyEnrollment(p.Config.Credential, manualProof, transcript); err != nil || artifactID != "" {
 		t.Fatalf("manual enrollment: %s %v", artifactID, err)
-	}
-	wrongIdentityProof := security.MakeAuth(old.Config.Credential, newer.IdentityKey, transcript)
-	if _, _, err := s.VerifyEnrollment(p.Config.Credential, wrongIdentityProof, transcript); err == nil {
-		t.Fatal("artifact credential accepted a different identity")
 	}
 	if _, err := s.Revoke(a.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := s.VerifyEnrollment(p.Config.Credential, oldProof, transcript); err == nil {
 		t.Fatal("revoked artifact enrolled")
+	}
+	if _, _, err := s.VerifyEnrollment(p.Config.Credential, secondCopyProof, transcript); err == nil {
+		t.Fatal("second copy of revoked artifact enrolled")
 	}
 	if _, artifactID, err := s.VerifyEnrollment(p.Config.Credential, newProof, transcript); err != nil || artifactID != b.ID {
 		t.Fatal("revocation affected unrelated artifact")

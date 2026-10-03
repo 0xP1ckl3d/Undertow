@@ -367,6 +367,7 @@ type liveClientConsole struct {
 	localNetworks []netip.Prefix
 	routeFile     string
 	routes        []control.AcceptedRoute
+	request       consoleCaller
 	events        chan string
 	serverIP      netip.Addr
 	carrierIP     netip.Addr
@@ -387,6 +388,9 @@ func (c *liveClientConsole) id() uint64 {
 }
 
 func (c *liveClientConsole) call(ctx context.Context, method, path string, body any) ([]byte, error) {
+	if c.request != nil {
+		return c.request(ctx, method, path, body)
+	}
 	if path == "/v1/file/transfer" {
 		encoded, err := json.Marshal(body)
 		if err != nil {
