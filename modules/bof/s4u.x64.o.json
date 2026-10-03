@@ -1,0 +1,12 @@
+{
+  "description": "Request a constrained delegation S4U service ticket.",
+  "usage": "bof-s4u \"/ticket:BASE64 /service:SPN /impersonateuser:USER\"",
+  "help": "Request a constrained delegation S4U service ticket. See docs/module-bank.md for examples and original source.",
+  "arguments": [
+    {
+      "name": "options",
+      "type": "string",
+      "required": true
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "description": "List visible window titles; /pid includes process information.",
+  "usage": "bof-window-list [/pid]",
+  "help": "List visible window titles; /pid includes process information. See docs/module-bank.md for examples and original source.",
+  "arguments": [
+    {
+      "name": "option",
+      "type": "string",
+      "required": false
+    }
+  ]
+}

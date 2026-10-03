@@ -1,0 +1,5 @@
+{
+  "description": "Read text currently on the Windows clipboard.",
+  "usage": "bof-clipboard",
+  "help": "Read text currently on the Windows clipboard. See docs/module-bank.md for examples and original source."
+}

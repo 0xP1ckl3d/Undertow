@@ -1,0 +1,5 @@
+{
+  "description": "Map AI tools, agent profiles, and MCP configuration locations on this Windows host.",
+  "usage": "bof-ai-surface",
+  "help": "Map AI tools, agent profiles, and MCP configuration locations on this Windows host. See docs/module-bank.md for examples and original source."
+}

@@ -1,0 +1,12 @@
+{
+  "description": "Enumerate AD Certificate Services CAs and templates.",
+  "usage": "bof-adcs-enum <domain-or-empty>",
+  "help": "Enumerate AD Certificate Services CAs and templates. See docs/module-bank.md for examples and original source.",
+  "arguments": [
+    {
+      "name": "domain",
+      "type": "wstring",
+      "required": true
+    }
+  ]
+}

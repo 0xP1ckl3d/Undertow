@@ -1,0 +1,5 @@
+{
+  "description": "List local and RDP user sessions on the selected Windows host.",
+  "usage": "bof-enumlocalsessions",
+  "help": "List local and RDP user sessions on the selected Windows host. See docs/module-bank.md for examples and original source."
+}

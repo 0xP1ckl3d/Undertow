@@ -1,0 +1,5 @@
+{
+  "description": "Show the Windows version, build, and patch release.",
+  "usage": "bof-winver",
+  "help": "Show the Windows version, build, and patch release. See docs/module-bank.md for examples and original source."
+}

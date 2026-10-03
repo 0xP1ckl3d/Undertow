@@ -1,0 +1,5 @@
+{
+  "description": "Find PSReadLine history and PowerShell transcript locations and excerpts.",
+  "usage": "bof-powershell-history",
+  "help": "Find PSReadLine history and PowerShell transcript locations and excerpts. See docs/module-bank.md for examples and original source."
+}

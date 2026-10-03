@@ -1,0 +1,22 @@
+{
+  "description": "Request directory replication data for domain accounts in the domain or an OU.",
+  "usage": "bof-dcsync-all <ou-or-empty> <dc-or-empty> <ldaps-0-or-1>",
+  "help": "Request directory replication data for domain accounts in the domain or an OU. See docs/module-bank.md for examples and original source.",
+  "arguments": [
+    {
+      "name": "ou",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "dc",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "ldaps",
+      "type": "int",
+      "required": true
+    }
+  ]
+}

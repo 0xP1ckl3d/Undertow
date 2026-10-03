@@ -1,0 +1,12 @@
+{
+  "description": "Run the BOFKatz in-memory Mimikatz wrapper; output can contain credentials.",
+  "usage": "bof-kiwi [command]",
+  "help": "Run the BOFKatz in-memory Mimikatz wrapper; output can contain credentials. See docs/module-bank.md for examples and original source.",
+  "arguments": [
+    {
+      "name": "command",
+      "type": "string",
+      "required": false
+    }
+  ]
+}

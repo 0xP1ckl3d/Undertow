@@ -11,7 +11,7 @@ import (
 )
 
 func TestBOFConsoleManifestAndInspection(t *testing.T) {
-	object := filepath.Join("..", "..", "modules", "bof", "arguments.o")
+	object := filepath.Join("..", "..", "internal", "bof", "testdata", "examples", "arguments.o")
 	values := []string{"123", "-7", "hello", "雪", "base64:AP8="}
 	got, err := bofArguments(object, "", "", values)
 	if err != nil {

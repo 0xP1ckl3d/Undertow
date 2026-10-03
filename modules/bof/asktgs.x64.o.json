@@ -1,0 +1,12 @@
+{
+  "description": "Request a service ticket from a supplied base64 TGT.",
+  "usage": "bof-asktgs \"/ticket:BASE64 /service:SPN\"",
+  "help": "Request a service ticket from a supplied base64 TGT. See docs/module-bank.md for examples and original source.",
+  "arguments": [
+    {
+      "name": "options",
+      "type": "string",
+      "required": true
+    }
+  ]
+}

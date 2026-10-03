@@ -11,7 +11,7 @@ import (
 
 func fixture(t *testing.T, name string) []byte {
 	t.Helper()
-	path := filepath.Join("..", "..", "modules", "bof", name+".o")
+	path := filepath.Join("testdata", "examples", name+".o")
 	if name == "unsupported_imports" {
 		path = filepath.Join("testdata", name+".o")
 	}

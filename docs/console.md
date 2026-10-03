@@ -47,7 +47,7 @@ session kill
 agent shutdown
 ```
 
-`payload build` prints a 24-character **payload ID** for the build, a 32-character **agent ID** for the future connection, and the binary's **server file** path. The server file is not an endpoint install path. `payload host` prints the endpoint **download URL** and opaque **download path**; `payload show` and `payload url` retrieve them again. Use `payload retrieval-path` to view the public prefix and `payload retrieval-path set /downloads/` to change it without restarting. Changing it rotates hosted download tokens, permanently invalidating earlier URLs; `payload hosted` lists the new URLs. Use `payload profile delete NAME` to remove a reusable profile. Editing one leaves existing payloads unchanged. Verify the download's SHA-256 before launching it with no arguments. `session kill` closes a connection and permits reconnect; `agent shutdown` stops the configured process. `payload unhost`, `revoke`, and `delete` separately control download, future enrollment, and the server-side file/record. Normal packaged-agent operation writes no local runtime files; the server retains bounded lifecycle events. Older `agent profile/build/artifacts/host` forms still work as aliases. See [payload deployment](agent-distribution.md) for authentication and endpoint state.
+`payload build` prints a 24-character **payload ID** for the build and the binary's **server file** path. Each running copy creates a separate 32-character agent ID when it connects. The server file is not an endpoint install path. `payload host` prints the endpoint **download URL** and opaque **download path**; `payload show` and `payload url` retrieve them again. Use `payload retrieval-path` to view the public prefix and `payload retrieval-path set /downloads/` to change it without restarting. Changing it rotates hosted download tokens, permanently invalidating earlier URLs; `payload hosted` lists the new URLs. Use `payload profile delete NAME` to remove a reusable profile. Editing one leaves existing payloads unchanged. Verify the download's SHA-256 before launching it with no arguments. `session kill` closes a connection and permits reconnect; `agent shutdown` stops the configured process. `payload unhost`, `revoke`, and `delete` separately control download, future enrollment, and the server-side file/record. Normal packaged-agent operation writes no local runtime files; the server retains bounded lifecycle events. Older `agent profile/build/artifacts/host` forms still work as aliases. See [payload deployment](agent-distribution.md) for authentication and endpoint state.
 
 ## Server listeners and agent topology
 
@@ -78,7 +78,7 @@ No agent listens for children until `relay start` succeeds. The omitted bind def
 
 Agent numbers can change after connections change. Run `agents` again before selecting by number. Type `help` after `use` to see that agent's menu. Quote a path or argument containing spaces with single or double quotes. The console parses quotes; it does not expand shell variables or run shell syntax.
 
-At startup the console loads packaged BOFs, native modules, and WASM modules from the local `modules/` directory. Type `help` to see them, then `help bof-hello`, `help module-wininfo`, or `help wasm-triage` for usage. Loaded commands can run against any selected agent and can use trailing `--background`. See [local module bank](module-bank.md) for where to place additional artifacts and sidecar help files.
+At startup the console loads packaged BOFs, native modules, and WASM modules from the local `modules/` directory. Type `help` to see them, then `help bof-winver`, `help module-wininfo`, or `help wasm-triage` for usage. Loaded commands can run against any selected agent and can use trailing `--background`. See [local module bank](module-bank.md) for where to place additional artifacts and sidecar help files.
 
 When input is an interactive terminal, Up and Down recall commands. Help uses colour on supported terminals and honours `NO_COLOR`. Tab completes command names and local file paths for `run-script`, `run-wasm` (including `--stdin`), `run-native` (including `--data`), `upload`, and the local destination of `download`. Paths are read from the **console host**, not the agent; remote file arguments do not use local path completion. Tab can enter directories and complete quoted names containing spaces. `help TOPIC` and `route`/`relay` subcommands also complete. The consoles announce an agent connection or loss without flooding the prompt with routine transport logs. In the VPN client console, Ctrl+C asks for confirmation before stopping the VPN.
 
@@ -158,7 +158,7 @@ background
 | `route accept CIDR AGENT_ID` | Main menu | Accept a named agent's advertised subnet. |
 | `route add CIDR` | Selected agent | Add a manual local route via that agent, even when it has not advertised the subnet. |
 | `route add CIDR AGENT_ID` | Main menu | Add a manual local route via a named agent. |
-| `route del CIDR` | Either menu | Remove a locally accepted or manual route. |
+| `route del CIDR` / `route delete CIDR` | Either menu | Remove a locally accepted or manual route, including one owned by another agent. |
 | `internal on` / `internal off` / `internal status` | Either menu | Change or inspect use of server configured global pivot routes for new flows. Explicitly accepted client routes remain active. |
 | `vpn on` / `vpn off` / `vpn status` | Either menu | Change or inspect Internet egress through Undertow without stopping the client. Enabling verifies public egress and rolls back its two `/1` routes on failure. |
 | `upload LOCAL REMOTE` | Selected agent | Copy a client file to the agent. |
@@ -169,6 +169,8 @@ background
 | `background` | Either menu | Detach the console while the VPN and its routes keep running. |
 
 Accepted and manual routes are saved locally in `client-routes.json` by default and reapplied after reconnect. Change the path with `client --routes-file PATH`. The client can add a routed subnet that is reachable from an agent even if it is absent from that agent's directly attached subnet list. Make sure the agent actually has a route to the target subnet.
+
+If a saved route belongs to an agent that has disconnected, `route accept CIDR` in another agent's menu transfers that route to the selected agent. A connected owner blocks reassignment; use `route del CIDR` to remove the saved route first. This works from either menu.
 
 Each agent also reports structured IPv4 routes when available. In the client console, `routes` labels directly attached networks and networks reached through a gateway, including the interface and route source. It shows the agent's default route separately for information. Use `route accept CIDR` in the selected-agent menu for a reported candidate, or `route add CIDR` for another route you know that agent can reach. Both install only on this VPN client. A prefix overlapping this client's existing local networks is rejected.
 

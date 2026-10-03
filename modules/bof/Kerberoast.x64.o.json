@@ -1,0 +1,17 @@
+{
+  "description": "List SPN accounts or request service tickets for offline analysis.",
+  "usage": "bof-kerberoast <list|list-no-aes|roast|roast-no-aes> [account]",
+  "help": "List SPN accounts or request service tickets for offline analysis. See docs/module-bank.md for examples and original source.",
+  "arguments": [
+    {
+      "name": "action",
+      "type": "wstring",
+      "required": true
+    },
+    {
+      "name": "account",
+      "type": "wstring",
+      "required": false
+    }
+  ]
+}

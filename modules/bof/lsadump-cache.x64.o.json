@@ -1,0 +1,5 @@
+{
+  "description": "Extract cached domain credential hashes from the Windows SECURITY hive; requires SYSTEM.",
+  "usage": "bof-lsadump-cache",
+  "help": "Extract cached domain credential hashes from the Windows SECURITY hive; requires SYSTEM. See docs/module-bank.md for examples and original source."
+}

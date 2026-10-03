@@ -345,10 +345,10 @@ Server console: job stop 1
 On a Windows AMD64 agent, `run-bof` executes a compatible compiled COFF `.o` through the Beacon ABI. Inspect an object on the console host before use, or place it in the [module bank](docs/module-bank.md) to run it by name. BOF arguments can be typed with `--format` or a JSON sidecar. See [BOF compatibility](docs/bof-compatibility.md) for supported imports, build examples, argument formats, and limits.
 
 ```text
-Server: undertow bof inspect modules/bof/hello.o
+Server: undertow bof inspect modules/bof/Winver.x64.o
 Server console: modules
 Server console: use 1
-Server console: bof-hello
+Server console: bof-winver
 ```
 
 ### Upload and download

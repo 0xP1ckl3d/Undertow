@@ -32,7 +32,7 @@ func init() {
 
 func bofFixture(t *testing.T, name string) []byte {
 	t.Helper()
-	object, err := os.ReadFile(filepath.Join("..", "..", "modules", "bof", name+".o"))
+	object, err := os.ReadFile(filepath.Join("..", "bof", "testdata", "examples", name+".o"))
 	if err != nil {
 		t.Fatal(err)
 	}

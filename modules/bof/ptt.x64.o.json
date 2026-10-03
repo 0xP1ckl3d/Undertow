@@ -1,0 +1,12 @@
+{
+  "description": "Import a supplied base64 Kerberos ticket into a logon session.",
+  "usage": "bof-ptt \"/ticket:BASE64\"",
+  "help": "Import a supplied base64 Kerberos ticket into a logon session. See docs/module-bank.md for examples and original source.",
+  "arguments": [
+    {
+      "name": "options",
+      "type": "string",
+      "required": true
+    }
+  ]
+}

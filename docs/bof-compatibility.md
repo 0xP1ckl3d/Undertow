@@ -2,24 +2,24 @@
 
 Undertow can run a compatible, already compiled Beacon Object File (BOF) directly as an AMD64 COFF `.o` file. This complements portable [WASM modules](wasm-development.md) and Undertow [native `.module` DLLs](native-modules.md). New Undertow native modules use `undertow_native_v1` and `run-native`; existing BOFs use the conventional `go` and Beacon ABI with `run-bof`. No `nativepack` conversion is needed.
 
-For repeated use, put the `.o` and its optional help/argument sidecar in the local [module bank](module-bank.md). The console preloads packaged BOFs as commands such as `bof-hello` and `bof-arguments`. You can also use `load bof FILE [NAME] [--format FORMAT]` during a session.
+For repeated use, put the `.o` and its optional help/argument sidecar in the local [module bank](module-bank.md). The console preloads packaged BOFs as commands such as `bof-winver` and `bof-ldapsearch`. You can also use `load bof FILE [NAME] [--format FORMAT]` during a session.
 
 ## From object file to an agent run
 
 If you already have a compatible Windows AMD64 BOF, inspect it on the **console host**, then put the `.o` and optional `.json` argument sidecar under the local `modules/` bank. Start or reattach the console so it loads the command; no BOF file needs to be installed on the agent.
 
 ```sh
-undertow bof inspect modules/bof/hello.o
+undertow bof inspect modules/bof/Winver.x64.o
 ```
 
 ```text
 modules
-help bof-hello
+help bof-winver
 use 1
-bof-hello
+bof-winver
 ```
 
-To build the packaged examples from source, run `./modules/bof/build.ps1` in an x64 MSVC Developer PowerShell before opening the console. For a one-off file run, use `run-bof modules/bof/hello.o` after selecting an agent. The [module bank](module-bank.md) explains naming and sidecars; the sections below describe supported COFF features and typed arguments.
+The packaged objects are compiled third-party tools; their original source and usage are linked in the [module bank](module-bank.md#bofs-windows-amd64-agents). For a one-off file run, use `run-bof modules/bof/Winver.x64.o` after selecting an agent. The sections below describe supported COFF features and typed arguments.
 
 ## Supported subset
 
@@ -32,12 +32,12 @@ The Beacon compatibility bridge currently exports `BeaconPrintf`, `BeaconOutput`
 ## Inspect and run
 
 ```text
-undertow bof inspect modules/bof/hello.o
+undertow bof inspect modules/bof/Winver.x64.o
 
 undertow> use 1
-undertow[TALON]> run-bof modules/bof/hello.o
-undertow[TALON]> run-bof modules/bof/arguments.o --format "iszZb" 123 7 hello "C:\Program Files" @payload.bin
-undertow[TALON]> run-bof --background modules/bof/loop.o
+undertow[TALON]> run-bof modules/bof/Winver.x64.o
+undertow[TALON]> run-bof modules/bof/window-list.x64.o --format z /pid
+undertow[TALON]> run-bof --background modules/bof/ai-surface.x64.o
 undertow[TALON]> jobs
 undertow[TALON]> job output 1
 undertow[TALON]> job stop 1
@@ -91,14 +91,14 @@ The registration is local to one console process. It is independent of agent sel
 
 ## Build and runtime behavior
 
-The checked-in examples use MSVC x64. In an x64 Developer PowerShell:
+The loader test fixtures use MSVC x64. In an x64 Developer PowerShell:
 
 ```powershell
-./modules/bof/build.ps1
-undertow bof inspect modules/bof/hello.o
+./internal/bof/testdata/examples/build.ps1
+undertow bof inspect internal/bof/testdata/examples/hello.o
 ```
 
-The build uses `cl.exe /c /GS- /Zl /O1`; it produces raw COFF `.o` files directly. Include only declarations for Beacon helpers and Windows imports expected by the BOF environment. See [the example source and build notes](../modules/bof/README.md). Existing compatible BOFs built with another conventional toolchain can be inspected and used without rebuilding.
+The build uses `cl.exe /c /GS- /Zl /O1`; it produces raw COFF `.o` files directly. Include only declarations for Beacon helpers and Windows imports expected by the BOF environment. These fixtures are for loader development and do not preload into the console. See the [packaged BOF catalogue](module-bank.md#bofs-windows-amd64-agents) for operator tools and source links. Existing compatible BOFs built with another conventional toolchain can be inspected and used without rebuilding.
 
 BOFs run under the agent's `native` capability, two-run concurrency limit, execution deadline and output limit. Background runs use the existing jobs manager and its retained output. The agent launches a child process per BOF so cancellation, `job stop`, deadline expiry or a crashing BOF can terminate that run. The child owns loaded sections, argument storage, imported DLL handles and formatting allocations. The agent and server retain only the normal job state and bounded output. A BOF can call normal Windows APIs with the privileges of the agent account. The Beacon ABI has no cancellation callback, so BOFs that do not return are stopped by terminating their worker process.
 

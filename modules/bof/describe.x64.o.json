@@ -1,0 +1,12 @@
+{
+  "description": "Describe a supplied base64 Kerberos ticket.",
+  "usage": "bof-describe \"/ticket:BASE64\"",
+  "help": "Describe a supplied base64 Kerberos ticket. See docs/module-bank.md for examples and original source.",
+  "arguments": [
+    {
+      "name": "options",
+      "type": "string",
+      "required": true
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "description": "Calculate Kerberos key hashes from a password.",
+  "usage": "bof-hash \"/password:PASSWORD\"",
+  "help": "Calculate Kerberos key hashes from a password. See docs/module-bank.md for examples and original source.",
+  "arguments": [
+    {
+      "name": "options",
+      "type": "string",
+      "required": true
+    }
+  ]
+}

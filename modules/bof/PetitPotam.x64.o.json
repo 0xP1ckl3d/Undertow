@@ -1,0 +1,17 @@
+{
+  "description": "Request EFSRPC authentication from a target Windows host to a capture host.",
+  "usage": "bof-petitpotam <capture-host> <target-host>",
+  "help": "Request EFSRPC authentication from a target Windows host to a capture host. See docs/module-bank.md for examples and original source.",
+  "arguments": [
+    {
+      "name": "capture-host",
+      "type": "wstring",
+      "required": true
+    },
+    {
+      "name": "target-host",
+      "type": "wstring",
+      "required": true
+    }
+  ]
+}

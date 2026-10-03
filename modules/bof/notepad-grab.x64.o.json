@@ -1,0 +1,5 @@
+{
+  "description": "Read text in open Notepad windows in the current desktop session.",
+  "usage": "bof-notepad-grab",
+  "help": "Read text in open Notepad windows in the current desktop session. See docs/module-bank.md for examples and original source."
+}

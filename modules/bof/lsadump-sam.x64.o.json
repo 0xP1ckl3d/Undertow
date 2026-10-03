@@ -1,0 +1,5 @@
+{
+  "description": "Extract local account NTLM hashes from the SAM hive; requires administrator rights.",
+  "usage": "bof-lsadump-sam",
+  "help": "Extract local account NTLM hashes from the SAM hive; requires administrator rights. See docs/module-bank.md for examples and original source."
+}

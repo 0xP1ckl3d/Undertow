@@ -1,0 +1,42 @@
+{
+  "description": "Search Active Directory with a custom LDAP query and result options.",
+  "usage": "bof-ldapsearch <filter> <attributes> <count> <scope> <hostname-or-empty> <dn-or-empty> <ldaps-0-or-1>",
+  "help": "Search Active Directory with a custom LDAP query and result options. See docs/module-bank.md for examples and original source.",
+  "arguments": [
+    {
+      "name": "filter",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "attributes",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "count",
+      "type": "int",
+      "required": true
+    },
+    {
+      "name": "scope",
+      "type": "int",
+      "required": true
+    },
+    {
+      "name": "hostname",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "dn",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "ldaps",
+      "type": "int",
+      "required": true
+    }
+  ]
+}

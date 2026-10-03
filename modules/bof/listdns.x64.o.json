@@ -1,0 +1,5 @@
+{
+  "description": "List DNS cache entries and attempt to resolve each name.",
+  "usage": "bof-listdns",
+  "help": "List DNS cache entries and attempt to resolve each name. See docs/module-bank.md for examples and original source."
+}

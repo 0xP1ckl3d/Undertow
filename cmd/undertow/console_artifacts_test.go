@@ -138,7 +138,7 @@ func TestModuleBankPreload(t *testing.T) {
 	for _, item := range []struct{ kind, source, filename string }{
 		{"module", filepath.Join("..", "..", "modules", "native", "wininfo", "wininfo.module"), "wininfo.module"},
 		{"wasm", filepath.Join("..", "..", "modules", "wasm", "triage", "triage.wasm"), "triage.wasm"},
-		{"bof", filepath.Join("..", "..", "modules", "bof", "hello.o"), "hello.o"},
+		{"bof", filepath.Join("..", "..", "modules", "bof", "Winver.x64.o"), "Winver.x64.o"},
 	} {
 		dir := filepath.Join(root, item.kind)
 		if err := os.MkdirAll(dir, 0700); err != nil {
@@ -157,7 +157,7 @@ func TestModuleBankPreload(t *testing.T) {
 	if problems := preloadModuleBank(artifacts, bofs); len(problems) != 0 {
 		t.Fatalf("preload errors: %v", problems)
 	}
-	if bofs.get("bof-hello") == nil || artifacts.get("module-wininfo") == nil || artifacts.get("wasm-triage") == nil {
+	if bofs.get("bof-winver") == nil || artifacts.get("module-wininfo") == nil || artifacts.get("wasm-triage") == nil {
 		t.Fatalf("preloaded bofs=%v modules=%v", bofs.names(), artifacts.names())
 	}
 	var output strings.Builder
@@ -178,10 +178,16 @@ func TestPackagedModuleBank(t *testing.T) {
 	if problems := preloadModuleBank(artifacts, bofs); len(problems) != 0 {
 		t.Fatalf("packaged bank has invalid artifacts: %v", problems)
 	}
-	if len(bofs.names()) < 5 || len(artifacts.names()) < 11 {
+	if len(bofs.names()) != 34 || len(artifacts.names()) < 11 {
 		t.Fatalf("packaged bank: bofs=%v modules=%v", bofs.names(), artifacts.names())
 	}
-	for _, name := range []string{"bof-arguments", "bof-hello", "bof-imports", "bof-loaderimports", "bof-loop"} {
+	for _, name := range bofs.names() {
+		manifest := bofs.get(name).Manifest
+		if manifest.Description == "" || manifest.Usage == "" || manifest.Help == "" {
+			t.Errorf("BOF %s is missing help", name)
+		}
+	}
+	for _, name := range []string{"bof-ai-surface", "bof-asktgt", "bof-dcsync-single", "bof-kiwi", "bof-lsadump-sam", "bof-petitpotam", "bof-winver"} {
 		if bofs.get(name) == nil {
 			t.Errorf("missing packaged BOF %s", name)
 			continue

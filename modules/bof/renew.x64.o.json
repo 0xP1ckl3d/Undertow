@@ -1,0 +1,12 @@
+{
+  "description": "Renew a supplied base64 ticket-granting ticket.",
+  "usage": "bof-renew \"/ticket:BASE64\"",
+  "help": "Renew a supplied base64 ticket-granting ticket. See docs/module-bank.md for examples and original source.",
+  "arguments": [
+    {
+      "name": "options",
+      "type": "string",
+      "required": true
+    }
+  ]
+}

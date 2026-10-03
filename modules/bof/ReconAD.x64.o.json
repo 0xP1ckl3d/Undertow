@@ -1,0 +1,37 @@
+{
+  "description": "Query Active Directory objects and attributes with a custom LDAP filter.",
+  "usage": "bof-reconad custom <filter> <attributes> <max-results> <use-gc-0-or-1> <server-or-empty>",
+  "help": "Query Active Directory objects and attributes with a custom LDAP filter. See docs/module-bank.md for examples and original source.",
+  "arguments": [
+    {
+      "name": "mode",
+      "type": "wstring",
+      "required": true
+    },
+    {
+      "name": "filter",
+      "type": "wstring",
+      "required": true
+    },
+    {
+      "name": "attributes",
+      "type": "wstring",
+      "required": true
+    },
+    {
+      "name": "max-results",
+      "type": "int",
+      "required": true
+    },
+    {
+      "name": "use-gc",
+      "type": "int",
+      "required": true
+    },
+    {
+      "name": "server",
+      "type": "wstring",
+      "required": true
+    }
+  ]
+}

