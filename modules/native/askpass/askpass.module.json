@@ -1,5 +1,5 @@
 {
-  "description": "Prompt locally through the Windows credential UI.",
-  "usage": "askpass [TITLE] [MESSAGE]",
-  "help": "Runs on the selected Windows agent. Review the README before use."
+  "description": "Prompt on the selected Windows agent's visible desktop.",
+  "usage": "askpass TITLE MESSAGE",
+  "help": "Requires a visible Windows desktop and both TITLE and MESSAGE arguments. Submitted values are returned in module output; review the README before use."
 }

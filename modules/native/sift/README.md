@@ -1,5 +1,7 @@
 # Sift Native for Undertow
 
+See the [module bank](../../../docs/module-bank.md) for every shipped module and its console command.
+
 This Windows AMD64 `undertow_native_v1` module scans files for sensitive data from an existing Undertow agent. It embeds the [Stratus Sift](https://github.com/Stratus-Security/Sift) default rule catalogue pinned to commit `cf6a3ac42e98e78e54e9cdfeea56a9dfb0c21635`: 112 effective rules, 313 patterns, and 101 ignore entries. The JSON rules live in `upstream-rules/`; `generate_rules.py` converts them to `generated_rules.h` at build time. PCRE2 is linked into the module so target machines need no regex runtime.
 
 ## Usage
@@ -12,6 +14,8 @@ run-native modules/native/sift/sift.module local C:\Shares\config.env
 run-native modules/native/sift/sift.module network --device FILE01 --share Finance
 run-native --background modules/native/sift/sift.module domain --max-hosts 100 --json
 ```
+
+**Long-running scans:** Sift can run for an extended time on large directories, network shares, or a domain. Its file and host limits are unset by default. In a selected-agent console, run `module-sift --background local C:\Shares --json` to keep the console available. Use `jobs` to find the job ID, `job output JOB_ID` for a preview, `job save JOB_ID` for complete output, and `job stop JOB_ID` to cancel it. Set scan limits such as `--max-files` or `--max-hosts` when appropriate.
 
 Content findings include the **actual matched value**, byte offset, rule, and severity. Generic assignment findings extend the evidence through the value because the upstream pattern itself captures only a short prefix. JSON Lines output adds `validator` and `validated`; `validated: false` means a named upstream post-match validator has not yet been ported, so the regex match is reported without that additional check. The module applies native validators for Luhn, IBAN, Australian TFN, Australian Medicare, GitHub PAT structure, and Slack token structure. Treat output and saved Undertow jobs as sensitive.
 

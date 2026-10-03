@@ -1,5 +1,7 @@
 # Packaged WASM host-assessment modules
 
+See the [module bank](../../docs/module-bank.md) for every shipped module and its console command.
+
 Each directory contains readable Go source and a compiled WASI `.wasm`. All modules use the same public [`undertow_host_v1` API](../../docs/wasm-development.md) available to any custom or third-party WASM. They execute with the agent process's host privileges. These examples report observations; they do not change host configuration.
 
 Build from the repository root with Go 1.25 or later:

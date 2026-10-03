@@ -1,5 +1,7 @@
 # Process and network inventory
 
+See the [module bank](../../../docs/module-bank.md) for every shipped module and its console command.
+
 Shows process, service, connection/listener, and neighbour snapshots. Optional `FILTER` matches output lines case-insensitively. Each section shows at most 30 matching lines.
 
 Build from the repository root with `./modules/wasm/build.ps1 inventory` or `sh modules/wasm/build.sh inventory`.

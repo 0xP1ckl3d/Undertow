@@ -1,5 +1,7 @@
 # Host triage
 
+See the [module bank](../../../docs/module-bank.md) for every shipped module and its console command.
+
 Reports the agent host's OS, architecture, hostname, user IDs, and privilege context. The module is read-only and works on Windows and Linux.
 
 From the repository root, build with `./modules/wasm/build.ps1 triage` (PowerShell) or `sh modules/wasm/build.sh triage` (POSIX shell). See the [shared build and API guide](../../../docs/wasm-development.md).

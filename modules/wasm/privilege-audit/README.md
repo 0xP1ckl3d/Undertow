@@ -1,5 +1,7 @@
 # Privilege and configuration audit
 
+See the [module bank](../../../docs/module-bank.md) for every shipped module and its console command.
+
 A read-only WASM example inspired by [PrivescCheck](https://github.com/itm4n/PrivescCheck). It runs on the selected Undertow agent through `undertow_host_v1`, with no PowerShell script on the agent.
 
 Build from the repository root with `./modules/wasm/build.ps1 privilege-audit` or `sh modules/wasm/build.sh privilege-audit`, then run:

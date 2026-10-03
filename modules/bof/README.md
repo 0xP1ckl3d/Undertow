@@ -1,5 +1,7 @@
 # BOF compatibility examples
 
+See the [module bank](../../docs/module-bank.md) for every shipped module and its console command.
+
 Run `./modules/bof/build.ps1` in an x64 MSVC Developer PowerShell. It builds raw AMD64 COFF `.o` files with `cl.exe /c /GS- /Zl /O1 /W4`; no wrapping or post-processing is needed. The compiled objects are included for inspection and tests. `beacon.h` contains the minimal conventional Beacon declarations used by these examples.
 
 - `hello.c` exercises `BeaconPrintf`, `BeaconOutput`, a `KERNEL32$` import, and multiple sections.

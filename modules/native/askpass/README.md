@@ -1,5 +1,7 @@
 # askpass
 
+See the [module bank](../../../docs/module-bank.md) for every shipped module and its console command.
+
 Undertow Windows AMD64 native module that displays the Windows credential UI, prefills the username with the current security context (`DOMAIN\\user` when available), unpacks the submitted credentials, validates them with `LogonUserW`, and returns the domain, username and password through Undertow module output.
 
 It mirrors the behaviour of Hagrid29/BOF-CredUI with the requested current-user prefill.

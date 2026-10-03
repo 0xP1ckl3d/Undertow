@@ -21,6 +21,49 @@ undertow[TALON]> wasm-triage --background
 undertow[TALON]> job output 1
 ```
 
+## Shipped modules
+
+The repository includes **16 compiled modules** with help sidecars. Start or reattach a console from this checkout so it scans `modules/`, type `modules` to confirm what loaded, then `agents` and `use NUMBER` to select the target. The examples below are commands to type **inside the selected-agent console**. Run `help COMMAND` before a command to see its local help; the module file is sent to the agent when you invoke it.
+
+### WASM host assessment (Windows or Linux agents)
+
+| Console command | What it does | Basic use |
+| --- | --- | --- |
+| [wasm-triage](../modules/wasm/triage/README.md) | Summarizes host, OS, user, and privilege context. | `wasm-triage` |
+| [wasm-inventory](../modules/wasm/inventory/README.md) | Lists processes, services, connections, and neighbours; an optional word filters output. | `wasm-inventory tcp` |
+| [wasm-artifact-discovery](../modules/wasm/artifact-discovery/README.md) | Lists interesting file names and metadata under the agent user's home directory or a chosen root; it does not print file contents. | `wasm-artifact-discovery` |
+| [wasm-privilege-audit](../modules/wasm/privilege-audit/README.md) | Checks Windows policy and service path configuration; on Linux, checks UID/GID and selected writable paths. | `wasm-privilege-audit` |
+| [wasm-persistence-audit](../modules/wasm/persistence-audit/README.md) | Reports service startup and user autoruns. | `wasm-persistence-audit` |
+| [wasm-enterprise-posture](../modules/wasm/enterprise-posture/README.md) | Reports domain environment, DNS, and OS policy locations. | `wasm-enterprise-posture` |
+
+For `wasm-artifact-discovery`, add an **agent-side** root such as `wasm-artifact-discovery /home/analyst`; `--stdin ./patterns.txt` adds name patterns from a file on the console host. See the [WASM examples](../modules/wasm/README.md) and each example's README for platform-specific output and build instructions.
+
+### Native modules (Windows AMD64 agents)
+
+| Console command | What it does | Basic use |
+| --- | --- | --- |
+| [module-hello](../modules/native/README.md) | Demonstrates native arguments, output, status, and cancellation. | `module-hello one "two words"` |
+| [module-wininfo](../modules/native/README.md) | Reports Windows computer, process, architecture, and memory information. | `module-wininfo` |
+| [module-hostcheck](../modules/native/README.md) | Reports user, token elevation, integrity, privileges, and network adapters. | `module-hostcheck` |
+| [module-sift](../modules/native/sift/README.md) | Scans a file or directory with the packaged Sift rules. | `module-sift local C:\Audit --json` |
+| [module-askpass](../modules/native/askpass/README.md) | Displays a Windows credential dialog on the agent's desktop. | `module-askpass "Credential test" "Enter test account credentials"` |
+
+`module-askpass` needs a visible interactive Windows desktop; a headless agent session cannot show its dialog. It returns submitted values in module output. `module-sift` can report matched values, so treat its output and saved jobs as sensitive. Replace the example `C:\Audit` with a file or directory on the selected agent.
+
+**Long-running Sift scans:** Sift can run for an extended time across large directories, shares, or a domain; its file and host limits are unset by default. Run `module-sift --background local C:\Audit --json` to keep the console available, then use `jobs`, `job output JOB_ID`, and `job stop JOB_ID` to inspect or stop it. Use `help module-sift` or `module-sift --help` for its local, network, and domain scan modes and optional limits. See the [native examples](../modules/native/README.md), [Sift guide](../modules/native/sift/README.md), and [askpass guide](../modules/native/askpass/README.md).
+
+### BOF compatibility examples (Windows AMD64 agents)
+
+| Console command | What it does | Basic use |
+| --- | --- | --- |
+| [bof-hello](../modules/bof/README.md) | Demonstrates Beacon output and a Windows import. | `bof-hello` |
+| [bof-arguments](../modules/bof/README.md) | Demonstrates typed integer, short, text, wide-text, and binary arguments. | `bof-arguments 123 7 hello world base64:AAEC` |
+| [bof-imports](../modules/bof/README.md) | Exercises Windows imports from several DLLs. | `bof-imports` |
+| [bof-loaderimports](../modules/bof/README.md) | Exercises runtime loader imports and typed integer parsing. | `bof-loaderimports 0x01020304` |
+| [bof-loop](../modules/bof/README.md) | Runs until cancelled; useful for testing background jobs. | `bof-loop --background` |
+
+After starting `bof-loop --background`, run `jobs` to find its job ID and `job stop JOB_ID` to end it. The BOFs are loader and API examples; see the [BOF examples](../modules/bof/README.md) and [compatibility guide](bof-compatibility.md) for inspection, supported imports, and argument formats.
+
 Startup names are `bof-`, `module-`, or `wasm-` followed by the filename stem, lowercased. A final `.x64`, `.amd64`, `.win64`, or `.windows-amd64` before the extension is removed. Thus `network.x64.o` becomes `bof-network` and `wininfo.module` becomes `module-wininfo`. Names must begin with a lowercase ASCII letter, contain only lowercase ASCII letters, digits, and hyphens, and be at most 64 characters. A duplicate name or invalid artifact is reported as a preload warning and skipped. Built-in console commands cannot be replaced.
 
 Use `help` to see every loaded command. `help NAME` shows its usage and original file path; `bofs` lists BOFs and `modules` lists all three formats. The loaded bytes remain usable if the source file changes or disappears during the session. Nothing is persisted in the server. After updating a file, restart the console or use `unload TYPE NAME` followed by `load TYPE FILE [NAME]`.
