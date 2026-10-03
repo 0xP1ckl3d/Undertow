@@ -19,3 +19,5 @@ Windows IP Configuration
 ```
 
 See the [host API guide](../../../docs/wasm-development.md) for extending the assessment.
+
+Back to [documentation home](../../../docs/README.md).

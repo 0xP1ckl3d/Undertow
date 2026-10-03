@@ -91,3 +91,5 @@ Keep `--fingerprint FINGERPRINT` with every carrier. A `--vpn` client using DNS 
 ## Scripts and further examples
 
 The examples above use the consoles to inspect and accept routes. For automation, use `server --background` or `client --background`, `status --json`, and standalone commands such as `route add 10.20.0.0/16 --via AGENT_ID`. For a foreground worker under a service manager, use explicit `--foreground`. See the [CLI reference](cli-reference.md) for flags and scripting, the [console guide](console.md) for daily operation, and [deployment scenarios](scenarios.md) for forwarding and multi-agent routes.
+
+Back to [documentation home](README.md).

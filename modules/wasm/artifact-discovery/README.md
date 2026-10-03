@@ -17,3 +17,5 @@ Interesting file names under /home/analyst (metadata only):
 ```
 
 See the [host API guide](../../../docs/wasm-development.md) for traversal bounds.
+
+Back to [documentation home](../../../docs/README.md).

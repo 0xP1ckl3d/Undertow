@@ -35,3 +35,5 @@ From an x64 MSVC Developer PowerShell with Go and Python on `PATH`:
 The bundled patterns, severities, metadata targets, content extension scopes, keyword prefilters, entropy thresholds, path exclusions, and ignore entries come from the pinned upstream catalogue. Three leading variable-length lookbehinds are translated to PCRE2 `\K` at generation time so their reported match remains the secret value. Regex engine semantics can still differ from .NET for some edge cases. This module does not yet implement every upstream validator or output aggregation rule. It scans text and UTF-16LE ASCII projections; upstream's document/archive extraction and cloud connectors are outside this native module. Domain discovery uses NetAPI instead of Sift's LDAP crawler, and network mode currently supports one device rather than a subnet.
 
 The copied Sift rule catalogue and profile are subject to the upstream [AGPL-3.0-only license](UPSTREAM-LICENSE.txt). The bundled PCRE2 source is under its [BSD-3-Clause with PCRE2 exception license](pcre2/LICENCE.md). See those files when distributing the module or its source.
+
+Back to [documentation home](../../../docs/README.md).

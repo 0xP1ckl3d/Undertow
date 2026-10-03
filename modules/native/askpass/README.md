@@ -45,3 +45,5 @@ The native module runs in the Undertow agent process and therefore needs an inte
 ## v1.0.1
 
 Normalises `DOMAIN\\user` before `LogonUserW` validation and uses `CREDUIWIN_ENUMERATE_CURRENT_USER` with the generic credential prompt. Invalid validation output also includes the Win32 `LogonUserW` error code.
+
+Back to [documentation home](../../../docs/README.md).

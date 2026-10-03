@@ -112,3 +112,5 @@ BOFs run under the agent's `native` capability, two-run concurrency limit, execu
 - `BOF argument count does not match --format`: provide one value per format character or use a matching sidecar.
 
 `run-native`, UTN1, `nativepack` and `undertow_native_v1` remain the development path for Undertow-specific native modules. BOF compatibility is an independent loader and bridge that shares transport, capability, jobs and console output.
+
+Back to [documentation home](README.md).

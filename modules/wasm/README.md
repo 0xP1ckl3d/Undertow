@@ -35,3 +35,5 @@ job output JOB_ID
 ```
 
 The compiled modules are checked in because the repository's ignore policy permits `.wasm`. The source remains the source of truth. Rebuild with the script after editing source. For extension and local testing of your own modules, read the [developer guide](../../docs/wasm-development.md).
+
+Back to [documentation home](../../docs/README.md).

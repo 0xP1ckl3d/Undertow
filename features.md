@@ -454,3 +454,5 @@ VPN client console: quit
 ```
 
 For flag details, see [CLI reference](docs/cli-reference.md); for the wire format, see [protocol](docs/protocol.md); for tested performance, see [benchmarks](docs/benchmarks.md).
+
+Back to [documentation home](docs/README.md).

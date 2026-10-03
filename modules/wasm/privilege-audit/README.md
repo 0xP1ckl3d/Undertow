@@ -23,3 +23,5 @@ The service path check does **not** claim exploitability. Effective write access
 This covers a subset of PrivescCheck's Windows checks. PrivescCheck also checks scheduled tasks, applications, credentials, network settings, hardening, updates, and more; those are not replicated here. On Linux, the example retains its earlier UID/GID and world-writable system path checks. Other operating systems print that no checks are implemented.
 
 See the [host API guide](../../../docs/wasm-development.md) for API details and limits.
+
+Back to [documentation home](../../../docs/README.md).

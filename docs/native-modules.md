@@ -82,3 +82,5 @@ The runtime writes the DLL to a private temporary directory, calls Windows `Load
 Useful errors include `invalid native module container`, `unsupported module architecture`, `unsupported native ABI`, `missing native entry point undertow_main`, `load native module`, `native module returned non-zero status`, and `native module: context canceled`. A malformed container fails before execution. Unsupported metadata OS, architecture and ABI fail on the agent before loading. A missing DLL import fails during `LoadLibraryEx`; an absent exported entry fails during `GetProcAddress`. The current compatibility subset is Windows x64 PE32+ DLLs built with MSVC x64 `/LD /MT`, standard System32 DLL imports, and a single exported entry point.
 
 See [the examples](../modules/native/README.md) for `hello`, `wininfo`, and `hostcheck`. The latter two demonstrate direct Windows APIs rather than extra Undertow host operations.
+
+Back to [documentation home](README.md).

@@ -16,3 +16,5 @@ job stop 1
 `hostcheck` reports the Windows computer, user, process, token elevation, integrity level, privileges, and active network adapters through standard Windows APIs. It only reads host state.
 
 `sift/` contains a Windows AMD64 native sensitive-data scanner built from the pinned Stratus Sift rule catalogue. It reports matched values and locations from local files or accessible SMB shares. Build it with `modules/native/sift/build.ps1`; see its README for scope and license details.
+
+Back to [documentation home](../../docs/README.md).

@@ -236,3 +236,5 @@ After `agents` and `use NUMBER`, these commands run on the selected agent withou
 The agent's `--deny=hostops` setting blocks these built-in operations independently of arbitrary `exec`. For example, `--deny=exec,upload` leaves built-in `pwd`, `interfaces`, and `route-table` available. Results are capped at 32 KiB. On Linux, inventory uses `/proc`, `/etc/resolv.conf`, and installed `ps`/`ip` tools. On Windows, it uses installed `tasklist.exe`, `whoami.exe`, `ipconfig.exe`, and `route.exe`; those process windows remain hidden. If an OS tool is missing, the command reports its error. Avoid sharing `env` or `privileges` output publicly because it may contain secrets.
 
 For full launch flags, see the [CLI reference](cli-reference.md). For deployment walkthroughs, see [scenarios](scenarios.md).
+
+Back to [documentation home](README.md).

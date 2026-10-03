@@ -238,3 +238,5 @@ VPN client console: job output JOB_ID
 ```
 
 The agent instantiates the module in a pure-Go runtime without a temporary module file. The guest has no preopened WASI filesystem or WASI network sockets, but `undertow_host_v1` imports permit agent-side file reads and bounded outbound network requests with the agent process's privileges. `--deny=wasm` disables the module and its imports without disabling scripts, one-shot exec or other jobs. Module, stdin, runtime, memory, output and concurrency limits apply as listed in [the console reference](console.md); see the [WASM developer guide](wasm-development.md) for host operations.
+
+Back to [documentation home](README.md).

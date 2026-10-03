@@ -18,6 +18,8 @@ Undertow carries the same encrypted sessions over QUIC, HTTPS/WebSocket, or dire
 
 **New to Undertow?** Follow [Getting started](docs/getting-started.md). It walks through server initialization, a VPN client, a headless Windows agent, the first command and module, and an internal route.
 
+Browse the [documentation home](docs/README.md) to find guides by task.
+
 ## What can it do?
 
 | Need | Undertow provides | Guide |
@@ -98,3 +100,5 @@ The release scripts produce `undertow` (or `undertow.exe`) and Windows/Linux age
 The table above links to task-focused guides. For a complete inventory, use the [feature catalogue](features.md) or [CLI reference](docs/cli-reference.md). The [BOF](docs/bof-compatibility.md), [native module](docs/native-modules.md), and [WASM](docs/wasm-development.md) guides cover extension formats. For internals and measurements, see the [protocol](docs/protocol.md) and [benchmark guide](docs/benchmarks.md).
 
 Undertow is experimental. The Linux server, Linux VPN client, and Windows agent have been exercised over DNS, HTTPS/WebSocket, and QUIC with TCP, UDP, and ICMP traffic; results are in the [benchmark guide](docs/benchmarks.md). Windows client Wintun installation still needs an elevated live acceptance run. Undertow is [GPL-3.0-only](LICENSE); bundled third-party components retain their own licences.
+
+Back to [documentation home](docs/README.md).

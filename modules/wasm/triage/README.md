@@ -17,3 +17,5 @@ User: EXAMPLE\analyst uid=... gid=...
 Privilege context:
 USER INFORMATION
 ```
+
+Back to [documentation home](../../../docs/README.md).

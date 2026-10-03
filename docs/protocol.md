@@ -96,3 +96,5 @@ An explicitly enabled relay uses `relay-listener.undertow.invalid:0` as a server
 The DNS carrier has no separate protocol version field. Version 1 is identified by the legacy handshake shapes, the two session version fields, and the mux frame version. Adaptive profile `2` has a distinct signed hello shape. Unknown payload profiles, malformed handshake lengths, or mismatched session/mux versions are rejected. An adaptive client does not silently downgrade to a legacy profile because path discovery cannot establish whether an old server or a broken path caused the probe failure. Use an explicit legacy profile to connect to an older server.
 
 For the current wire behavior, the source and tests are authoritative. In particular, see `internal/security/handshake_test.go`, `internal/session/session_test.go`, `internal/mux/mux_test.go`, and `internal/transport/dns/codec_test.go`.
+
+Back to [documentation home](README.md).

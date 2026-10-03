@@ -18,3 +18,5 @@ TCP 127.0.0.1:445 0.0.0.0:0 LISTENING 1234
 ```
 
 See the [host API guide](../../../docs/wasm-development.md) for inventory formats and platform behavior.
+
+Back to [documentation home](../../../docs/README.md).

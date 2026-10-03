@@ -46,3 +46,5 @@ For BOFs, use the existing [BOF manifest](bof-compatibility.md) to describe type
 Use `load bof FILE [NAME]`, `load module FILE [NAME]`, or `load wasm FILE [NAME]` to register a file during the current console session. Manually loaded commands use the given alias, or the unprefixed filename stem when no alias is given. `unload bof|module|wasm NAME` removes a command. BOFs still support `run-bof`, native modules `run-native`, and WASM modules `run-wasm` for one-off use.
 
 The three formats remain separate: `.o` is a Windows AMD64 BOF with the conventional Beacon ABI, `.module` is an Undertow native DLL container with `undertow_native_v1`, and `.wasm` is portable WASI with `undertow_host_v1`. See the [BOF](bof-compatibility.md), [native](native-modules.md), and [WASM](wasm-development.md) guides for compiler requirements and runtime limits.
+
+Back to [documentation home](README.md).

@@ -212,3 +212,5 @@ For command tables, menu examples, key bindings, agent selection, route acceptan
 If the agent and VPN client share a host, accepting a route used by the agent's own outbound connections can create a routing loop. Keep that outbound path outside the client's accepted routes or use an agent on a separate host.
 
 See [scenarios](scenarios.md) for complete commands and verification steps.
+
+Back to [documentation home](README.md).

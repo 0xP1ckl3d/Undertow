@@ -124,3 +124,5 @@ go test ./internal/mux -run '^$' -bench '^BenchmarkLossyMultiplexers$' -benchtim
 ```
 
 The mux benchmarks use a local ordered carrier or a simulated lossy carrier. Keep their values separate from the live DNS and iodine results.
+
+Back to [documentation home](README.md).

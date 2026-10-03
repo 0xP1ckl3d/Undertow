@@ -143,3 +143,5 @@ UNDERTOW_WASM_TEST_MODULE=./my-audit.wasm go test ./internal/pivot -run '^TestCu
 ```
 
 On PowerShell, set `$env:UNDERTOW_WASM_TEST_MODULE = 'C:\\path\\to\\my-audit.wasm'` before the same `go test` command. This exercises the real agent mux and WASM runtime. A plain WASI runtime cannot supply Undertow imports unless it implements this namespace. To deploy the module for operators, copy `my-audit.wasm` and an optional help sidecar to the console host's [module bank](module-bank.md), then start or reattach the console and invoke its loaded command on a selected agent. For a one-off run, use `run-wasm my-audit.wasm`. The compiled file is read from the console host; it need not be copied onto the agent. See the [console guide](console.md#running-an-agent-program-and-transferring-files) for agent selection and jobs.
+
+Back to [documentation home](README.md).

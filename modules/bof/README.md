@@ -10,3 +10,5 @@ Run `./modules/bof/build.ps1` in an x64 MSVC Developer PowerShell. It builds raw
 - `internal/bof/testdata/unsupported_imports.c` is an intentional negative fixture for inspection. It lives outside the startup module bank because it cannot execute.
 
 Inspect a compiled object with `undertow bof inspect modules/bof/hello.o`, then select a Windows amd64 agent and run `run-bof modules/bof/hello.o`. See [the compatibility guide](../../docs/bof-compatibility.md) for the supported COFF subset and argument packet.
+
+Back to [documentation home](../../docs/README.md).

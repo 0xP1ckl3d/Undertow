@@ -94,3 +94,5 @@ The older `agent profile`, `agent build`, `agent artifacts`, and related deploym
 ## Format and compatibility
 
 New artifacts use a bounded JSON payload with compact field names, followed by SHA-256, a four-byte length, and an eight-byte version 3 binary footer. The reader strictly checks length, integrity, fields, and version before connecting. Earlier version 1 and 2 binaries must be rebuilt to get the embedded identity and no-write execution model. Their server-side records can remain until removed, but the new thin-agent reader does not include the old profile-format parser. A changed public prefix rotates hosted retrieval tokens; previously copied URLs must be replaced with the current URLs from `payload hosted`. The old product-labelled path no longer works. The whole artifact has a SHA-256 for download verification. A format version and Undertow build identity are recorded server-side.
+
+Back to [documentation home](README.md).
