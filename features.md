@@ -230,6 +230,8 @@ Other internal host: serve HTTP on 10.20.1.25:80
 
 A VPN client can ask one selected agent to listen on a TCP address and relay connections to a loopback service on that client. Multiple forwards and agents are supported. `--deny=listeners` on the agent rejects new listeners. A forward survives client console detach, and its listener closes when the owning client or agent session disconnects.
 
+Follow [remote port forwarding](docs/remote-port-forwarding.md) for the full client-to-agent workflow, multiple services, verification, and cleanup.
+
 ```text
 VPN client: python3 -m http.server 8080 --bind 127.0.0.1
 VPN client console: use 1

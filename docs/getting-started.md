@@ -162,6 +162,6 @@ The server listens on `127.0.0.1:47889` for operator commands. It creates `contr
 
 Run operator commands as an account allowed to read `control.key`. When the server first creates it under `sudo`, use `sudo` for `status`, `agent list/show/select`, `route`, and `session` commands too, or arrange restricted file access for your operator account.
 
-See [scenarios](scenarios.md) for working topologies and [CLI reference](cli-reference.md) for every flag.
+See [scenarios](scenarios.md) for working topologies, [remote port forwarding](remote-port-forwarding.md) to expose a client service through an agent, and [CLI reference](cli-reference.md) for every flag.
 
 Back to [documentation home](README.md).

@@ -195,6 +195,8 @@ When an agent and VPN client run on the **same host**, do not accept a route tha
 
 ## 9. Expose a VPN client web server on one agent
 
+For multiple services, agent selection, and cleanup, use the dedicated [remote port forwarding guide](remote-port-forwarding.md).
+
 Start a TCP web server on the VPN client at port 8080, then start its VPN console. Select the agent that should receive incoming connections:
 
 ```text

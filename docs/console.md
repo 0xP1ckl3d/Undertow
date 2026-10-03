@@ -180,7 +180,9 @@ After `background`, run `undertow client attach` to return. A VPN started with `
 
 ### Expose a client TCP service on an agent
 
-In the VPN client console, select the agent that should listen and add a forward. For a web server listening on the **client** at `0.0.0.0:8080`:
+For a complete setup, multiple services, and troubleshooting, see [remote port forwarding](remote-port-forwarding.md).
+
+In the VPN client console, select the agent that should listen and add a forward. For a web server listening on the **client** at `127.0.0.1:8080`:
 
 ```text
 agents

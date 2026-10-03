@@ -27,7 +27,7 @@ Browse the [documentation home](docs/README.md) to find guides by task.
 | Reach a service on a remote internal network | An outbound agent and an accepted route from the server or client; TCP, UDP, and ICMP traffic can use the agent's network | [Getting started](docs/getting-started.md#5-route-client-traffic-through-the-agent) · [Routing scenarios](docs/scenarios.md) |
 | Route your laptop's traffic | `client --internal` for agent networks, `client --vpn` for server Internet egress, or both | [Networking modes](docs/networking-modes.md) |
 | Work on a remote host | Interactive shell, one-shot commands, built-in host operations, file transfer, and background jobs | [Console guide](docs/console.md) |
-| Reach or expose one service | Forward a TCP service through an agent without routing a whole subnet | [Forwarding scenarios](docs/scenarios.md) |
+| Expose a local service through an agent | Let a remote host reach one or several TCP services running on your client | [Remote port forwarding](docs/remote-port-forwarding.md) |
 | Run specialized tools | Stream scripts, run WASM modules, or run Windows native modules and BOFs through the agent | [Module bank](docs/module-bank.md) |
 | Deploy an unattended agent | Build a Windows or Linux payload with its own identity, host it over HTTPS, generate a verification script, or download it for your own delivery flow | [Payload deployment](docs/agent-distribution.md) |
 | Reach a network beyond the first agent | Start an explicit relay and connect another independent agent through it | [Topology and relays](docs/topology-and-relays.md) |
