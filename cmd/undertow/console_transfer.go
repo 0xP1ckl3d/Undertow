@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -13,14 +15,26 @@ import (
 )
 
 func runConsoleTransfer(ctx context.Context, output io.Writer, editor *consoleEditor, transfer clientTransferAction, args []string) error {
-	if len(args) != 4 {
-		return errors.New("use upload AGENT_ID LOCAL REMOTE or download AGENT_ID REMOTE LOCAL")
+	if len(args) != 4 && !(len(args) == 3 && args[0] == "download") {
+		return errors.New("use upload AGENT_ID LOCAL REMOTE or download AGENT_ID REMOTE [LOCAL]")
 	}
 	request := clientFileRequest{AgentID: args[1], Operation: args[0]}
+	var err error
 	if args[0] == "upload" {
 		request.LocalPath, request.RemotePath = args[2], args[3]
 	} else {
-		request.LocalPath, request.RemotePath = args[3], args[2]
+		request.RemotePath = args[2]
+		if len(args) == 4 {
+			request.LocalPath = args[3]
+		} else {
+			request.LocalPath, err = defaultDownloadPath(request.AgentID, request.RemotePath)
+			if err != nil {
+				return err
+			}
+			if err := os.MkdirAll(filepath.Dir(request.LocalPath), 0700); err != nil {
+				return err
+			}
+		}
 	}
 	local, err := filepath.Abs(request.LocalPath)
 	if err != nil {
@@ -58,6 +72,9 @@ func runConsoleTransfer(ctx context.Context, output io.Writer, editor *consoleEd
 			return fmt.Errorf("%s failed after transfer started: %w", label, result.err)
 		}
 		fmt.Fprintf(output, "%s complete: %d bytes, SHA-256 %s\n", label, result.result.Size, result.result.SHA256)
+		if request.Operation == "download" {
+			fmt.Fprintf(output, "Saved to %s\n", request.LocalPath)
+		}
 		return nil
 	case <-detach:
 		cancel()
@@ -71,4 +88,15 @@ func runConsoleTransfer(ctx context.Context, output io.Writer, editor *consoleEd
 		cancel()
 		return ctx.Err()
 	}
+}
+
+func defaultDownloadPath(agentID, remotePath string) (string, error) {
+	if agentID == "" || strings.ContainsAny(agentID, "/\\") || agentID == "." || agentID == ".." {
+		return "", errors.New("invalid agent ID for output path")
+	}
+	name := path.Base(strings.ReplaceAll(remotePath, "\\", "/"))
+	if name == "" || name == "." || name == "/" || name == ".." {
+		return "", errors.New("download source must name a file")
+	}
+	return filepath.Join("outputs", "downloads", agentID, name), nil
 }

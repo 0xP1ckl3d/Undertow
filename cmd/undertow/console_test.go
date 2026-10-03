@@ -89,7 +89,7 @@ func TestConsoleHelpTopics(t *testing.T) {
 	if err := printConsoleHelp(&agentSummary, true, true, false, "", consoleHelpOptions{agent: "TALON"}); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"VPN CLIENT / AGENT TALON", "AGENT SESSION", "AGENT HOST", "AGENT FILES AND SERVICES", "upload LOCAL REMOTE", "download REMOTE LOCAL", "forward add BIND TARGET", "route accept CIDR", "back"} {
+	for _, want := range []string{"VPN CLIENT / AGENT TALON", "AGENT SESSION", "AGENT HOST", "AGENT FILES AND SERVICES", "upload LOCAL REMOTE", "download REMOTE [LOCAL]", "screenshot [NUMBER]", "forward add BIND TARGET", "route accept CIDR", "back"} {
 		if !strings.Contains(agentSummary.String(), want) {
 			t.Fatalf("selected agent menu missing %q: %q", want, agentSummary.String())
 		}

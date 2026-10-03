@@ -119,6 +119,7 @@ func printConsoleOverview(output io.Writer, vpnClient, selected, serverAttached 
 		m.row("interfaces", "Network interfaces")
 		m.row("dns", "DNS settings")
 		m.row("route-table", "Host route table")
+		m.row("screens", "List displays and foreground apps")
 	}
 
 	if vpnClient {
@@ -134,7 +135,8 @@ func printConsoleOverview(output io.Writer, vpnClient, selected, serverAttached 
 		if selected {
 			m.section("AGENT FILES AND SERVICES")
 			m.row("upload LOCAL REMOTE", "Send a file to this agent")
-			m.row("download REMOTE LOCAL", "Save a file from this agent")
+			m.row("download REMOTE [LOCAL]", "Save a file from this agent")
+			m.row("screenshot [NUMBER]", "Capture one or all displays locally")
 			m.row("forward add BIND TARGET", "Expose a client service on this agent")
 			m.row("forward list", "List this agent's forwards")
 			m.row("forward del BIND", "Close one forward")
@@ -175,7 +177,7 @@ func printConsoleOverview(output io.Writer, vpnClient, selected, serverAttached 
 		}
 	}
 	m.hint("Type help TOPIC for details. Tab completes commands and local paths.")
-	if opt.loadedBOFs != nil {
+	if selected && opt.loadedBOFs != nil {
 		if names := opt.loadedBOFs.names(); len(names) > 0 {
 			m.section("Loaded BOFs")
 			for _, name := range names {
@@ -188,7 +190,7 @@ func printConsoleOverview(output io.Writer, vpnClient, selected, serverAttached 
 			}
 		}
 	}
-	if opt.loadedArtifacts != nil {
+	if selected && opt.loadedArtifacts != nil {
 		for _, kind := range []string{"module", "wasm"} {
 			title := "Loaded Native Modules"
 			if kind == "wasm" {

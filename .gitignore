@@ -5,6 +5,7 @@
 /agent-distribution/
 jobs-output/
 job-downloads/
+outputs/
 payloads/
 /Plan.md
 /client-routes.json

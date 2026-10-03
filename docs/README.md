@@ -8,7 +8,7 @@ New to Undertow? Follow [Getting started](getting-started.md) first. It takes yo
 | --- | --- |
 | Build, host, download, or deploy a headless agent | [Payload deployment](agent-distribution.md) |
 | Choose VPN egress, internal routing, or a carrier | [Networking modes and transports](networking-modes.md) |
-| Use the console for agents, routes, files, jobs, and forwards | [Console guide](console.md) |
+| Use the console for agents, routes, files, jobs, screenshots, and forwards | [Console guide](console.md) |
 | Expose one or several local services through an agent | [Remote port forwarding](remote-port-forwarding.md) |
 | Work through a complete network layout | [Deployment scenarios](scenarios.md) |
 | Run an included module or load one in a session | [Module bank](module-bank.md) |

@@ -2,6 +2,7 @@ package pivot
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -18,6 +19,7 @@ var builtinArgCount = map[string][2]int{
 	"mkdir": {1, 1}, "rm": {1, 1}, "whoami": {0, 0},
 	"ps": {0, 0}, "privileges": {0, 0}, "env": {0, 1},
 	"interfaces": {0, 0}, "dns": {0, 0}, "route-table": {0, 0},
+	"screens": {0, 0},
 }
 
 func validateBuiltin(name string, args []string) error {
@@ -89,6 +91,14 @@ func runBuiltin(parent context.Context, name string, args []string) ExecResult {
 		}
 	case "ps", "privileges", "dns", "route-table":
 		output, err = platformHostInfo(ctx, name)
+	case "screens":
+		var screens []ScreenInfo
+		screens, err = listScreens()
+		if err == nil {
+			var encoded []byte
+			encoded, err = json.Marshal(screens)
+			output = string(encoded)
+		}
 	case "env":
 		if len(args) == 1 {
 			value, exists := os.LookupEnv(args[0])

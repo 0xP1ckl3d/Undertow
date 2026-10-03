@@ -206,6 +206,20 @@ The agent must allow the native capability. See docs/bof-compatibility.md.
 jobs show|output|save|delete|cancel|stop NUMBER|ID also work. Job IDs remain valid if list
 numbers change. At the main menu, jobs AGENT_ID filters the list.
 run-script, run-wasm, run-native and run-bof also accept --background.
+Default client output: outputs/jobs/AGENT_ID/.
+`)
+	case "screens", "screenshot":
+		fmt.Fprint(output, `Windows screen capture (VPN client console):
+  screens                   Number displays and show the foreground app.
+  screenshot                Save every display as a PNG on this client.
+  screenshot NUMBER         Save one numbered display.
+  screenshot --output DIR   Save all displays in a chosen directory.
+  screenshot NUMBER --output DIR  Save one display there.
+The default is outputs/screenshots/ in the console working directory.
+At the main menu, put AGENT_ID after screens or screenshot.
+A headless agent needs access to an interactive Windows desktop session.
+The agent must allow hostops and download; the server relays bytes without
+saving a screenshot.
 `)
 	case "host", "hostops", "pwd", "ls", "stat", "mkdir", "rm", "whoami", "ps", "privileges", "env", "interfaces", "dns", "route-table":
 		fmt.Fprint(output, `Built-in agent host operations (select an agent first):
@@ -221,6 +235,7 @@ run-script, run-wasm, run-native and run-bof also accept --background.
   interfaces                List network interfaces and addresses.
   dns                       Show DNS configuration.
   route-table               Show the host route table.
+  screens                   List Windows displays and foreground apps.
 These run on the agent. At the main menu, put AGENT_ID after the command.
 rm removes one file or empty directory; it is not recursive.
 `)
@@ -230,9 +245,12 @@ rm removes one file or empty directory; it is not recursive.
 		}
 		fmt.Fprint(output, `Transfer files to or from a selected agent:
   upload LOCAL REMOTE       Send a client file to the agent.
-  download REMOTE LOCAL     Save an agent file on the client.
+  download REMOTE [LOCAL]   Save an agent file on the client.
+  screenshot [NUMBER]       Save all screens, or one numbered screen.
 At the main menu, put AGENT_ID after upload or download. Local paths are
 on this console machine; Tab completes them. Transfers verify SHA-256.
+Default downloads go to outputs/downloads/AGENT_ID/; screenshots go to
+outputs/screenshots/. Use help screenshot for output directory options.
 `)
 	case "forward":
 		if !vpnClient {

@@ -36,7 +36,15 @@ func attachClient(args []string) error {
 }
 
 func attachClientAt(path string) error {
+	if removed, err := removeDeadBackgroundState(path); err != nil {
+		return err
+	} else if removed {
+		return errors.New("client process is no longer running; removed stale PID file")
+	}
 	if _, err := callClientConsole(path, consoleRPCRequest{Action: "session"}); err != nil {
+		if removed, checkErr := removeDeadBackgroundState(path); checkErr == nil && removed {
+			return errors.New("client process is no longer running; removed stale PID file")
+		}
 		return fmt.Errorf("attach to VPN client: %w", err)
 	}
 	ctx, cancel := commandContext()

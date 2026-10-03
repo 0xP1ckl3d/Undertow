@@ -160,6 +160,10 @@ type backgroundState struct {
 }
 
 func launchBackground(mode string, args []string, logPath, pidPath string) error {
+	_, err := removeDeadBackgroundState(pidPath)
+	if err != nil {
+		return err
+	}
 	if _, err := os.Lstat(pidPath); err == nil {
 		return fmt.Errorf("background state %s already exists; use '%s --stop' or inspect and remove a stale file", pidPath, mode)
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -247,6 +251,40 @@ func launchBackground(mode string, args []string, logPath, pidPath string) error
 			}
 		}
 	}
+}
+
+// removeDeadBackgroundState removes only a state file that still matches a
+// confirmed dead PID. An unreadable or replaced file is retained.
+func removeDeadBackgroundState(path string) (bool, error) {
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	var state backgroundState
+	if err := json.Unmarshal(raw, &state); err != nil {
+		return false, fmt.Errorf("invalid background state %s: %w", path, err)
+	}
+	alive, err := backgroundProcessAlive(state.PID)
+	if err != nil {
+		return false, err
+	}
+	if alive {
+		return false, nil
+	}
+	current, err := os.ReadFile(path)
+	if err != nil {
+		return false, err
+	}
+	if string(current) != string(raw) {
+		return false, errors.New("background state changed while checking stale PID")
+	}
+	if err := os.Remove(path); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func backgroundStartupError(mode string, childErr error, logPath string, offset int64) error {
@@ -432,6 +470,12 @@ func startBackgroundControl(pidPath string) (func(), error) {
 }
 
 func stopBackground(pidPath string) error {
+	if removed, err := removeDeadBackgroundState(pidPath); err != nil {
+		return err
+	} else if removed {
+		fmt.Printf("background process is no longer running; removed stale state %s\n", pidPath)
+		return nil
+	}
 	raw, err := os.ReadFile(pidPath)
 	if err != nil {
 		return err
@@ -446,6 +490,10 @@ func stopBackground(pidPath string) error {
 	}
 	conn, err := net.DialTimeout("tcp4", state.Address, 3*time.Second)
 	if err != nil {
+		if removed, checkErr := removeDeadBackgroundState(pidPath); checkErr == nil && removed {
+			fmt.Printf("background process %d is no longer running; removed stale state %s\n", state.PID, pidPath)
+			return nil
+		}
 		return fmt.Errorf("background PID %d is not responding: %w", state.PID, err)
 	}
 	defer conn.Close()

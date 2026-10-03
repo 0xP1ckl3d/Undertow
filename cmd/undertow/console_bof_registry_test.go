@@ -172,11 +172,15 @@ func TestLoadedBOFManifestAndArguments(t *testing.T) {
 		}
 	}
 	var overview strings.Builder
-	if err := printConsoleHelp(&overview, false, false, false, "", consoleHelpOptions{loadedBOFs: registry}); err != nil {
+	if err := printConsoleHelp(&overview, false, true, false, "", consoleHelpOptions{loadedBOFs: registry}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(overview.String(), "Loaded BOFs") || !strings.Contains(overview.String(), "Argument demonstration") {
 		t.Fatalf("BOF overview: %s", overview.String())
+	}
+	var mainOverview strings.Builder
+	if err := printConsoleHelp(&mainOverview, false, false, false, "", consoleHelpOptions{loadedBOFs: registry}); err != nil || strings.Contains(mainOverview.String(), "Loaded BOFs") {
+		t.Fatalf("main menu showed agent BOFs: %v %s", err, mainOverview.String())
 	}
 	var emptyOverview strings.Builder
 	if err := printConsoleHelp(&emptyOverview, false, false, false, "", consoleHelpOptions{loadedBOFs: newLoadedBOFRegistry()}); err != nil {
@@ -246,7 +250,7 @@ func TestLoadedBOFCompletion(t *testing.T) {
 		{[]string{"unload", "bof"}, "ex", "example"},
 		{[]string{"load"}, "bo", "bof"},
 	} {
-		matches := consoleCompletions(tc.before, tc.prefix, 0, false, false, false, registry)
+		matches := consoleCompletions(tc.before, tc.prefix, 0, len(tc.before) == 0, false, false, registry)
 		if len(matches) != 1 || matches[0].value != tc.want {
 			t.Fatalf("completion %+v = %+v", tc, matches)
 		}

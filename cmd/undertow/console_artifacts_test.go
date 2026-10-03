@@ -75,7 +75,7 @@ func TestLoadedNativeAndWASMRegistry(t *testing.T) {
 		{[]string{"unload", "wasm"}, "tria", "triage"},
 		{[]string{"load"}, "mo", "module"},
 	} {
-		matches := consoleCompletions(tc.before, tc.prefix, 0, false, false, false, bofs, artifacts)
+		matches := consoleCompletions(tc.before, tc.prefix, 0, len(tc.before) == 0, false, false, bofs, artifacts)
 		if len(matches) != 1 || matches[0].value != tc.want {
 			t.Fatalf("completion %+v: %+v", tc, matches)
 		}
@@ -161,11 +161,15 @@ func TestModuleBankPreload(t *testing.T) {
 		t.Fatalf("preloaded bofs=%v modules=%v", bofs.names(), artifacts.names())
 	}
 	var output strings.Builder
-	if err := printConsoleHelp(&output, false, false, false, "", consoleHelpOptions{loadedBOFs: bofs, loadedArtifacts: artifacts}); err != nil {
+	if err := printConsoleHelp(&output, false, true, false, "", consoleHelpOptions{loadedBOFs: bofs, loadedArtifacts: artifacts}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), "Loaded BOFs") || !strings.Contains(output.String(), "Loaded Native Modules") || !strings.Contains(output.String(), "Loaded WASM Modules") {
 		t.Fatalf("bank help: %s", output.String())
+	}
+	output.Reset()
+	if err := printConsoleHelp(&output, false, false, false, "", consoleHelpOptions{loadedBOFs: bofs, loadedArtifacts: artifacts}); err != nil || strings.Contains(output.String(), "Loaded Native Modules") || strings.Contains(output.String(), "Loaded WASM Modules") {
+		t.Fatalf("main menu showed agent modules: %v %s", err, output.String())
 	}
 	if len(newLoadedArtifactRegistry().names()) != 0 {
 		t.Fatal("new registry inherited session entries")

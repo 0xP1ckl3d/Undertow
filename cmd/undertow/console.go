@@ -423,6 +423,8 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 				args = append([]string{args[0], selectedID}, args[1:]...)
 			case "upload", "download":
 				args = append([]string{args[0], selectedID}, args[1:]...)
+			case "screens", "screenshot":
+				args = append([]string{args[0], selectedID}, args[1:]...)
 			case "forward":
 				if vpnClient && len(args) >= 2 && (args[1] == "add" || args[1] == "del" || args[1] == "list") {
 					args = append([]string{"forward", args[1], selectedID}, args[2:]...)
@@ -440,6 +442,25 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 		ownClientID := uint64(0)
 		if clientID != nil {
 			ownClientID = clientID()
+		}
+		if args[0] == "screens" || args[0] == "screenshot" {
+			if len(args) < 2 || args[1] == "" {
+				fmt.Fprintln(output, "error: select an agent with use NUMBER, or provide AGENT_ID")
+				continue
+			}
+			if args[0] == "screens" {
+				if len(args) != 2 {
+					fmt.Fprintln(output, "error: use screens [AGENT_ID]")
+					continue
+				}
+				err = runConsoleScreens(ctx, output, call, args[1])
+			} else {
+				err = runConsoleScreenshot(ctx, output, call, serverConsole.transfer, args[1], args[2:])
+			}
+			if err != nil {
+				fmt.Fprintln(output, "error:", err)
+			}
+			continue
 		}
 		if (args[0] == "upload" || args[0] == "download") && len(features) != 0 && features[0].transfer != nil {
 			if err := runConsoleTransfer(ctx, output, editor, features[0].transfer, args); err != nil {
@@ -854,14 +875,26 @@ Quote arguments containing spaces. Commands run only when submitted.
 		if !vpnClient {
 			return errors.New("file transfer is available in the VPN client console")
 		}
-		if len(args) != 4 {
-			return errors.New("use upload AGENT_ID LOCAL REMOTE or download AGENT_ID REMOTE LOCAL")
+		if len(args) != 4 && !(len(args) == 3 && args[0] == "download") {
+			return errors.New("use upload AGENT_ID LOCAL REMOTE or download AGENT_ID REMOTE [LOCAL]")
 		}
 		request := clientFileRequest{AgentID: args[1], Operation: args[0]}
+		var err error
 		if args[0] == "upload" {
 			request.LocalPath, request.RemotePath = args[2], args[3]
 		} else {
-			request.LocalPath, request.RemotePath = args[3], args[2]
+			request.RemotePath = args[2]
+			if len(args) == 4 {
+				request.LocalPath = args[3]
+			} else {
+				request.LocalPath, err = defaultDownloadPath(request.AgentID, request.RemotePath)
+				if err != nil {
+					return err
+				}
+				if err := os.MkdirAll(filepath.Dir(request.LocalPath), 0700); err != nil {
+					return err
+				}
+			}
 		}
 		local, err := filepath.Abs(request.LocalPath)
 		if err != nil {

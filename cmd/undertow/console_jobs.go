@@ -214,7 +214,7 @@ func saveJobOutput(ctx context.Context, output io.Writer, call consoleCaller, jo
 		if job.State != "completed" {
 			name = job.ID + ".partial.out"
 		}
-		destination = filepath.Join("job-downloads", job.AgentID, name)
+		destination = filepath.Join("outputs", "jobs", job.AgentID, name)
 	}
 	abs, err := filepath.Abs(destination)
 	if err != nil {

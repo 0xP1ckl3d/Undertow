@@ -259,7 +259,7 @@ VPN client console: exec powershell.exe -NoProfile -Command whoami
 
 ### Built-in host operations
 
-The built-ins are `pwd`, `ls`, `stat`, `mkdir`, `rm`, `whoami`, `ps`, `privileges`, `env`, `interfaces`, `dns`, and `route-table`. They use the independent `hostops` capability; denying `exec` does not deny them.
+The built-ins are `pwd`, `ls`, `stat`, `mkdir`, `rm`, `whoami`, `ps`, `privileges`, `env`, `interfaces`, `dns`, `route-table`, and Windows `screens`. They use the independent `hostops` capability; denying `exec` does not deny them.
 
 ```text
 Agent: undertow agent --transport quic --server SERVER_IP:443 --tls-insecure-skip-verify --fingerprint FINGERPRINT --token-file token.key --deny=exec
@@ -268,6 +268,8 @@ VPN client console: whoami
 VPN client console: interfaces
 VPN client console: route-table
 ```
+
+On a Windows agent, `screens` lists numbered displays and the frontmost visible application on each. `screenshot` captures all displays; `screenshot NUMBER` captures one. PNGs are transferred to the initiating VPN client's ignored `outputs/screenshots/` directory. Use `--output DIRECTORY` to choose another location. Captures need an accessible interactive desktop and the `hostops` and `download` capabilities. See the [console guide](docs/console.md#windows-display-screenshots).
 
 ### Long-lived interactive sessions
 

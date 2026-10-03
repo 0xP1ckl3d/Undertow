@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -123,8 +124,8 @@ func TransferFileProgress(parent context.Context, session *mux.Mux, agentID, ope
 	if session == nil {
 		return result, errors.New("VPN session is not connected")
 	}
-	if agentID == "" || !validTransferPath(remotePath) || !validTransferPath(localPath) || operation != "upload" && operation != "download" {
-		return result, errors.New("use upload LOCAL REMOTE or download REMOTE LOCAL with a selected agent")
+	if agentID == "" || !validTransferPath(remotePath) || !validTransferPath(localPath) || operation != "upload" && operation != "download" && operation != "screenshot" {
+		return result, errors.New("use upload, download, or screenshot with a selected agent")
 	}
 	ctx, cancel := context.WithTimeout(parent, 30*time.Minute)
 	defer cancel()
@@ -164,7 +165,7 @@ func TransferFileProgress(parent context.Context, session *mux.Mux, agentID, ope
 	if err := WriteFileMessage(stream, FileMessage{AgentID: agentID, Operation: operation, Path: remotePath, Size: size}); err != nil {
 		return result, err
 	}
-	if operation == "download" {
+	if operation == "download" || operation == "screenshot" {
 		_ = stream.CloseWrite()
 	}
 	reader := bufio.NewReaderSize(stream, 4096)
@@ -270,13 +271,39 @@ func serveFile(ctx context.Context, stream *mux.Stream, caps Capabilities) {
 		fileError(stream, reader, errors.New("agent upload is disabled"))
 	} else if request.Operation == "download" && !caps.Download {
 		fileError(stream, reader, errors.New("agent download is disabled"))
+	} else if request.Operation == "screenshot" && (!caps.Download || !caps.HostOps) {
+		fileError(stream, reader, errors.New("agent screenshot requires download and hostops capabilities"))
 	} else if request.Operation == "upload" && request.Size >= 0 {
 		serveUpload(stream, reader, request)
 	} else if request.Operation == "download" {
 		serveDownload(stream, request)
+	} else if request.Operation == "screenshot" {
+		serveScreenshot(stream, request)
 	} else {
 		fileError(stream, reader, errors.New("invalid file transfer operation"))
 	}
+}
+
+func serveScreenshot(stream *mux.Stream, request FileMessage) {
+	number, err := strconv.Atoi(request.Path)
+	if err != nil || number < 1 {
+		fileError(stream, nil, errors.New("invalid screen number"))
+		return
+	}
+	image, err := captureScreen(number)
+	if err != nil {
+		fileError(stream, nil, err)
+		return
+	}
+	if err := WriteFileMessage(stream, FileMessage{OK: true, Size: int64(len(image))}); err != nil {
+		return
+	}
+	hash := sha256.Sum256(image)
+	if _, err := stream.Write(image); err != nil {
+		return
+	}
+	_, _ = stream.Write(hash[:])
+	_ = stream.CloseWrite()
 }
 
 func serveUpload(stream *mux.Stream, reader *bufio.Reader, request FileMessage) {

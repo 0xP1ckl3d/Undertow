@@ -181,7 +181,7 @@ In the attached client console, `vpn status` shows the active carrier and last v
 | `--log-file PATH` | `undertow-MODE.log` | Background log path. |
 | `--pid-file PATH` | `undertow-MODE.pid` | Background control state path. |
 
-Choose only one of foreground, background, and stop. With no lifecycle flag in a terminal, server and client open their consoles; without a terminal they run in the foreground. `--stop` needs the same `--pid-file` used on startup; the other connection flags are not needed for stop. A worker runs with the privilege of the command that launched it; a privileged server or VPN client should also be stopped at the needed privilege. Graceful stop cleans owned routes; forced termination may require manual OS route inspection.
+Choose only one of foreground, background, and stop. With no lifecycle flag in a terminal, server and client open their consoles; without a terminal they run in the foreground. `--stop` needs the same `--pid-file` used on startup; the other connection flags are not needed for stop. A worker runs with the privilege of the command that launched it; a privileged server or VPN client should also be stopped at the needed privilege. Graceful stop cleans owned routes; forced termination may require manual OS route inspection. If the PID in the state file is no longer running, the next background start removes that stale file and starts normally. `client attach` reports the dead process and removes its stale state; `client --stop` removes stale state without signalling an unrelated process.
 
 ## Operator commands
 

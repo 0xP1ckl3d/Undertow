@@ -112,18 +112,22 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 	}
 	loadedNames := append(registry.names(), artifacts.names()...)
 	if len(before) == 0 {
-		if matches := wordCompletions(loadedNames, partial); len(matches) == 1 && partial != "" {
-			return matches
+		if selected {
+			if matches := wordCompletions(loadedNames, partial); len(matches) == 1 && partial != "" {
+				return matches
+			}
 		}
 		commands := []string{"agents", "agent", "payload", "session", "use", "status", "routes", "help", "clear", "cls", "quit", "exit", "load", "unload", "bofs", "modules"}
-		commands = append(commands, loadedNames...)
 		if selected {
-			commands = append(commands, "show", "back", "route", "jobs", "job", "exec", "shell", "run-script", "run-wasm", "run-native", "run-bof", "pwd", "ls", "stat", "mkdir", "rm", "whoami", "ps", "privileges", "env", "interfaces", "dns", "route-table")
+			commands = append(commands, loadedNames...)
+		}
+		if selected {
+			commands = append(commands, "show", "back", "route", "jobs", "job", "exec", "shell", "run-script", "run-wasm", "run-native", "run-bof", "pwd", "ls", "stat", "mkdir", "rm", "whoami", "ps", "privileges", "env", "interfaces", "dns", "route-table", "screens")
 		}
 		if vpn {
 			commands = append(commands, "background", "internal", "vpn")
 			if selected {
-				commands = append(commands, "forward", "upload", "download")
+				commands = append(commands, "forward", "upload", "download", "screenshot")
 			}
 		} else {
 			commands = append(commands, "transports", "topology", "start", "stop", "client")
