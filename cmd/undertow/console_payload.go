@@ -17,7 +17,7 @@ import (
 // command namespace, even though older consoles used "agent" for both.
 func isPayloadSubcommand(value string) bool {
 	switch value {
-	case "profile", "profiles", "build", "list", "artifacts", "show", "host", "hosted", "url", "download", "unhost", "revoke", "delete", "deploy-script", "retrieval-host":
+	case "profile", "profiles", "build", "list", "artifacts", "show", "host", "hosted", "url", "download", "unhost", "revoke", "delete", "deploy-script", "retrieval-host", "host-agent", "agent-hosts", "unhost-agent", "deploy-script-agent":
 		return true
 	}
 	return false
@@ -38,6 +38,9 @@ Save:    payload download PAYLOAD_ID [OUTPUT]
          Defaults to outputs/downloads/payloads/FILENAME here.
 Manage:  payload unhost PAYLOAD_ID | payload revoke PAYLOAD_ID | payload delete PAYLOAD_ID
 Helper:  payload deploy-script PAYLOAD_ID powershell|shell
+Agent:   payload host-agent PAYLOAD_ID AGENT_ID BIND PUBLIC_HOST
+         payload agent-hosts [PAYLOAD_ID] | payload unhost-agent HOST_ID
+         payload deploy-script-agent HOST_ID powershell|shell
 Profile: payload profile show|edit|delete NAME
 
 NAME is a profile name. PAYLOAD_ID is the 24-character build ID shown by
@@ -65,6 +68,8 @@ func runConsolePayload(ctx context.Context, out io.Writer, call consoleCaller, a
 		return nil
 	}
 	switch args[1] {
+	case "host-agent", "agent-hosts", "unhost-agent", "deploy-script-agent":
+		return runPayloadAgentHost(ctx, out, call, args)
 	case "retrieval-host":
 		return runPayloadRetrievalHost(ctx, out, call, args)
 	case "retrieval-path":

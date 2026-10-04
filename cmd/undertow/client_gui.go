@@ -248,6 +248,15 @@ func (g *guiServer) handler() http.Handler {
 	mux.HandleFunc("POST /api/artifacts", g.remote(http.MethodPost, func(*http.Request) string { return "/v1/agent-artifacts" }))
 	mux.HandleFunc("GET /api/artifacts/{id}", g.remote(http.MethodGet, func(r *http.Request) string { return "/v1/agent-artifacts/" + url.PathEscape(r.PathValue("id")) }))
 	mux.HandleFunc("DELETE /api/artifacts/{id}", g.remote(http.MethodDelete, func(r *http.Request) string { return "/v1/agent-artifacts/" + url.PathEscape(r.PathValue("id")) }))
+	mux.HandleFunc("GET /api/agent-hosts", g.remote(http.MethodGet, func(*http.Request) string { return "/v1/agent-hosts" }))
+	mux.HandleFunc("GET /api/agent-hosts/{id}", g.remote(http.MethodGet, func(r *http.Request) string { return "/v1/agent-hosts/" + url.PathEscape(r.PathValue("id")) }))
+	mux.HandleFunc("DELETE /api/agent-hosts/{id}", g.remote(http.MethodDelete, func(r *http.Request) string { return "/v1/agent-hosts/" + url.PathEscape(r.PathValue("id")) }))
+	mux.HandleFunc("GET /api/artifacts/{id}/agent-hosts", g.remote(http.MethodGet, func(r *http.Request) string {
+		return "/v1/agent-artifacts/" + url.PathEscape(r.PathValue("id")) + "/agent-hosts"
+	}))
+	mux.HandleFunc("POST /api/artifacts/{id}/agent-hosts", g.remote(http.MethodPost, func(r *http.Request) string {
+		return "/v1/agent-artifacts/" + url.PathEscape(r.PathValue("id")) + "/agent-hosts"
+	}))
 	mux.HandleFunc("GET /api/artifacts/{id}/host", g.remote(http.MethodGet, func(r *http.Request) string {
 		return "/v1/agent-artifacts/" + url.PathEscape(r.PathValue("id")) + "/host"
 	}))
@@ -261,6 +270,7 @@ func (g *guiServer) handler() http.Handler {
 		return "/v1/agent-artifacts/" + url.PathEscape(r.PathValue("id")) + "/revoke"
 	}))
 	mux.HandleFunc("GET /api/artifacts/{id}/deploy-script", g.deployScript)
+	mux.HandleFunc("GET /api/agent-hosts/{id}/deploy-script", g.agentHostDeployScript)
 	mux.HandleFunc("GET /api/artifacts/{id}/download", g.downloadArtifact)
 	mux.HandleFunc("GET /api/modules", g.listModules)
 	mux.HandleFunc("POST /api/modules", g.importModule)

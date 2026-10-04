@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"undertow/internal/namedpipe"
 	"undertow/internal/tun"
 )
 
@@ -130,10 +131,16 @@ func doctorCommand(args []string, output io.Writer) error {
 		if *listen != "" && len(kinds) != 1 {
 			return errors.New("--listen requires one transport; use per-transport listen flags")
 		}
-		if !seen["websocket"] && !seen["quic"] && (*carrier.cert != "" || *carrier.selfSigned) { return errors.New("TLS options require a WebSocket or QUIC server listener") }
+		if !seen["websocket"] && !seen["quic"] && (*carrier.cert != "" || *carrier.selfSigned) {
+			return errors.New("TLS options require a WebSocket or QUIC server listener")
+		}
 		for _, option := range []struct{ kind, address string }{{"dns", *dnsListen}, {"websocket", *websocketListen}, {"quic", *quicListen}} {
-			if option.address != "" && !seen[option.kind] { return fmt.Errorf("--%s-listen requires %s in --transport", option.kind, option.kind) }
-			if *listen != "" && option.address != "" { return errors.New("choose --listen or a per-transport listen flag") }
+			if option.address != "" && !seen[option.kind] {
+				return fmt.Errorf("--%s-listen requires %s in --transport", option.kind, option.kind)
+			}
+			if *listen != "" && option.address != "" {
+				return errors.New("choose --listen or a per-transport listen flag")
+			}
 		}
 		checkDoctorFile(r, "identity", *identity, false, "run 'undertow init' to create the server identity")
 		if *carrier.cert != "" || *carrier.key != "" {
@@ -286,6 +293,16 @@ func checkDoctorServer(r *doctorReport, value string) netip.Addr {
 }
 
 func checkDoctorCarrierServer(r *doctorReport, value, carrier string) netip.Addr {
+	if carrier == "relay-smb" {
+		if err := namedpipe.ValidateRemote(value); err != nil {
+			r.fail("server address", err.Error())
+		} else if runtime.GOOS != "windows" {
+			r.fail("server address", "SMB named-pipe relay requires Windows")
+		} else {
+			r.pass("server address", value+" is a valid named-pipe path")
+		}
+		return netip.Addr{}
+	}
 	if carrier == "dns" {
 		return checkDoctorServer(r, value)
 	}

@@ -35,6 +35,26 @@ On Windows the release template uses the GUI subsystem, so normal packaged opera
 
 Optional `payload deploy-script PAYLOAD_ID powershell|shell` prints a helper that downloads, verifies SHA-256, places, and launches a hosted binary. The PowerShell helper works with Windows PowerShell 5.1 and PowerShell 7+, scopes any self-signed certificate exception to its download HTTP client, and computes SHA-256 before installation. Manual retrieval and launch always work.
 
+## Host a payload through a connected agent
+
+When a child can reach a parent agent but cannot reach the server's HTTPS payload listener, enable downloads on the parent's **existing relay listener**. The server keeps the artifact. For each download the parent requests its bytes through its current authenticated Undertow session and streams them to the child. The parent does not store the binary or run a shell. The relay listener continues to carry child agent sessions on the same address and port. Downloads are disabled until an operator explicitly enables them for an artifact.
+
+```text
+relay start 192.168.10.20:8443
+payload profile create branch server=192.168.10.20:8443 transport=relay
+payload build branch windows amd64
+payload host-agent PAYLOAD_ID PARENT_AGENT_ID 192.168.10.20:8443 192.168.10.20
+payload agent-hosts PAYLOAD_ID
+payload deploy-script-agent HOST_ID powershell
+payload unhost-agent HOST_ID
+```
+
+`RELAY_BIND` must match an active relay listener on the chosen parent. Choose an interface and port reachable by the child when starting that relay. `PUBLIC_HOST` is the IP address or DNS hostname the child uses for the download URL, without a port. Undertow adds the relay listener's port. A loopback relay bind is appropriate only for a child running on the parent host. The payload profile's `server` is the child's **Undertow relay carrier** destination. Its host and port may match the download URL, but the URL has an opaque HTTPS path.
+
+The returned host ID identifies one active download URL. It works only while that relay listener and parent session are active. `payload agent-hosts` lists active download URLs. `payload unhost-agent` invalidates one URL while leaving the relay listener and child sessions intact. Artifact revocation or deletion invalidates its relay download URLs. A server restart stops active relays and their downloads; start them again explicitly. The server audit log records operator actions, while the active download list reflects current state. The generated PowerShell helper pins the temporary agent HTTPS certificate and checks the artifact SHA-256; the POSIX helper pins its public key and checks SHA-256. Review the URL and target host before executing a helper on an endpoint.
+
+In the GUI, open **Payloads → Artifacts**, select the build, then use **Host through an agent**. Choose the connected parent, one of its active relay listeners, and a child-reachable host. The page lists current URLs and offers preview, download, and explicit disable controls. **Relays → Create child payload** preselects the parent and relay address for this workflow, but does not enable downloads automatically.
+
 ## Download for your own delivery
 
 If you will wrap the binary or distribute it through another channel, save it to the **console host** before or after hosting:

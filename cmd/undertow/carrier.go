@@ -36,13 +36,13 @@ func addCarrierFlags(f *flag.FlagSet, defaultKind ...string) carrierFlags {
 }
 
 func (f carrierFlags) validate() error {
-	if *f.kind != "dns" && *f.kind != "websocket" && *f.kind != "quic" && *f.kind != "relay" {
-		return errors.New("--transport must be dns, websocket, quic, or relay")
+	if *f.kind != "dns" && *f.kind != "websocket" && *f.kind != "quic" && *f.kind != "relay" && *f.kind != "relay-smb" {
+		return errors.New("--transport must be dns, websocket, quic, relay, or relay-smb")
 	}
 	if *f.kind == "dns" && (*f.cert != "" || *f.key != "" || *f.serverName != "" || *f.skipTLSVerify || *f.selfSigned) {
 		return errors.New("TLS flags require --transport websocket or quic")
 	}
-	if *f.kind == "relay" && (*f.cert != "" || *f.key != "" || *f.serverName != "" || *f.skipTLSVerify || *f.selfSigned) {
+	if (*f.kind == "relay" || *f.kind == "relay-smb") && (*f.cert != "" || *f.key != "" || *f.serverName != "" || *f.skipTLSVerify || *f.selfSigned) {
 		return errors.New("TLS flags do not apply to the end-to-end authenticated relay carrier")
 	}
 	if *f.selfSigned && (*f.cert != "" || *f.key != "") {
@@ -92,6 +92,9 @@ func (f carrierFlags) dial(ctx context.Context, server, domain, fingerprint stri
 	if *f.kind == "relay" {
 		return relay.Dial(ctx, server, fingerprint, token, key)
 	}
+	if *f.kind == "relay-smb" {
+		return relay.DialPipe(ctx, server, fingerprint, token, key)
+	}
 	if *f.kind == "quic" {
 		return quic.Dial(ctx, f.quicOptions(server), fingerprint, token, key)
 	}
@@ -115,7 +118,7 @@ func (f carrierFlags) fingerprint(ctx context.Context, server, domain, explicit,
 	if *f.kind == "dns" {
 		return resolveServerFingerprint(ctx, server, domain, explicit, path, trustFirstUse)
 	}
-	if *f.kind == "relay" {
+	if *f.kind == "relay" || *f.kind == "relay-smb" {
 		return resolveFingerprint(ctx, explicit, path, trustFirstUse, func(context.Context) (string, error) {
 			return "", errors.New("relay requires a pinned server fingerprint; use --fingerprint or --fingerprint-file")
 		})

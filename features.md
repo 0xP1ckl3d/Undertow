@@ -94,6 +94,8 @@ The server release includes thin-agent templates. A profile captures carrier and
 
 For agents that connect through a relay or private address, `payload retrieval-host set PUBLIC_SERVER_HOST` sets the HTTPS download host independently of the embedded agent connection address. The setting persists on the server and applies to hosted URL display and deploy scripts; see [public download host](docs/agent-distribution.md#public-https-download-host).
 
+An operator can enable an opaque HTTPS artifact URL on an existing TCP relay listener with `payload host-agent`. The parent agent fetches each artifact over its current Undertow session; the server retains the binary. Stopping that URL leaves the child relay running. See [agent-hosted distribution](docs/agent-distribution.md#host-a-payload-through-a-connected-agent).
+
 ## Routing and network traffic
 
 ### Full IPv4 VPN mode
@@ -244,6 +246,8 @@ VPN client console: forward del 0.0.0.0:8080
 ### Explicit multi-hop agent relays
 
 An operator can select an agent and type `relay start INTERNAL_IP:PORT`. That agent then accepts child-agent TCP connections on the requested interface only and carries them over its own Undertow session to the original server. A child uses `agent --transport relay --server INTERNAL_IP:PORT` with the original server fingerprint and token and its own private key. It appears independently in `agents`, `show`, `topology`, routes, shell/exec, files, scripts, WASM, jobs and forwards. Children can host their own explicitly requested relays to a maximum of eight links. Parent loss closes descendants and deactivates their routes. `relay list` and `relay stop [BIND]` manage the selected agent's listener; `--deny=relay` refuses one. A client on QUIC can therefore reach a child behind a DNS-connected parent without changing the parent or client carrier. See [topology and relays](docs/topology-and-relays.md).
+
+On Windows, `relay start \\.\pipe\NAME` opens a named-pipe alternative. A Windows child uses `--transport relay-smb --server \\PARENT_HOST\pipe\NAME`; the server records its carrier as `relay-smb`. The pipe requires Windows/SMB access, while Undertow still performs its normal end-to-end identity and enrollment handshake. See [SMB named-pipe relays](docs/smb-named-pipe-relays.md).
 
 ## Agent operations
 

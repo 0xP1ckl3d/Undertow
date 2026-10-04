@@ -41,6 +41,8 @@ The server presents each child as a separate agent. Use `topology` or `agents` t
 
 An agent can itself host a relay after it joins through another relay. Depth is limited to eight relay links, and an agent cannot relay to itself or create a parent loop. The server rejects an invalid or excessive chain. A parent disconnect closes its descendant sessions and deactivates their routes; children reconnect through the parent when it returns. Relay listeners are session scoped and must be started again after the parent reconnects.
 
+On Windows, a parent can instead listen on an SMB named pipe. The child uses `--transport relay-smb` with a UNC pipe path; the same end-to-end Undertow session and separate child identity apply. **Relays** in the GUI can start either TCP or SMB named-pipe listeners. The named pipe is not an HTTPS download URL; use [Payload deployment](agent-distribution.md) for artifact delivery choices. Follow the [Windows SMB named-pipe relay guide](smb-named-pipe-relays.md) for exact paths, Windows access requirements, profile build, and stop procedure.
+
 `--deny=relay` on an agent rejects relay listener requests while leaving its other capabilities available. `relay` is independent of `listeners`, which controls agent-side TCP forwards for client services. No relay port is opened just because the capability is allowed. The relay listener and child session do not change host adapters or routes.
 
 ## Mixed carrier path

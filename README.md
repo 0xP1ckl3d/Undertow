@@ -33,6 +33,7 @@ The client also serves an optional local [browser operator workspace](docs/gui.m
 | Run specialized tools | Stream scripts, run WASM modules, or run Windows native modules and BOFs through the agent | [Module bank](docs/module-bank.md) |
 | Deploy an unattended agent | Build a Windows or Linux payload, host it over HTTPS, generate a verification script, or download it for your own delivery flow. Each running copy gets its own identity. | [Payload deployment](docs/agent-distribution.md) |
 | Reach a network beyond the first agent | Start an explicit relay and connect another independent agent through it | [Topology and relays](docs/topology-and-relays.md) |
+| Connect Windows child agents over an SMB named pipe | Start an explicit pipe on a Windows parent and build a `relay-smb` child | [SMB named-pipe relays](docs/smb-named-pipe-relays.md) |
 
 ## How the pieces fit
 

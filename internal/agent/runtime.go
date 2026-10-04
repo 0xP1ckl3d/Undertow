@@ -16,6 +16,7 @@ import (
 
 	"undertow/internal/control"
 	"undertow/internal/mux"
+	"undertow/internal/namedpipe"
 	"undertow/internal/pivot"
 	"undertow/internal/security"
 	"undertow/internal/transport"
@@ -52,20 +53,27 @@ func (c Config) Validate() error {
 	if c.Version != ConfigVersion {
 		return fmt.Errorf("unsupported configuration version %d", c.Version)
 	}
-	host, port, err := net.SplitHostPort(c.Server)
-	if err != nil {
-		return fmt.Errorf("invalid agent server: %w", err)
-	}
-	number, err := strconv.Atoi(port)
-	if host == "" || host == "0.0.0.0" || host == "::" || err != nil || number < 1 || number > 65535 {
-		return errors.New("agent server must be a reachable HOST:PORT")
+	if c.Transport == "relay-smb" {
+		if err := namedpipe.ValidateRemote(c.Server); err != nil {
+			return err
+		}
+	} else {
+		host, port, err := net.SplitHostPort(c.Server)
+		if err != nil {
+			return fmt.Errorf("invalid agent server: %w", err)
+		}
+		number, err := strconv.Atoi(port)
+		if host == "" || host == "0.0.0.0" || host == "::" || err != nil || number < 1 || number > 65535 {
+			return errors.New("agent server must be a reachable HOST:PORT")
+		}
 	}
 	switch c.Transport {
-	case "dns", "websocket", "quic", "relay":
+	case "dns", "websocket", "quic", "relay", "relay-smb":
 	default:
 		return fmt.Errorf("unsupported agent transport %q", c.Transport)
 	}
 	if c.Transport == "dns" {
+		host, _, _ := net.SplitHostPort(c.Server)
 		ip := net.ParseIP(host)
 		if ip == nil || ip.To4() == nil {
 			return errors.New("DNS agent server must be numeric IPv4")
@@ -120,6 +128,8 @@ func (c Config) Dial(ctx context.Context, key ed25519.PrivateKey) (transport.Con
 		return quic.Dial(ctx, quic.DialOptions{Address: c.Server, TLSServerName: c.TLSServerName, TLSInsecureSkipVerify: c.TLSInsecureSkipVerify}, c.Fingerprint, c.Credential, key)
 	case "relay":
 		return relay.Dial(ctx, c.Server, c.Fingerprint, c.Credential, key)
+	case "relay-smb":
+		return relay.DialPipe(ctx, c.Server, c.Fingerprint, c.Credential, key)
 	default:
 		domain := c.Domain
 		if domain == "" {

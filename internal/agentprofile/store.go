@@ -377,6 +377,9 @@ func (s *Store) Build(name, platform, arch string, requestedFilename ...string) 
 	if !ok {
 		return Artifact{}, os.ErrNotExist
 	}
+	if p.Config.Transport == "relay-smb" && platform != "windows" {
+		return Artifact{}, errors.New("SMB named-pipe relay payloads require a Windows target")
+	}
 	template, err := templateName(platform, arch)
 	if err != nil {
 		return Artifact{}, err

@@ -15,6 +15,7 @@ New to Undertow? Follow [Getting started](getting-started.md) first. It takes yo
 | Run an included module or load one in a session | [Module bank](module-bank.md) |
 | Build and deploy a new module | [WASM](wasm-development.md), [native Windows](native-modules.md), or [BOF](bof-compatibility.md) development |
 | Connect child agents through a parent | [Topology and relays](topology-and-relays.md) |
+| Connect a Windows child through an SMB named pipe | [Windows SMB named-pipe relays](smb-named-pipe-relays.md) |
 | Use startup flags, terminal commands, or scripts | [CLI reference](cli-reference.md) |
 
 The [feature catalogue](../features.md) covers every operator capability in one place. For implementation and measurement, see the [protocol](protocol.md) and [benchmark guide](benchmarks.md).

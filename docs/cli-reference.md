@@ -41,6 +41,10 @@ The **server** defaults to all three listeners: QUIC UDP/443, WebSocket TCP/443 
 | `dns` | UDP/53 | Direct UDP DNS is the available outbound path, including some restrictive or captive portal networks. |
 | `websocket` | HTTPS WebSocket on TCP/443 | Ordinary enterprise HTTPS egress or an HTTP CONNECT proxy is available. The client reads standard proxy environment variables. |
 | `quic` | QUIC on UDP/443 | UDP/443 is allowed and lower transport overhead is desired. |
+| `relay` | Explicit TCP listener on a parent agent | A child reaches a parent over an internal TCP path. |
+| `relay-smb` | Explicit Windows named pipe on a parent agent | A Windows child reaches the parent pipe locally or through SMB. |
+
+TCP and SMB relay listeners start from an operator console or **Relays** in the GUI, never from the server's carrier listener flags. A Windows SMB child uses `--transport relay-smb --server '\\PARENT_HOST\pipe\NAME'` plus the original server fingerprint and enrollment credential. See [Windows SMB named-pipe relays](smb-named-pipe-relays.md) for setup and verification.
 
 WebSocket and QUIC server listeners use ephemeral self-signed TLS by default. Supply `--tls-cert PATH --tls-key PATH` to use certificate files; `--tls-self-signed` remains an explicit spelling. Agents and clients verify TLS certificates by default. Use `--tls-server-name NAME` when connecting to a numeric IP whose certificate has a DNS name; for a private or self-signed certificate, `--tls-insecure-skip-verify` permits the TLS connection while the separate Undertow `--fingerprint` pin still verifies the server identity. Obtain that fingerprint from a trusted server operator; do not use first-use discovery on an untrusted network. A WebSocket VPN client keeps its carrier peer outside the VPN routes. When its HTTP CONNECT proxy runs on the same client machine, use a numeric IPv4 `--server` address so Undertow can also preserve the proxy's upstream route. `--websocket-path` defaults to `/undertow` and must match at both endpoints. DNS `--domain` and `--payload-profile` do not apply to WebSocket or QUIC.
 
@@ -56,7 +60,7 @@ sudo undertow server --transport quic --tls-cert server.crt --tls-key server.key
 undertow agent --transport quic --server vpn.example.com:443 --fingerprint FINGERPRINT --token-file token.key
 ```
 
-Agents and VPN clients must provide `--server HOST:PORT`; DNS requires a numeric IPv4 address, while WebSocket and QUIC also accept hostnames. They pin the server through `--fingerprint HEX`, a previously saved `--fingerprint-file PATH` (default `server.fingerprint`), or an explicit `--trust-on-first-use` first connection. The explicit fingerprint takes precedence. A fingerprint is saved only after a successful session. Trust on first use cannot authenticate an intercepted first contact. See [getting started](getting-started.md) for enrollment examples.
+Agents and VPN clients must provide a `--server` address. DNS, WebSocket, QUIC, and TCP relay use `HOST:PORT`; DNS needs numeric IPv4, while WebSocket and QUIC also accept hostnames. A Windows `relay-smb` agent instead uses `\\PARENT_HOST\pipe\NAME` or `\\.\pipe\NAME` on the parent host itself. Peers pin the original server through `--fingerprint HEX`, a previously saved `--fingerprint-file PATH` (default `server.fingerprint`), or an explicit `--trust-on-first-use` first connection. The explicit fingerprint takes precedence. A fingerprint is saved only after a successful session. Trust on first use cannot authenticate an intercepted first contact. See [getting started](getting-started.md) for enrollment examples.
 
 ## `init`
 
@@ -102,11 +106,11 @@ In a terminal, `server` starts a separate worker and opens its operator console.
 
 ## `agent`
 
-`undertow agent --server HOST:PORT [--fingerprint HEX | --trust-on-first-use] [FLAGS]`
+`undertow agent --server HOST:PORT|PIPE_PATH [--fingerprint HEX | --trust-on-first-use] [FLAGS]`
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `--server HOST:PORT` | Required | Server host and carrier port; DNS needs numeric IPv4. |
+| `--server ADDRESS` | Required | Host and port for network carriers; Windows `relay-smb` uses a named-pipe path. |
 | `--transport dns\|websocket\|quic\|relay` | `dns` | Choose one active server listener, or an explicitly enabled parent-agent relay. |
 | `--websocket-path PATH` | `/undertow` | Match the server WebSocket path. |
 | `--tls-server-name NAME` | Server IP | Name checked against the TLS certificate. |

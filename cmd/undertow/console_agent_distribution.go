@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -158,21 +160,40 @@ func parseProfileOptions(args []string) (profileRequest, error) {
 
 func printDeployScript(out io.Writer, hosted hostedArtifactInfo, shell string) error {
 	a := hosted.Artifact
+	if hosted.TLSCertSHA256 != "" {
+		if decoded, err := hex.DecodeString(hosted.TLSCertSHA256); err != nil || len(decoded) != sha256.Size {
+			return errors.New("invalid payload host TLS certificate pin")
+		}
+	}
+	if hosted.TLSPublicKeyPin != "" {
+		if decoded, err := base64.StdEncoding.DecodeString(hosted.TLSPublicKeyPin); err != nil || len(decoded) != sha256.Size {
+			return errors.New("invalid payload host TLS public key pin")
+		}
+	}
 	switch shell {
 	case "powershell":
 		fmt.Fprintf(out, "param([string]$Destination = '%s')\n$ErrorActionPreference = 'Stop'\n$url = '%s'\n$expected = '%s'\n$Destination = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Destination)\n$temp = $Destination + '.download'\ntry {\n", psQuote(a.Filename), psQuote(hosted.Retrieval), a.SHA256)
 		if hosted.TLSSelfSigned {
+			fmt.Fprintf(out, "  $certPin = '%s'\n", hosted.TLSCertSHA256)
 			fmt.Fprint(out, `  Add-Type -AssemblyName System.Net.Http
   if (-not ('ScopedArtifactTls' -as [type])) {
     $source = @'
+using System;
 using System.Net.Http;
 using System.Net.Security;
 using System.Security.Cryptography.X509Certificates;
 public static class ScopedArtifactTls {
-    public static HttpClientHandler CreateHandler() {
+    public static HttpClientHandler CreateHandler(string pin) {
         var handler = new HttpClientHandler();
         handler.ServerCertificateCustomValidationCallback =
-            (HttpRequestMessage request, X509Certificate2 certificate, X509Chain chain, SslPolicyErrors errors) => true;
+            (HttpRequestMessage request, X509Certificate2 certificate, X509Chain chain, SslPolicyErrors errors) => {
+                if (string.IsNullOrEmpty(pin)) return true;
+                if (certificate == null) return false;
+                using (var sha = System.Security.Cryptography.SHA256.Create()) {
+                    var actual = BitConverter.ToString(sha.ComputeHash(certificate.RawData)).Replace("-", "");
+                    return string.Equals(actual, pin, StringComparison.OrdinalIgnoreCase);
+                }
+            };
         return handler;
     }
 }
@@ -183,7 +204,7 @@ public static class ScopedArtifactTls {
       Add-Type -TypeDefinition $source
     }
   }
-  $handler = [ScopedArtifactTls]::CreateHandler()
+  $handler = [ScopedArtifactTls]::CreateHandler($certPin)
   $client = [System.Net.Http.HttpClient]::new($handler)
   try {
     $response = $client.GetAsync($url).GetAwaiter().GetResult()
@@ -205,6 +226,9 @@ public static class ScopedArtifactTls {
 		curlFlags := "-fL"
 		if hosted.TLSSelfSigned {
 			curlFlags += " -k"
+		}
+		if hosted.TLSPublicKeyPin != "" {
+			curlFlags += " --pinnedpubkey 'sha256//" + hosted.TLSPublicKeyPin + "'"
 		}
 		fmt.Fprintf(out, "#!/bin/sh\nset -eu\ndest=${1:-./%s}\ntemp=\"${dest}.download\"\ntrap 'rm -f \"$temp\"' EXIT\ncurl %s '%s' -o \"$temp\"\nactual=$(sha256sum \"$temp\" | cut -d ' ' -f 1)\n[ \"$actual\" = '%s' ] || { echo 'Artifact SHA-256 mismatch' >&2; exit 1; }\nmv -f \"$temp\" \"$dest\"\nchmod 700 \"$dest\"\nnohup \"$dest\" </dev/null >/dev/null 2>&1 &\n", a.Filename, curlFlags, shQuote(hosted.Retrieval), a.SHA256)
 	default:

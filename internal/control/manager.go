@@ -174,30 +174,31 @@ type agentState struct {
 	txRate         float64
 }
 type Manager struct {
-	mu                sync.RWMutex
-	operations        *OperationsStore
-	offlineAgents     map[string]AgentInfo
-	eventBus          *EventBroker
-	workerLogs        *WorkerLogBuffer
-	lifecycleEvents   []LifecycleEvent
-	artifactLookup    func(string) (string, string, bool)
-	agentDistribution http.Handler
-	server            ServerInfo
-	transports        TransportController
-	relayAccept       func(context.Context, string, *mux.Stream)
-	relays            map[string]map[string]*mux.Stream
-	agents            map[string]*agentState
-	clients           map[uint64]*clientState
-	forwards          map[string]*forwardState
-	jobs              map[string]*jobState
-	jobOutput         *jobOutputStore
-	routes            *routing.Table
-	device            RouteDevice
-	selected          string
-	virtualNetwork    netip.Prefix
-	proxyIP           netip.Addr
-	virtualByAgent    map[string]netip.Addr
-	virtualUsed       map[netip.Addr]bool
+	mu                 sync.RWMutex
+	operations         *OperationsStore
+	offlineAgents      map[string]AgentInfo
+	eventBus           *EventBroker
+	workerLogs         *WorkerLogBuffer
+	lifecycleEvents    []LifecycleEvent
+	artifactLookup     func(string) (string, string, bool)
+	agentDistribution  http.Handler
+	server             ServerInfo
+	transports         TransportController
+	relayAccept        func(context.Context, string, string, *mux.Stream)
+	relayPayloadAccept func(context.Context, string, *mux.Stream)
+	relays             map[string]map[string]*relayState
+	agents             map[string]*agentState
+	clients            map[uint64]*clientState
+	forwards           map[string]*forwardState
+	jobs               map[string]*jobState
+	jobOutput          *jobOutputStore
+	routes             *routing.Table
+	device             RouteDevice
+	selected           string
+	virtualNetwork     netip.Prefix
+	proxyIP            netip.Addr
+	virtualByAgent     map[string]netip.Addr
+	virtualUsed        map[netip.Addr]bool
 }
 
 func (m *Manager) SetOperationsStore(store *OperationsStore) error {
@@ -307,14 +308,20 @@ func (m *Manager) SetTransportController(controller TransportController) {
 	m.mu.Unlock()
 }
 
-func (m *Manager) SetRelayAcceptor(accept func(context.Context, string, *mux.Stream)) {
+func (m *Manager) SetRelayAcceptor(accept func(context.Context, string, string, *mux.Stream)) {
 	m.mu.Lock()
 	m.relayAccept = accept
 	m.mu.Unlock()
 }
 
+func (m *Manager) SetRelayPayloadAcceptor(accept func(context.Context, string, *mux.Stream)) {
+	m.mu.Lock()
+	m.relayPayloadAccept = accept
+	m.mu.Unlock()
+}
+
 func NewManager(routes *routing.Table, device RouteDevice, virtualNetwork netip.Prefix, proxyIP netip.Addr) *Manager {
-	return &Manager{eventBus: NewEventBroker(), agents: make(map[string]*agentState), offlineAgents: make(map[string]AgentInfo), clients: make(map[uint64]*clientState), forwards: make(map[string]*forwardState), jobs: make(map[string]*jobState), relays: make(map[string]map[string]*mux.Stream), routes: routes, device: device, virtualNetwork: virtualNetwork.Masked(), proxyIP: proxyIP, virtualByAgent: make(map[string]netip.Addr), virtualUsed: make(map[netip.Addr]bool)}
+	return &Manager{eventBus: NewEventBroker(), agents: make(map[string]*agentState), offlineAgents: make(map[string]AgentInfo), clients: make(map[uint64]*clientState), forwards: make(map[string]*forwardState), jobs: make(map[string]*jobState), relays: make(map[string]map[string]*relayState), routes: routes, device: device, virtualNetwork: virtualNetwork.Masked(), proxyIP: proxyIP, virtualByAgent: make(map[string]netip.Addr), virtualUsed: make(map[netip.Addr]bool)}
 }
 
 func (m *Manager) RegisterClient(peer transport.Peer, streamMux *mux.Mux, internal bool, hostname string, vpn ...bool) {
@@ -836,8 +843,8 @@ func (m *Manager) Unregister(id string, streamMux *mux.Mux) {
 			}{childID, state.mux})
 		}
 	}
-	for _, stream := range m.relays[id] {
-		closed = append(closed, stream)
+	for _, relay := range m.relays[id] {
+		closed = append(closed, relay.stream)
 	}
 	delete(m.relays, id)
 	for forwardID, forward := range m.forwards {
@@ -1252,6 +1259,18 @@ func (m *Manager) handler(token string) http.Handler {
 		}
 		handler.ServeHTTP(w, r)
 	}))
+	for _, path := range []string{"/v1/agent-hosts", "/v1/agent-hosts/"} {
+		muxer.Handle(path, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			m.mu.RLock()
+			handler := m.agentDistribution
+			m.mu.RUnlock()
+			if handler == nil {
+				http.Error(w, "agent distribution unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			handler.ServeHTTP(w, r)
+		}))
+	}
 	muxer.Handle("/v1/payload-retrieval-path", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		m.mu.RLock()
 		handler := m.agentDistribution

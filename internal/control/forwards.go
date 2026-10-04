@@ -169,13 +169,35 @@ func (m *Manager) serveAgentForwards(agentID string, agentMux *mux.Mux) {
 		if err != nil {
 			return
 		}
-		if stream.Destination() == pivot.RelayInboundDestination {
+		if stream.Destination() == pivot.RelayInboundDestination || stream.Destination() == pivot.RelayPipeInboundDestination {
+			carrier := "relay"
+			if stream.Destination() == pivot.RelayPipeInboundDestination {
+				carrier = "relay-smb"
+			}
 			m.mu.RLock()
 			accept := m.relayAccept
 			active := len(m.relays[agentID]) > 0
 			m.mu.RUnlock()
 			if accept == nil || !active {
 				stream.Fail(errors.New("relay listener is not active"))
+				continue
+			}
+			go func() {
+				if err := stream.AcceptOpen(context.Background()); err != nil {
+					_ = stream.Close()
+					return
+				}
+				accept(context.Background(), agentID, carrier, stream)
+			}()
+			continue
+		}
+		if stream.Destination() == pivot.RelayPayloadDestination {
+			m.mu.RLock()
+			accept := m.relayPayloadAccept
+			active := len(m.relays[agentID]) > 0
+			m.mu.RUnlock()
+			if accept == nil || !active {
+				stream.Fail(errors.New("relay payload retrieval is unavailable"))
 				continue
 			}
 			go func() {

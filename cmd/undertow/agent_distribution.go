@@ -28,6 +28,8 @@ type agentDistribution struct {
 	credential    []byte
 	pathMu        sync.RWMutex
 	retrievalPath string
+	hostsMu       sync.RWMutex
+	agentHosts    map[string]*agentPayloadHost
 }
 
 var retrievalPathPattern = regexp.MustCompile(`^/(?:[A-Za-z0-9_-]+/)*$`)
@@ -409,6 +411,31 @@ func (d *agentDistribution) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		distributionJSON(w, http.StatusCreated, d.artifactInfo(a))
+	case path == "/v1/agent-hosts" && r.Method == http.MethodGet:
+		distributionJSON(w, http.StatusOK, d.agentHostList(""))
+	case strings.HasPrefix(path, "/v1/agent-hosts/"):
+		id := strings.TrimPrefix(path, "/v1/agent-hosts/")
+		if id == "" || strings.Contains(id, "/") || r.URL.RawQuery != "" {
+			http.NotFound(w, r)
+			return
+		}
+		switch r.Method {
+		case http.MethodGet:
+			info, ok := d.agentHost(id)
+			if !ok {
+				http.NotFound(w, r)
+				return
+			}
+			distributionJSON(w, http.StatusOK, info)
+		case http.MethodDelete:
+			if !d.stopAgentPayloadHost(id) {
+				http.NotFound(w, r)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
 	case strings.HasPrefix(path, "/v1/agent-artifacts/"):
 		parts := strings.Split(strings.TrimPrefix(path, "/v1/agent-artifacts/"), "/")
 		id := parts[0]
@@ -422,10 +449,16 @@ func (d *agentDistribution) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if len(parts) == 1 {
 			if r.Method == http.MethodDelete {
-				if err := d.store.DeleteArtifact(id); err != nil {
+				a, err := d.store.Artifact(id)
+				if err != nil {
 					distributionError(w, err)
 					return
 				}
+				if err := d.store.DeleteArtifact(a.ID); err != nil {
+					distributionError(w, err)
+					return
+				}
+				d.stopArtifactHosts(a.ID)
 				w.WriteHeader(http.StatusNoContent)
 				return
 			}
@@ -438,6 +471,36 @@ func (d *agentDistribution) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				distributionJSON(w, http.StatusOK, d.artifactInfo(a))
 				return
 			}
+		}
+		if len(parts) == 2 && parts[1] == "agent-hosts" {
+			switch r.Method {
+			case http.MethodGet:
+				a, err := d.store.Artifact(id)
+				if err != nil {
+					distributionError(w, err)
+					return
+				}
+				distributionJSON(w, http.StatusOK, d.agentHostList(a.ID))
+			case http.MethodPost:
+				var req struct {
+					AgentID    string `json:"agent_id"`
+					Bind       string `json:"bind"`
+					PublicHost string `json:"public_host"`
+				}
+				if err := decodeDistributionRequest(r, &req); err != nil {
+					distributionError(w, err)
+					return
+				}
+				info, err := d.startAgentPayloadHost(r.Context(), id, req.AgentID, req.Bind, req.PublicHost)
+				if err != nil {
+					distributionError(w, err)
+					return
+				}
+				distributionJSON(w, http.StatusCreated, info)
+			default:
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			}
+			return
 		}
 		if len(parts) == 2 && parts[1] == "host" {
 			if r.Method == http.MethodGet {
@@ -499,6 +562,7 @@ func (d *agentDistribution) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				distributionError(w, err)
 				return
 			}
+			d.stopArtifactHosts(a.ID)
 			distributionJSON(w, http.StatusOK, d.artifactInfo(a))
 			return
 		}
@@ -510,10 +574,12 @@ func (d *agentDistribution) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 type hostedArtifactInfo struct {
 	agentprofile.Artifact
-	ServerPath    string `json:"server_path"`
-	Retrieval     string `json:"retrieval"`
-	RetrievalPath string `json:"retrieval_path"`
-	TLSSelfSigned bool   `json:"tls_self_signed,omitempty"`
+	ServerPath      string `json:"server_path"`
+	Retrieval       string `json:"retrieval"`
+	RetrievalPath   string `json:"retrieval_path"`
+	TLSSelfSigned   bool   `json:"tls_self_signed,omitempty"`
+	TLSCertSHA256   string `json:"tls_cert_sha256,omitempty"`
+	TLSPublicKeyPin string `json:"tls_public_key_pin,omitempty"`
 }
 
 func (d *agentDistribution) hostedInfo(a agentprofile.Artifact) (hostedArtifactInfo, error) {

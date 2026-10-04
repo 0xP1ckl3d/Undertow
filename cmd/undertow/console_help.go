@@ -133,6 +133,10 @@ when applications on the server host itself should use these routes.
 Omitting BIND uses 127.0.0.1:8443. Use an agent-reachable address such as
 10.20.1.15:8443 for a child on another host. The child connects with
 agent --transport relay --server ADDRESS --fingerprint FINGERPRINT.
+On a Windows parent, use relay start \\.\pipe\NAME. A Windows child uses
+--transport relay-smb --server \\PARENT_HOST\pipe\NAME. A child on the same
+host may use \\.\pipe\NAME. SMB carries the pipe; Undertow still authenticates
+the child end to end. See docs/smb-named-pipe-relays.md.
 The parent must allow the relay capability; --deny=relay blocks it.
 `)
 	case "transport", "transports", "start", "stop":

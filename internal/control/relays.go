@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"sync"
 	"time"
 
 	"undertow/internal/mux"
@@ -15,6 +16,11 @@ import (
 type RelayInfo struct {
 	AgentID string `json:"agent_id"`
 	Bind    string `json:"bind"`
+}
+
+type relayState struct {
+	stream   *mux.Stream
+	commands sync.Mutex
 }
 
 func relayAllowed(agent *agentState) bool {
@@ -61,8 +67,10 @@ func (m *Manager) StartRelay(ctx context.Context, agentID, bind string) (RelayIn
 	waitDone := make(chan struct{})
 	go func() {
 		select {
-		case <-ctx.Done(): _ = stream.Close()
-		case <-time.After(15 * time.Second): _ = stream.Close()
+		case <-ctx.Done():
+			_ = stream.Close()
+		case <-time.After(15 * time.Second):
+			_ = stream.Close()
 		case <-waitDone:
 		}
 	}()
@@ -88,14 +96,15 @@ func (m *Manager) StartRelay(ctx context.Context, agentID, bind string) (RelayIn
 		return RelayInfo{}, errors.New("agent disconnected while starting relay")
 	}
 	if m.relays[agentID] == nil {
-		m.relays[agentID] = make(map[string]*mux.Stream)
+		m.relays[agentID] = make(map[string]*relayState)
 	}
-	m.relays[agentID][result.Bind] = stream
+	state := &relayState{stream: stream}
+	m.relays[agentID][result.Bind] = state
 	m.mu.Unlock()
 	go func() {
 		<-stream.Done()
 		m.mu.Lock()
-		if m.relays[agentID][result.Bind] == stream {
+		if m.relays[agentID][result.Bind] == state {
 			delete(m.relays[agentID], result.Bind)
 		}
 		m.mu.Unlock()
@@ -139,13 +148,53 @@ func (m *Manager) StopRelay(agentID, bind string) error {
 			bind = value
 		}
 	}
-	stream := listeners[bind]
-	if stream != nil {
+	state := listeners[bind]
+	if state != nil {
 		delete(listeners, bind)
 	}
 	m.mu.Unlock()
-	if stream == nil {
+	if state == nil {
 		return fmt.Errorf("relay %s is not listening on %s", agentID, bind)
 	}
-	return stream.Close()
+	return state.stream.Close()
+}
+
+// SetRelayPayload adds or removes an opaque artifact token on an already
+// running relay listener. Commands and results share its authenticated control
+// stream; no second listener is created.
+func (m *Manager) SetRelayPayload(ctx context.Context, agentID, bind, token string, enabled bool) (pivot.RelayPayloadResult, <-chan struct{}, error) {
+	m.mu.RLock()
+	state := m.relays[agentID][bind]
+	m.mu.RUnlock()
+	if state == nil {
+		return pivot.RelayPayloadResult{}, nil, errors.New("start the selected agent relay listener first")
+	}
+	state.commands.Lock()
+	defer state.commands.Unlock()
+	operation := "remove"
+	if enabled {
+		operation = "add"
+	}
+	deadline, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-deadline.Done():
+			_ = state.stream.Close()
+		case <-done:
+		}
+	}()
+	defer close(done)
+	if err := json.NewEncoder(state.stream).Encode(pivot.RelayPayloadCommand{Operation: operation, Token: token}); err != nil {
+		return pivot.RelayPayloadResult{}, nil, err
+	}
+	var result pivot.RelayPayloadResult
+	if err := json.NewDecoder(state.stream).Decode(&result); err != nil {
+		return pivot.RelayPayloadResult{}, nil, err
+	}
+	if result.Error != "" {
+		return pivot.RelayPayloadResult{}, nil, errors.New(result.Error)
+	}
+	return result, state.stream.Done(), nil
 }

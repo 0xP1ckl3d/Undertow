@@ -1,0 +1,17 @@
+.agent-payload-hosting{margin-top:24px;padding:20px;border:1px solid #53644f;background:#131b15}
+.agent-payload-hosting h3{display:flex;align-items:center;gap:9px;margin:0;color:#e7c891;font-size:13px}
+.agent-payload-hosting>p{color:#9fac9c;font-size:10px;line-height:1.6}
+.agent-payload-hosting>.primary{margin-top:12px;border:1px solid #c49a47;background:#b2832b;color:#10140e;padding:9px 12px;font-size:10px;font-weight:700;cursor:pointer}
+.agent-payload-hosting>.primary:disabled{opacity:.45;cursor:not-allowed}
+.agent-host-list{margin-top:21px;border-top:1px solid #334237;padding-top:16px}
+.agent-host-list>strong{font-size:11px;color:#e6e9df}
+.agent-host-list>p{font-size:10px;color:#91a08e}
+.agent-host-card{margin-top:12px;padding:15px;border:1px solid #425443;background:#19231b}
+.agent-host-card>div:first-child{display:flex;justify-content:space-between;gap:10px}
+.agent-host-card b{font-size:11px;color:#e2e8df}
+.agent-host-card span{font-size:9px;color:#9dad9e}
+.agent-host-card>label{display:flex;flex-direction:column;gap:5px;margin-top:12px;color:#a7b4a4;font-size:9px}
+.agent-host-card>label input{width:100%;min-width:0}
+.agent-host-card .payload-actions{margin-top:11px;flex-wrap:wrap}
+.agent-host-card pre{overflow:auto;max-height:320px;border:1px solid #3c4c40;background:#0c120e;padding:12px;color:#dce8da;font-size:10px}
+.agent-host-card .danger{border-color:#824b44;color:#efaba1;background:#2d1b19}

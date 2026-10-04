@@ -402,15 +402,17 @@ func serve(args []string) error {
 	transportManager.SetEnrollmentVerifier(verifyEnrollment)
 	transportManager.SetArtifactHandler(http.HandlerFunc(distribution.Retrieve))
 	manager.SetTransportController(transportManager)
-	manager.SetRelayAcceptor(func(_ context.Context, parentID string, stream *mux.Stream) {
+	manager.SetRelayAcceptor(func(_ context.Context, parentID, carrier string, stream *mux.Stream) {
 		peer, err := relay.AcceptWithVerifier(ctx, stream, parentID, identity, token, verifyEnrollment)
 		if err != nil {
 			log.Printf("relay via %s rejected: %v", parentID, err)
 			_ = stream.Close()
 			return
 		}
+		peer.Carrier = carrier
 		handleServerPeer(ctx, manager, controlToken, *probeEcho, peer)
 	})
+	manager.SetRelayPayloadAcceptor(distribution.serveRelayPayload)
 	defer transportManager.Close()
 	go func() {
 		if err := manager.ServeHTTP(ctx, *controlListen, controlToken); err != nil && ctx.Err() == nil {

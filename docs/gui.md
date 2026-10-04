@@ -17,7 +17,16 @@ The GUI starts by default with the client. Use `--no-gui` for terminal-only oper
 
 An operator-only client does not install VPN or accepted routes. To use client routing, start an elevated VPN client with `--internal`, `--vpn`, or both. Settings shows which mode is active; the Routes view explains when installation is unavailable.
 
-![Topology showing clients, server, agents, carriers, and relay paths](images/gui/topology.png)
+### First review from the browser
+
+1. Start or attach to the client and copy its printed `GUI available:` URL into a browser **on that client host**. If the page says **Disconnected**, check the client console or **Settings → Status** for the current server address, carrier, and session. The browser service can remain open while its Undertow connection reconnects.
+2. Open **Topology**. The central server, operator clients, and connected or retained agents show their actual carrier and relay paths. Double-click a connected agent to open its workspace.
+3. Open the agent's **Overview** first for identity, last contact, parent path, capabilities, and advertised routes. In **Console**, type `help` to see the commands available for that selected agent. Merely opening the workspace or Console sends no agent command.
+4. Use **Files**, **Jobs**, **Screenshots**, **Modules**, or **Host** for the corresponding operation. Each tab gives you an explicit control and shows progress or retained results. A disconnected agent remains readable but cannot receive new commands.
+5. Return to **History** for server audit actions. The client and session IDs are server bound; the operator name in **Settings → Identity** is an unverified claim until server authentication is added.
+
+For terminal equivalents, see [Console guide](console.md). For the server and client startup flags, see [Getting started](getting-started.md) and [CLI reference](cli-reference.md).
+
 
 ## Read the topology
 
@@ -33,7 +42,6 @@ Select an agent from **Agents**. Overview shows the latest platform, carrier, re
 
 The **Console** tab is the attached Undertow **agent command menu**. It is bound to the selected agent and shows only commands the GUI console can run. `help` uses the terminal console's section and row renderer, and loaded BOF, native, and WASM commands appear with their packaged descriptions. The command area does not start an OS shell. The separate **Live shell** tab requires an explicit **Start live shell** click.
 
-![Bound agent console with categorized help and persistent history](images/gui/agent-console.png)
 
 The client stores console commands and streamed output, including foreground runs started in **Modules**, in its restricted local GUI database. Reopen Console after a client restart to see that history. Background module output belongs to the server's retained **Jobs** view. Console history can include sensitive command arguments and output; protect the client host and its GUI database accordingly. The history is bounded to the latest 1,000 entries per agent, and a single entry is capped at 64 KiB.
 
@@ -61,7 +69,6 @@ Open **Files**, click **Browse**, then choose a directory or file. A single clic
 
 ## Manage shared and local settings
 
-![Settings with client routing, carrier, identity, status, and log sections](images/gui/settings.png)
 
 **Settings → Client** controls this client's VPN and internal routing modes when it has a TUN device. **Carriers** lists server listeners and starts or stops DNS, QUIC, and WebSocket listeners. The local client refuses to stop the carrier carrying its own control session, including a force-stop request. Use another connected carrier first. **Status** shows session and server details; **Logs** shows recent server worker logs and a live follow view.
 
@@ -77,7 +84,9 @@ Open **Files**, click **Browse**, then choose a directory or file. A single clic
 
 For a child agent, start a relay on the parent, then click **Create child payload** on that listener. The profile form selects `relay` and pre-fills its bind address as the child's connection destination. Check the address from the child's host: the default loopback bind is reachable only from the parent host. Save the profile, build for the chosen platform, and download the artifact. You can host it on the server's HTTPS payload listener and generate a deploy helper there. Generating or downloading a helper never executes it on an agent.
 
-The relay listener carries Undertow child sessions; it is not an HTTP file server. An agent-hosted payload service would be a separate agent capability and is not represented as active. The GUI therefore never labels server HTTPS hosting as hosting through the parent. See [Topology and relays](topology-and-relays.md) for the relay connection model and [Payload deployment](agent-distribution.md) for download and deploy choices.
+The relay listener carries Undertow child sessions. To distribute a built artifact through that same listener and port, select it under **Payloads → Artifacts → Host through an agent**. Choose the connected parent, one of its active relay listeners, and the parent's child-reachable IP or DNS name. **Enable payload downloads** adds an opaque download URL to that listener. The parent requests the artifact from the server over its existing authenticated Undertow session for each download; it does not hold the binary. Active URLs show pinned deploy helpers and explicit disable controls. Disabling a URL leaves the relay and its child sessions running. Generating a helper does not execute it. Artifact revocation, deletion, parent disconnect, or server restart invalidates its download URL. See [Topology and relays](topology-and-relays.md) for the relay connection model and [Payload deployment](agent-distribution.md) for the full console workflow.
+
+For a Windows parent and child, **Relays** also offers an **SMB named pipe** carrier. Choose a Windows parent and enter its local bind as `\\.\pipe\NAME`. **Create child payload** then selects an SMB relay profile; enter the child's reachable address as `\\PARENT_HOST\pipe\NAME` and build a Windows artifact. The child appears as a separate `relay-smb` agent in Topology. A named pipe does not have a browser download URL, so retrieve that artifact from the server or use your chosen delivery channel. Follow the [SMB named-pipe relay guide](smb-named-pipe-relays.md) for the full workflow and Windows access checks.
 
 Payload **Retrieval settings** controls the server's public HTTPS host and retrieval path separately from a profile's embedded connection address. Changing the path rotates hosted download tokens and invalidates earlier URLs. The artifact page shows each build's profile snapshot, platform, size, hash, download, hosted URL, helper preview and lifecycle controls. A built artifact is not an agent until an operator deploys and starts it.
 

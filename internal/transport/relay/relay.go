@@ -9,6 +9,7 @@ import (
 	"net"
 	"sync"
 
+	"undertow/internal/namedpipe"
 	"undertow/internal/security"
 	"undertow/internal/transport/stream"
 )
@@ -69,6 +70,18 @@ func Dial(ctx context.Context, address, fingerprint string, token []byte, key ed
 	if err != nil {
 		return nil, err
 	}
+	return dialConn(ctx, conn, fingerprint, token, key)
+}
+
+func DialPipe(ctx context.Context, address, fingerprint string, token []byte, key ed25519.PrivateKey) (*stream.Connection, error) {
+	conn, err := namedpipe.Dial(ctx, address)
+	if err != nil {
+		return nil, err
+	}
+	return dialConn(ctx, conn, fingerprint, token, key)
+}
+
+func dialConn(ctx context.Context, conn net.Conn, fingerprint string, token []byte, key ed25519.PrivateKey) (*stream.Connection, error) {
 	framed := &messageConn{ReadWriteCloser: conn, remote: conn.RemoteAddr().String()}
 	connection, err := stream.Dial(ctx, framed, fingerprint, token, key)
 	if err != nil {

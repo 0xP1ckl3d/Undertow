@@ -11,10 +11,12 @@ import (
 	"time"
 
 	"undertow/internal/mux"
+	"undertow/internal/namedpipe"
 )
 
 const RelayListenerDestination = "relay-listener.undertow.invalid:0"
 const RelayInboundDestination = "relay-inbound.undertow.invalid:0"
+const RelayPipeInboundDestination = "relay-pipe-inbound.undertow.invalid:0"
 
 type RelayListenerRequest struct {
 	Bind string `json:"bind"`
@@ -24,7 +26,33 @@ type RelayListenerResult struct {
 	Error string `json:"error,omitempty"`
 }
 
+const RelayPayloadDestination = "relay-payload.undertow.invalid:0"
+
+type RelayPayloadCommand struct {
+	Operation string `json:"operation"`
+	Token     string `json:"token"`
+}
+
+type RelayPayloadResult struct {
+	Error           string `json:"error,omitempty"`
+	TLSCertSHA256   string `json:"tls_cert_sha256,omitempty"`
+	TLSPublicKeyPin string `json:"tls_public_key_pin,omitempty"`
+}
+
+type RelayPayloadRequest struct {
+	Token string `json:"token"`
+	Head  bool   `json:"head,omitempty"`
+}
+type RelayPayloadHeader struct {
+	Error  string `json:"error,omitempty"`
+	Size   int64  `json:"size,omitempty"`
+	SHA256 string `json:"sha256,omitempty"`
+}
+
 func ValidateRelayBind(bind string) error {
+	if namedpipe.IsLocal(bind) {
+		return namedpipe.ValidateLocal(bind)
+	}
 	host, portText, err := net.SplitHostPort(bind)
 	if err != nil {
 		return errors.New("relay bind must be numeric IPv4:PORT")
@@ -40,7 +68,8 @@ func ValidateRelayBind(bind string) error {
 	return nil
 }
 
-// ServeAgentRelayListener opens exactly one operator-requested TCP listener.
+// ServeAgentRelayListener opens exactly one operator-requested TCP or Windows
+// named-pipe listener.
 // Child bytes are forwarded to the original server over this agent's session.
 func ServeAgentRelayListener(ctx context.Context, session *mux.Mux, control *mux.Stream) {
 	defer control.Close()
@@ -52,15 +81,27 @@ func ServeAgentRelayListener(ctx context.Context, session *mux.Mux, control *mux
 		_ = json.NewEncoder(control).Encode(RelayListenerResult{Error: "invalid relay bind"})
 		return
 	}
-	listener, err := net.Listen("tcp4", request.Bind)
+	var listener net.Listener
+	var err error
+	if namedpipe.IsLocal(request.Bind) {
+		listener, err = namedpipe.Listen(request.Bind)
+	} else {
+		listener, err = net.Listen("tcp4", request.Bind)
+	}
 	if err != nil {
 		_ = json.NewEncoder(control).Encode(RelayListenerResult{Error: err.Error()})
 		return
 	}
 	defer listener.Close()
-	if err := json.NewEncoder(control).Encode(RelayListenerResult{Bind: listener.Addr().String()}); err != nil {
+	actualBind := listener.Addr().String()
+	if namedpipe.IsLocal(request.Bind) {
+		actualBind = request.Bind
+	}
+	if err := json.NewEncoder(control).Encode(RelayListenerResult{Bind: actualBind}); err != nil {
 		return
 	}
+	registry := newRelayPayloadRegistry()
+	go registry.serveCommands(control)
 	go func() {
 		select {
 		case <-control.Done():
@@ -75,8 +116,16 @@ func ServeAgentRelayListener(ctx context.Context, session *mux.Mux, control *mux
 			return
 		}
 		go func(conn net.Conn) {
+			conn, handled := registry.serveDownload(ctx, session, conn)
+			if handled {
+				return
+			}
 			openCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-			upstream, err := session.Open(openCtx, RelayInboundDestination)
+			destination := RelayInboundDestination
+			if namedpipe.IsLocal(request.Bind) {
+				destination = RelayPipeInboundDestination
+			}
+			upstream, err := session.Open(openCtx, destination)
 			cancel()
 			if err != nil {
 				_ = conn.Close()

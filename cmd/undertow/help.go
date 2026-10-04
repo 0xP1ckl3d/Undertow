@@ -153,10 +153,10 @@ server sockets and does not require --tun. Use one 'server' subcommand only.
 	case "agent":
 		body = `undertow agent — unprivileged connector on an internal host
 
-Usage: undertow agent --server HOST:PORT [--fingerprint HEX | --trust-on-first-use] [FLAGS]
+Usage: undertow agent --server HOST:PORT|PIPE_PATH [--fingerprint HEX | --trust-on-first-use] [FLAGS]
 
-  --server HOST:PORT       Server host and carrier port; DNS needs numeric IPv4.
-  --transport MODE         dns (default), websocket, quic, or relay.
+  --server ADDRESS         Host:port for network carriers, \\HOST\pipe\NAME for relay-smb.
+  --transport MODE         dns (default), websocket, quic, relay, or relay-smb.
   --websocket-path PATH    Match server path for WebSocket (default /undertow).
   --tls-server-name NAME   Verify a DNS name in the TLS certificate.
   --tls-insecure-skip-verify  Allow a private/self-signed TLS certificate;
@@ -195,6 +195,8 @@ For a child agent, select its parent in the SERVER console, run
 '--transport relay --server INTERNAL_IP:8443 --fingerprint HEX'.
 Use a separate --agent-key. No relay listener opens by default;
 --deny=relay rejects the operator request independently of listeners.
+For a Windows SMB named-pipe relay, start \\.\pipe\NAME on the parent and
+use '--transport relay-smb --server \\PARENT_HOST\pipe\NAME' on a Windows child.
 
 The agent changes no interface or host route. After it connects, run
 'undertow status' on the server and add an internal route through its ID.
@@ -220,7 +222,7 @@ Usage: undertow client (--vpn | --internal | --vpn --internal) --server HOST:POR
                            console; server global routes are optional. Alone,
                            this leaves Internet/default routes unchanged.
   --server HOST:PORT       Server host and carrier port; DNS needs numeric IPv4.
-  --transport MODE         dns (default), websocket, quic, or relay.
+  --transport MODE         dns (default), websocket, quic, relay, or relay-smb.
   --websocket-path PATH    Match server path for WebSocket (default /undertow).
   --tls-server-name NAME   Verify a DNS name in the TLS certificate.
   --tls-insecure-skip-verify  Allow a private/self-signed TLS certificate;

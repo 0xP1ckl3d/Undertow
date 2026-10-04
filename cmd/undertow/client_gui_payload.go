@@ -4,10 +4,12 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
 	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -101,6 +103,42 @@ func (g *guiServer) deployScript(w http.ResponseWriter, r *http.Request) {
 	}
 	if script.Len() > 64<<10 {
 		http.Error(w, "deploy script exceeds local limit", http.StatusBadGateway)
+		return
+	}
+	guiJSON(w, http.StatusOK, map[string]string{"script": script.String(), "filename": "deploy-" + a.ID + map[string]string{"powershell": ".ps1", "shell": ".sh"}[format]})
+}
+
+func (g *guiServer) agentHostDeployScript(w http.ResponseWriter, r *http.Request) {
+	format := r.URL.Query().Get("format")
+	if format != "powershell" && format != "shell" {
+		http.Error(w, "format must be powershell or shell", http.StatusBadRequest)
+		return
+	}
+	claims, err := g.actionClaims()
+	if err != nil {
+		http.Error(w, "preferences unavailable", http.StatusInternalServerError)
+		return
+	}
+	ctx := control.WithActionClaims(r.Context(), claims)
+	data, err := g.client.call(ctx, http.MethodGet, "/v1/agent-hosts/"+url.PathEscape(r.PathValue("id")), nil)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	var host agentPayloadHostInfo
+	if err := json.Unmarshal(data, &host); err != nil || host.ID == "" || !strings.HasPrefix(host.Retrieval, "https://") {
+		http.Error(w, "invalid agent-hosted payload record", http.StatusBadGateway)
+		return
+	}
+	a, err := resolvePayload(ctx, g.client.call, host.ArtifactID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	hosted := hostedArtifactInfo{Artifact: a.Artifact, Retrieval: host.Retrieval, RetrievalPath: host.RetrievalPath, TLSSelfSigned: host.TLSSelfSigned, TLSCertSHA256: host.TLSCertSHA256, TLSPublicKeyPin: host.TLSPublicKeyPin}
+	var script bytes.Buffer
+	if err := printDeployScript(&script, hosted, format); err != nil || script.Len() > 64<<10 {
+		http.Error(w, "could not generate agent-hosted deploy script", http.StatusBadGateway)
 		return
 	}
 	guiJSON(w, http.StatusOK, map[string]string{"script": script.String(), "filename": "deploy-" + a.ID + map[string]string{"powershell": ".ps1", "shell": ".sh"}[format]})
