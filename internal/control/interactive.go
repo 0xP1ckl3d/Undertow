@@ -3,9 +3,12 @@ package control
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"sync"
@@ -16,8 +19,9 @@ import (
 )
 
 type interactiveRelayRequest struct {
-	AgentID string `json:"agent_id"`
-	Kind    string `json:"kind,omitempty"`
+	AgentID string       `json:"agent_id"`
+	Kind    string       `json:"kind,omitempty"`
+	Actor   ActionClaims `json:"actor,omitempty"`
 }
 
 // OpenClientInteractive relays one client console session through the server.
@@ -29,7 +33,7 @@ func OpenClientInteractive(ctx context.Context, client *mux.Mux, agentID string,
 	if err != nil {
 		return nil, err
 	}
-	if err := json.NewEncoder(stream).Encode(interactiveRelayRequest{AgentID: agentID}); err != nil {
+	if err := json.NewEncoder(stream).Encode(interactiveRelayRequest{AgentID: agentID, Actor: claimsFromContext(ctx)}); err != nil {
 		stream.Close()
 		return nil, err
 	}
@@ -60,7 +64,7 @@ func openClientMemory(ctx context.Context, client *mux.Mux, agentID, kind string
 	if err != nil {
 		return nil, err
 	}
-	if err := json.NewEncoder(stream).Encode(interactiveRelayRequest{AgentID: agentID, Kind: kind}); err != nil {
+	if err := json.NewEncoder(stream).Encode(interactiveRelayRequest{AgentID: agentID, Kind: kind, Actor: claimsFromContext(ctx)}); err != nil {
 		stream.Close()
 		return nil, err
 	}
@@ -129,6 +133,10 @@ func bridgeClientInteractive(ctx context.Context, client *mux.Mux, agentID, kind
 }
 
 func (m *Manager) ServeInteractiveRelay(ctx context.Context, client *mux.Stream) {
+	m.ServeInteractiveRelayForClient(ctx, 0, client)
+}
+
+func (m *Manager) ServeInteractiveRelayForClient(ctx context.Context, clientID uint64, client *mux.Stream) {
 	defer client.Close()
 	if err := client.AcceptOpen(ctx); err != nil {
 		return
@@ -144,8 +152,14 @@ func (m *Manager) ServeInteractiveRelay(ctx context.Context, client *mux.Stream)
 		pivot.RejectInteractive(client, errors.New("invalid agent ID"))
 		return
 	}
+	finishAudit, err := m.startInteractiveAudit(clientID, request)
+	if err != nil {
+		pivot.RejectInteractive(client, errors.New("audit unavailable"))
+		return
+	}
 	agent := m.Get(request.AgentID)
 	if agent == nil {
+		finishAudit(http.StatusNotFound)
 		pivot.RejectInteractive(client, errors.New("agent is not connected"))
 		return
 	}
@@ -159,16 +173,64 @@ func (m *Manager) ServeInteractiveRelay(ctx context.Context, client *mux.Stream)
 	} else if request.Kind == "bof" {
 		destination = pivot.BOFDestination
 	} else if request.Kind != "" {
+		finishAudit(http.StatusBadRequest)
 		pivot.RejectInteractive(client, errors.New("unknown task kind"))
 		return
 	}
 	upstream, err := agent.Open(ctx, destination)
 	if err != nil {
+		finishAudit(http.StatusBadGateway)
 		pivot.RejectInteractive(client, err)
 		return
 	}
 	defer upstream.Close()
+	finishAudit(http.StatusOK)
 	bridgeInteractive(ctx, client, reader, upstream)
+}
+
+func (m *Manager) startInteractiveAudit(clientID uint64, request interactiveRelayRequest) (func(int), error) {
+	m.mu.RLock()
+	store := m.operations
+	client := m.clients[clientID]
+	m.mu.RUnlock()
+	if store == nil {
+		return func(int) {}, nil
+	}
+	if clientID != 0 && client == nil {
+		return nil, errors.New("client disconnected")
+	}
+	var random [16]byte
+	if _, err := rand.Read(random[:]); err != nil {
+		return nil, err
+	}
+	id := hex.EncodeToString(random[:])
+	key := ""
+	if client != nil {
+		key = client.peer.Snapshot().AgentID
+	}
+	source := "server_console"
+	trust := "local_unverified"
+	if clientID != 0 {
+		source = "client_console"
+		trust = "client_bound_operator_claim"
+		if request.Actor.Source == "gui" {
+			source = "gui"
+		}
+	}
+	path := "/v1/agents/" + request.AgentID + "/interactive"
+	if request.Kind != "" {
+		path = "/v1/agents/" + request.AgentID + "/" + request.Kind
+	}
+	record := AuditRecord{ID: id, ActionID: truncateClaim(request.Actor.ActionID, 128), At: time.Now().UTC(), Action: "CONNECT", Target: path, ClientID: key, ClientSessionID: clientID, OperatorID: truncateClaim(request.Actor.OperatorID, 128), DisplayName: truncateClaim(request.Actor.DisplayName, 128), Source: source, IdentityTrust: trust}
+	if err := store.RecordAudit(record); err != nil {
+		return nil, err
+	}
+	return func(status int) {
+		if err := store.CompleteAudit(id, status); err != nil {
+			log.Printf("interactive audit result: %v", err)
+		}
+		m.PublishEvent("audit.recorded", id)
+	}, nil
 }
 
 func bridgeInteractive(ctx context.Context, client *mux.Stream, reader io.Reader, upstream *mux.Stream) {

@@ -19,7 +19,7 @@ var builtinArgCount = map[string][2]int{
 	"mkdir": {1, 1}, "rm": {1, 1}, "whoami": {0, 0},
 	"ps": {0, 0}, "privileges": {0, 0}, "env": {0, 1},
 	"interfaces": {0, 0}, "dns": {0, 0}, "route-table": {0, 0},
-	"screens": {0, 0},
+	"screens": {0, 0}, "file-list": {0, 2},
 }
 
 func validateBuiltin(name string, args []string) error {
@@ -41,9 +41,16 @@ func runBuiltin(parent context.Context, name string, args []string) ExecResult {
 	}
 	var output string
 	var err error
+	var screenDetails []ScreenInfo
 	switch name {
 	case "pwd":
 		output, err = os.Getwd()
+	case "file-list":
+		listing, listErr := listFiles(args)
+		if listErr != nil {
+			return ExecResult{Error: listErr.Error()}
+		}
+		return ExecResult{Files: &listing}
 	case "ls":
 		path := "."
 		if len(args) == 1 {
@@ -98,6 +105,7 @@ func runBuiltin(parent context.Context, name string, args []string) ExecResult {
 			var encoded []byte
 			encoded, err = json.Marshal(screens)
 			output = string(encoded)
+			screenDetails = screens
 		}
 	case "env":
 		if len(args) == 1 {
@@ -140,5 +148,5 @@ func runBuiltin(parent context.Context, name string, args []string) ExecResult {
 	if output != "" && !strings.HasSuffix(output, "\n") {
 		output += "\n"
 	}
-	return ExecResult{Stdout: output}
+	return ExecResult{Stdout: output, Screens: screenDetails}
 }

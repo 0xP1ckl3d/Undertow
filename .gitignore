@@ -2,6 +2,8 @@
 /.local/
 /bin/
 /dist/
+/cmd/undertow/web/node_modules/
+/cmd/undertow/web/tsconfig.tsbuildinfo
 /agent-distribution/
 jobs-output/
 job-downloads/

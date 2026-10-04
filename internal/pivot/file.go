@@ -209,6 +209,9 @@ func TransferFileProgress(parent context.Context, session *mux.Mux, agentID, ope
 	if ready.Size < 0 {
 		return result, errors.New("invalid download size")
 	}
+	if operation == "screenshot" && ready.Size > 64<<20 {
+		return result, errors.New("screenshot exceeds 64 MiB limit")
+	}
 	parentDir := filepath.Dir(localPath)
 	temp, err := os.CreateTemp(parentDir, ".tmp-*")
 	if err != nil {

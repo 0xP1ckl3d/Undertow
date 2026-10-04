@@ -1,0 +1,169 @@
+package control
+
+import (
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+
+	_ "modernc.org/sqlite"
+)
+
+type AuditRecord struct {
+	ID              string    `json:"id"`
+	ActionID        string    `json:"action_id,omitempty"`
+	At              time.Time `json:"at"`
+	Action          string    `json:"action"`
+	Target          string    `json:"target"`
+	ClientID        string    `json:"client_id,omitempty"`
+	ClientSessionID uint64    `json:"client_session_id,omitempty"`
+	OperatorID      string    `json:"operator_id,omitempty"`
+	DisplayName     string    `json:"display_name,omitempty"`
+	Source          string    `json:"source"`
+	IdentityTrust   string    `json:"identity_trust"`
+	Status          int       `json:"status"`
+}
+
+type OperationsStore struct {
+	db             *sql.DB
+	screenshotsDir string
+}
+
+func OpenOperationsStore(path string) (*OperationsStore, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(filepath.Dir(abs), 0700); err != nil {
+		return nil, err
+	}
+	db, err := sql.Open("sqlite", abs)
+	if err != nil {
+		return nil, err
+	}
+	db.SetMaxOpenConns(1)
+	for _, statement := range []string{
+		"PRAGMA journal_mode=WAL",
+		"PRAGMA busy_timeout=5000",
+		`CREATE TABLE IF NOT EXISTS audit (id TEXT PRIMARY KEY, action_id TEXT NOT NULL, at TEXT NOT NULL, action TEXT NOT NULL, target TEXT NOT NULL, client_id TEXT NOT NULL, client_session_id TEXT NOT NULL, operator_id TEXT NOT NULL, display_name TEXT NOT NULL, source TEXT NOT NULL, identity_trust TEXT NOT NULL, status INTEGER NOT NULL)`,
+		"CREATE INDEX IF NOT EXISTS audit_at ON audit(at DESC)",
+		`CREATE TABLE IF NOT EXISTS job_history (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, owner_client_id TEXT NOT NULL, kind TEXT NOT NULL, state TEXT NOT NULL, started TEXT NOT NULL, ended TEXT, output_bytes INTEGER NOT NULL, output_path TEXT NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS job_records (id TEXT PRIMARY KEY, info_json BLOB NOT NULL, owner_key TEXT NOT NULL, output_path TEXT NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS host_results (agent_id TEXT NOT NULL, operation TEXT NOT NULL, session_id TEXT NOT NULL, at TEXT NOT NULL, result_json BLOB NOT NULL, PRIMARY KEY(agent_id,operation))`,
+		`CREATE TABLE IF NOT EXISTS screenshots (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, screen INTEGER NOT NULL, at TEXT NOT NULL, size INTEGER NOT NULL, sha256 TEXT NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL, client_id TEXT NOT NULL, client_session_id TEXT NOT NULL, operator_id TEXT NOT NULL, display_name TEXT NOT NULL)`,
+		"CREATE INDEX IF NOT EXISTS screenshots_agent_at ON screenshots(agent_id, at DESC)",
+		"PRAGMA user_version=4",
+	} {
+		if _, err := db.Exec(statement); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("initialize operations database: %w", err)
+		}
+	}
+	if err := os.Chmod(abs, 0600); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return &OperationsStore{db: db, screenshotsDir: filepath.Join(filepath.Dir(abs), "screenshots")}, nil
+}
+
+type StoredJob struct {
+	Info       JobInfo
+	OwnerKey   string
+	OutputPath string
+}
+
+func (s *OperationsStore) SaveJob(info JobInfo, ownerKey, outputPath string) error {
+	if s == nil {
+		return errors.New("operations store is not configured")
+	}
+	data, err := json.Marshal(info)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`INSERT INTO job_records(id,info_json,owner_key,output_path) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET info_json=excluded.info_json,owner_key=excluded.owner_key,output_path=excluded.output_path`, info.ID, data, ownerKey, outputPath)
+	return err
+}
+
+func (s *OperationsStore) DeleteJob(id string) error {
+	if s == nil {
+		return errors.New("operations store is not configured")
+	}
+	_, err := s.db.Exec(`DELETE FROM job_records WHERE id=?`, id)
+	return err
+}
+
+func (s *OperationsStore) LoadJobs() ([]StoredJob, error) {
+	if s == nil {
+		return nil, nil
+	}
+	rows, err := s.db.Query(`SELECT info_json,owner_key,output_path FROM job_records ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []StoredJob
+	for rows.Next() {
+		var item StoredJob
+		var data []byte
+		if err := rows.Scan(&data, &item.OwnerKey, &item.OutputPath); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(data, &item.Info); err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (s *OperationsStore) Close() error {
+	if s == nil {
+		return nil
+	}
+	return s.db.Close()
+}
+
+func (s *OperationsStore) RecordAudit(record AuditRecord) error {
+	if s == nil {
+		return errors.New("operations store is not configured")
+	}
+	_, err := s.db.Exec(`INSERT INTO audit (id,action_id,at,action,target,client_id,client_session_id,operator_id,display_name,source,identity_trust,status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, record.ID, record.ActionID, record.At.Format(time.RFC3339Nano), record.Action, record.Target, record.ClientID, fmt.Sprint(record.ClientSessionID), record.OperatorID, record.DisplayName, record.Source, record.IdentityTrust, record.Status)
+	return err
+}
+
+func (s *OperationsStore) CompleteAudit(id string, status int) error {
+	if s == nil {
+		return errors.New("operations store is not configured")
+	}
+	_, err := s.db.Exec(`UPDATE audit SET status=? WHERE id=?`, status, id)
+	return err
+}
+
+func (s *OperationsStore) AuditHistory(limit int) ([]AuditRecord, error) {
+	if s == nil {
+		return []AuditRecord{}, nil
+	}
+	if limit < 1 || limit > 500 {
+		limit = 100
+	}
+	rows, err := s.db.Query(`SELECT id,action_id,at,action,target,client_id,client_session_id,operator_id,display_name,source,identity_trust,status FROM audit ORDER BY at DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]AuditRecord, 0, limit)
+	for rows.Next() {
+		var r AuditRecord
+		var at, session string
+		if err := rows.Scan(&r.ID, &r.ActionID, &at, &r.Action, &r.Target, &r.ClientID, &session, &r.OperatorID, &r.DisplayName, &r.Source, &r.IdentityTrust, &r.Status); err != nil {
+			return nil, err
+		}
+		r.At, _ = time.Parse(time.RFC3339Nano, at)
+		_, _ = fmt.Sscan(session, &r.ClientSessionID)
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}

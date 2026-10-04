@@ -103,7 +103,9 @@ func (c *liveClientConsole) set(session *mux.Mux, id uint64, device *tun.Device,
 	c.routeMu.Unlock()
 	if session != nil {
 		c.notify("VPN connected")
-		go c.restoreLoop(session)
+		if !c.operatorOnly {
+			go c.restoreLoop(session)
+		}
 	} else {
 		c.notify("VPN disconnected")
 	}
@@ -263,6 +265,101 @@ func (c *liveClientConsole) activateRoute(ctx context.Context, route control.Acc
 	return nil
 }
 
+// AcceptClientRoute is shared by the terminal and local GUI. It validates the
+// route, binds server acceptance to this client session, installs the OS route,
+// and persists the local choice as one operation.
+func (c *liveClientConsole) AcceptClientRoute(ctx context.Context, prefix, agentID string, manual bool) (bool, error) {
+	c.routeMu.Lock()
+	defer c.routeMu.Unlock()
+	return c.acceptClientRouteLocked(ctx, prefix, agentID, manual)
+}
+
+// The caller holds routeMu. The bool reports reassignment from a disconnected agent.
+func (c *liveClientConsole) acceptClientRouteLocked(ctx context.Context, rawPrefix, agentID string, manual bool) (bool, error) {
+	prefix, err := netip.ParsePrefix(rawPrefix)
+	if err != nil || !prefix.Addr().Is4() || prefix.Contains(c.serverIP) || prefix.Contains(c.carrierIP) || prefix.Contains(c.tunnelPrefix.Addr()) || c.tunnelPrefix.Contains(prefix.Addr()) {
+		return false, errors.New("route must be IPv4 CIDR outside the server, carrier endpoint, and client tunnel networks")
+	}
+	prefix = prefix.Masked()
+	for _, local := range c.localNetworks {
+		if prefix.Overlaps(local) {
+			return false, fmt.Errorf("route %s conflicts with local network %s", prefix, local)
+		}
+	}
+	for i, existing := range c.routes {
+		if existing.Prefix != prefix.String() {
+			continue
+		}
+		if existing.AgentID == agentID {
+			return false, fmt.Errorf("route %s is already accepted via this agent", prefix)
+		}
+		agents, err := consoleAgents(ctx, c.call)
+		if err != nil {
+			return false, fmt.Errorf("check current route owner: %w", err)
+		}
+		for _, agent := range agents {
+			if agent.ID == existing.AgentID {
+				return false, fmt.Errorf("route %s is owned by connected agent %s (%s); remove it before assigning another agent", prefix, consoleAgentName(agent), agent.ID)
+			}
+		}
+		if err := c.replaceAcceptedRoute(ctx, i, control.AcceptedRoute{Prefix: prefix.String(), AgentID: agentID, Manual: manual}); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+	if len(c.routes) >= 64 {
+		return false, errors.New("at most 64 client routes can be saved")
+	}
+	route := control.AcceptedRoute{Prefix: prefix.String(), AgentID: agentID, Manual: manual}
+	if err := c.activateRoute(ctx, route); err != nil {
+		return false, err
+	}
+	updated := append(append([]control.AcceptedRoute(nil), c.routes...), route)
+	if err := saveClientRoutes(c.routeFile, updated); err != nil {
+		_ = c.removeActiveRoute(ctx, route)
+		return false, fmt.Errorf("save client route: %w", err)
+	}
+	c.routes = updated
+	return false, nil
+}
+
+func (c *liveClientConsole) RemoveClientRoute(ctx context.Context, prefix, agentID string) error {
+	c.routeMu.Lock()
+	defer c.routeMu.Unlock()
+	return c.removeClientRouteLocked(ctx, prefix, agentID)
+}
+
+// The caller holds routeMu. An empty agentID means any current owner.
+func (c *liveClientConsole) removeClientRouteLocked(ctx context.Context, rawPrefix, agentID string) error {
+	prefix, err := netip.ParsePrefix(rawPrefix)
+	if err != nil || !prefix.Addr().Is4() {
+		return errors.New("route del requires an IPv4 CIDR")
+	}
+	key := prefix.Masked().String()
+	for i, route := range c.routes {
+		if route.Prefix != key {
+			continue
+		}
+		if agentID != "" && route.AgentID != agentID {
+			return errors.New("route belongs to a different agent")
+		}
+		updated := append(append([]control.AcceptedRoute(nil), c.routes[:i]...), c.routes[i+1:]...)
+		wasActive := c.active[route.Prefix]
+		if err := c.removeActiveRoute(ctx, route); err != nil {
+			return err
+		}
+		if err := saveClientRoutes(c.routeFile, updated); err != nil {
+			if wasActive {
+				_ = c.activateRoute(ctx, route)
+			}
+			return err
+		}
+		c.routes = updated
+		return nil
+	}
+	return errors.New("route is not accepted by this client")
+}
+
 func (c *liveClientConsole) routeCommand(ctx context.Context, args []string, output io.Writer) error {
 	c.routeMu.Lock()
 	defer c.routeMu.Unlock()
@@ -332,92 +429,34 @@ func (c *liveClientConsole) routeCommand(ctx context.Context, args []string, out
 		return nil
 	}
 	if len(args) == 4 && args[0] == "route" && (args[1] == "accept" || args[1] == "add") {
-		prefix, err := netip.ParsePrefix(args[2])
-		if err != nil || !prefix.Addr().Is4() || prefix.Contains(c.serverIP) || prefix.Contains(c.carrierIP) || prefix.Contains(c.tunnelPrefix.Addr()) || c.tunnelPrefix.Contains(prefix.Addr()) {
-			return errors.New("route must be IPv4 CIDR outside the server, carrier endpoint, and client tunnel networks")
-		}
-		prefix = prefix.Masked()
-		for _, local := range c.localNetworks {
-			if prefix.Overlaps(local) {
-				return fmt.Errorf("route %s conflicts with local network %s", prefix, local)
+		previousOwner := ""
+		for _, route := range c.routes {
+			if route.Prefix == args[2] {
+				previousOwner = route.AgentID
+				break
 			}
 		}
-		for i, existing := range c.routes {
-			if existing.Prefix == prefix.String() {
-				if existing.AgentID == args[3] {
-					return fmt.Errorf("route %s is already accepted via this agent", prefix)
-				}
-				agents, err := consoleAgents(ctx, c.call)
-				if err != nil {
-					return fmt.Errorf("check current route owner: %w", err)
-				}
-				for _, agent := range agents {
-					if agent.ID == existing.AgentID {
-						return fmt.Errorf("route %s is owned by connected agent %s (%s); remove it with route del %s before assigning another agent", prefix, consoleAgentName(agent), agent.ID, prefix)
-					}
-				}
-				replacement := control.AcceptedRoute{Prefix: prefix.String(), AgentID: args[3], Manual: args[1] == "add"}
-				if err := c.replaceAcceptedRoute(ctx, i, replacement); err != nil {
-					return err
-				}
-				fmt.Fprintf(output, "Local route %s reassigned from %s to %s and saved.\n", prefix, existing.AgentID, replacement.AgentID)
-				return nil
-			}
-		}
-		if len(c.routes) >= 64 {
-			return errors.New("at most 64 client routes can be saved")
-		}
-		route := control.AcceptedRoute{Prefix: prefix.String(), AgentID: args[3], Manual: args[1] == "add"}
-		if err := c.activateRoute(ctx, route); err != nil {
+		reassigned, err := c.acceptClientRouteLocked(ctx, args[2], args[3], args[1] == "add")
+		if err != nil {
 			return err
 		}
-		updated := append(append([]control.AcceptedRoute(nil), c.routes...), route)
-		if err := saveClientRoutes(c.routeFile, updated); err != nil {
-			_ = c.removeActiveRoute(ctx, route)
-			return fmt.Errorf("save client route: %w", err)
+		if reassigned {
+			fmt.Fprintf(output, "Local route %s reassigned from %s to %s and saved.\n", args[2], previousOwner, args[3])
+		} else {
+			fmt.Fprintf(output, "Local route %s via %s accepted and saved.\n", args[2], args[3])
 		}
-		c.routes = updated
-		label := route.AgentID
-		if data, err := c.call(ctx, http.MethodGet, "/v1/status", nil); err == nil {
-			var status struct {
-				Agents []control.AgentInfo `json:"agents"`
-			}
-			if json.Unmarshal(data, &status) == nil {
-				label = agentRouteLabel(route.AgentID, status.Agents)
-			}
-		}
-		fmt.Fprintf(output, "Local route %s via %s accepted and saved.\n", route.Prefix, label)
 		return nil
 	}
 	if (len(args) == 3 || len(args) == 4) && args[0] == "route" && (args[1] == "del" || args[1] == "delete") {
-		prefix, err := netip.ParsePrefix(args[2])
-		if err != nil || !prefix.Addr().Is4() {
-			return errors.New("route del requires an IPv4 CIDR")
+		agentID := ""
+		if len(args) == 4 {
+			agentID = args[3]
 		}
-		key := prefix.Masked().String()
-		for i, route := range c.routes {
-			if route.Prefix != key {
-				continue
-			}
-			if len(args) == 4 && route.AgentID != args[3] {
-				return errors.New("route belongs to a different agent")
-			}
-			updated := append(append([]control.AcceptedRoute(nil), c.routes[:i]...), c.routes[i+1:]...)
-			wasActive := c.active[route.Prefix]
-			if err := c.removeActiveRoute(ctx, route); err != nil {
-				return err
-			}
-			if err := saveClientRoutes(c.routeFile, updated); err != nil {
-				if wasActive {
-					_ = c.activateRoute(ctx, route)
-				}
-				return err
-			}
-			c.routes = updated
-			fmt.Fprintf(output, "Local route %s removed.\n", key)
-			return nil
+		if err := c.removeClientRouteLocked(ctx, args[2], agentID); err != nil {
+			return err
 		}
-		return errors.New("route is not accepted by this client")
+		fmt.Fprintf(output, "Local route %s removed.\n", args[2])
+		return nil
 	}
 	return errors.New("use routes, route accept CIDR AGENT_ID, route add CIDR AGENT_ID, or route del CIDR (delete is an alias)")
 }

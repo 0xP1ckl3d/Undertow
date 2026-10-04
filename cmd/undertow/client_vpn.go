@@ -31,6 +31,29 @@ import (
 )
 
 func clientCommand(args []string) error {
+	if len(args) > 0 && args[0] == "gui" {
+		f := flag.NewFlagSet("client gui", flag.ContinueOnError)
+		pidFile := f.String("pid-file", "undertow-client.pid", "running client state file")
+		if err := f.Parse(args[1:]); err != nil {
+			return err
+		}
+		if f.NArg() != 0 {
+			return errors.New("usage: undertow client gui [--pid-file PATH]")
+		}
+		path, err := filepath.Abs(*pidFile)
+		if err != nil {
+			return err
+		}
+		response, err := callClientConsole(path, consoleRPCRequest{Action: "gui"})
+		if err != nil {
+			return err
+		}
+		if response.Output == "" {
+			return errors.New("GUI is not enabled for this client; restart with --gui")
+		}
+		fmt.Println(response.Output)
+		return nil
+	}
 	if len(args) > 0 && (args[0] == "attach" || args[0] == "console") {
 		return attachClient(args[1:])
 	}
@@ -39,6 +62,11 @@ func clientCommand(args []string) error {
 	carrier := addCarrierFlags(f)
 	vpn := f.Bool("vpn", false, "route IPv4 traffic through the privileged VPN client")
 	internal := f.Bool("internal", false, "use configured agent routes without changing the Internet route")
+	operatorOnly := f.Bool("operator-only", false, "connect an operator client without a TUN device")
+	gui := f.Bool("gui", true, "serve the browser GUI on loopback")
+	noGUI := f.Bool("no-gui", false, "disable the browser GUI")
+	guiListen := f.String("gui-listen", "127.0.0.1:0", "numeric loopback address for the browser GUI")
+	guiStore := f.String("gui-store", "client-ui.db", "local GUI preferences database")
 	server := f.String("server", "", "server host:port (numeric IPv4 for DNS)")
 	domain := f.String("domain", "t.undertow.invalid", "synthetic DNS domain")
 	fingerprint := f.String("fingerprint", "", "pinned server identity fingerprint")
@@ -62,8 +90,11 @@ func clientCommand(args []string) error {
 	if f.NArg() != 0 {
 		return fmt.Errorf("unexpected client argument %q; use 'undertow client --vpn or --internal ...'", f.Arg(0))
 	}
-	if !*lifecycle.stop && !*vpn && !*internal {
-		return errors.New("client requires at least one of --vpn or --internal")
+	if !*lifecycle.stop && !*vpn && !*internal && !*operatorOnly {
+		return errors.New("client requires --vpn, --internal, or --operator-only")
+	}
+	if *operatorOnly && (*vpn || *internal) {
+		return errors.New("--operator-only cannot be combined with --vpn or --internal")
 	}
 	if *interactive && (*lifecycle.background || *lifecycle.foreground || *lifecycle.stop) {
 		return errors.New("--interactive cannot be combined with --foreground, --background, or --stop")
@@ -132,13 +163,16 @@ func clientCommand(args []string) error {
 	if prefix.Contains(serverIP) {
 		return errors.New("VPN tunnel network contains the server address")
 	}
-	networks, err := tun.ExistingNetworks()
-	if err != nil {
-		return err
-	}
-	for _, existing := range networks {
-		if existing.Contains(prefix.Masked().Addr()) || prefix.Masked().Contains(existing.Addr()) {
-			return fmt.Errorf("VPN network %s conflicts with local network %s", prefix.Masked(), existing)
+	var networks []netip.Prefix
+	if !*operatorOnly {
+		networks, err = tun.ExistingNetworks()
+		if err != nil {
+			return err
+		}
+		for _, existing := range networks {
+			if existing.Contains(prefix.Masked().Addr()) || prefix.Masked().Contains(existing.Addr()) {
+				return fmt.Errorf("VPN network %s conflicts with local network %s", prefix.Masked(), existing)
+			}
 		}
 	}
 	ctx, stop := commandContext()
@@ -155,12 +189,23 @@ func clientCommand(args []string) error {
 	if err != nil {
 		return err
 	}
-	live := &liveClientConsole{routeFile: *routesFile, routes: savedRoutes, serverIP: serverIP, tunnelPrefix: prefix.Masked(), localNetworks: networks, vpn: *vpn, internal: *internal, transport: *carrier.kind, verifyURL: *verifyURL, events: make(chan string, 16)}
+	live := &liveClientConsole{routeFile: *routesFile, routes: savedRoutes, serverIP: serverIP, tunnelPrefix: prefix.Masked(), localNetworks: networks, vpn: *vpn, internal: *internal, operatorOnly: *operatorOnly, transport: *carrier.kind, verifyURL: *verifyURL, events: make(chan string, 16)}
+	if *gui && !*noGUI {
+		guiURL, guiClose, err := startClientGUI(ctx, live, *guiListen, *guiStore)
+		if err != nil {
+			return err
+		}
+		defer guiClose()
+		live.guiURL = guiURL
+		log.Printf("GUI available: %s", guiURL)
+	}
 	setBackgroundConsoleHandler(func(ctx context.Context, request consoleRPCRequest) consoleRPCResponse {
 		var response consoleRPCResponse
 		switch request.Action {
 		case "session":
 			response.SessionID = live.id()
+		case "gui":
+			response.Output = live.guiURL
 		case "call":
 			data, err := live.call(ctx, request.Method, request.Path, request.Body)
 			response.Data = data
@@ -317,7 +362,11 @@ func clientCommand(args []string) error {
 			live.mu.RLock()
 			vpnEnabled, internalEnabled := live.vpn, live.internal
 			live.mu.RUnlock()
-			err = runVPN(ctx, c, carrierIP, serverIP, vpnEnabled, internalEnabled, *tunName, *address, prefix, *verifyURL, live.set)
+			if *operatorOnly {
+				err = runOperator(ctx, c, live.set)
+			} else {
+				err = runVPN(ctx, c, carrierIP, serverIP, vpnEnabled, internalEnabled, *tunName, *address, prefix, *verifyURL, live.set)
+			}
 			c.Close()
 			if err != nil && !errors.Is(err, io.EOF) && ctx.Err() == nil {
 				live.notify("VPN error: " + err.Error())
@@ -360,6 +409,8 @@ type liveClientConsole struct {
 	global        map[string]bool
 	vpn           bool
 	internal      bool
+	operatorOnly  bool
+	guiURL        string
 	transport     string
 	publicIP      string
 	modeRoutes    *clientModeRoutes
@@ -372,6 +423,47 @@ type liveClientConsole struct {
 	serverIP      netip.Addr
 	carrierIP     netip.Addr
 	tunnelPrefix  netip.Prefix
+}
+
+func runOperator(parent context.Context, c transport.Connection, onActive func(*mux.Mux, uint64, *tun.Device, *clientModeRoutes, string)) error {
+	ctx, cancel := context.WithCancel(parent)
+	defer cancel()
+	m := mux.New(ctx, c, false)
+	defer m.Close()
+	hostname, _ := os.Hostname()
+	hello, _ := json.Marshal(struct {
+		Mode     string `json:"mode"`
+		Hostname string `json:"hostname"`
+	}{"vpn", hostname})
+	if err := m.SendControl(ctx, hello); err != nil {
+		return err
+	}
+	readyCtx, readyCancel := context.WithTimeout(ctx, 15*time.Second)
+	reply, err := m.RecvControl(readyCtx)
+	readyCancel()
+	if err != nil {
+		return err
+	}
+	var ready struct {
+		Mode  string `json:"mode"`
+		Ready bool   `json:"ready"`
+	}
+	if json.Unmarshal(reply, &ready) != nil || ready.Mode != "vpn" || !ready.Ready {
+		return errors.New("operator server did not confirm readiness")
+	}
+	if err := markBackgroundReady(); err != nil {
+		return err
+	}
+	if onActive != nil {
+		onActive(m, c.ID(), nil, nil, "")
+		defer onActive(nil, 0, nil, nil, "")
+	}
+	select {
+	case <-ctx.Done():
+		return nil
+	case <-m.Done():
+		return io.EOF
+	}
 }
 
 func (c *liveClientConsole) notify(message string) {

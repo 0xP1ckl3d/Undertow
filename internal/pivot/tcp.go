@@ -215,6 +215,7 @@ func serveSocket(ctx context.Context, s *mux.Stream) {
 // ServeVPN accepts outbound client flows. Explicit pivot routes may be sent
 // through an agent when the client requested internal access.
 const ControlDestination = "control.undertow.invalid:0"
+const EventDestination = "events.undertow.invalid:0"
 const ShutdownDestination = "shutdown.undertow.invalid:0"
 
 func ServeVPN(ctx context.Context, client *mux.Mux, resolve func(netip.Addr) (*mux.Mux, bool), internal bool) {
@@ -228,7 +229,7 @@ func ServeVPNInteractive(ctx context.Context, client *mux.Mux, resolve func(neti
 			return
 		}
 		go func(s *mux.Stream) {
-			if s.Destination() == ControlDestination || s.Destination() == FileDestination || s.Destination() == InteractiveRelayDestination {
+			if s.Destination() == ControlDestination || s.Destination() == EventDestination || s.Destination() == FileDestination || s.Destination() == InteractiveRelayDestination {
 				if control == nil {
 					s.Fail(errors.New("remote operator console is disabled"))
 				} else {

@@ -194,7 +194,7 @@ func TestDuplicateModeArgumentIsRejected(t *testing.T) {
 }
 
 func TestClientRequiresRoutingMode(t *testing.T) {
-	if err := clientCommand(nil); err == nil || !strings.Contains(err.Error(), "--vpn or --internal") {
+	if err := clientCommand(nil); err == nil || !strings.Contains(err.Error(), "--vpn, --internal, or --operator-only") {
 		t.Fatalf("missing mode error: %v", err)
 	}
 }

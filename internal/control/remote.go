@@ -22,11 +22,20 @@ type remoteRequest struct {
 	Method string          `json:"method"`
 	Path   string          `json:"path"`
 	Body   json.RawMessage `json:"body,omitempty"`
+	Actor  ActionClaims    `json:"actor,omitempty"`
 }
 
 type remoteResponse struct {
 	Status int    `json:"status"`
 	Body   []byte `json:"body"`
+}
+
+func truncateClaim(value string, max int) string {
+	value = strings.TrimSpace(value)
+	if len(value) > max {
+		value = value[:max]
+	}
+	return value
 }
 
 // ServeRemote exposes client status, agent execution, deployment management,
@@ -59,11 +68,30 @@ func (m *Manager) ServeRemote(ctx context.Context, token string, clientID uint64
 	if _, err := io.CopyN(io.Discard, stream, 6<<20); err != io.EOF {
 		return
 	}
-	if !strings.HasPrefix(request.Path, "/v1/") || len(request.Path) > 2048 || request.Method != http.MethodGet && request.Method != http.MethodPost && request.Method != http.MethodPut && request.Method != http.MethodDelete {
+	if !strings.HasPrefix(request.Path, "/v1/") || len(request.Path) > 8192 || request.Method != http.MethodGet && request.Method != http.MethodPost && request.Method != http.MethodPut && request.Method != http.MethodDelete {
 		writeRemoteResponse(stream, remoteResponse{Status: http.StatusBadRequest, Body: []byte("invalid API request")})
 		return
 	}
-	httpRequest, err := http.NewRequestWithContext(context.WithValue(ctx, jobOwnerKey{}, clientID), request.Method, "http://localhost"+request.Path, bytes.NewReader(request.Body))
+	m.mu.RLock()
+	client := m.clients[clientID]
+	clientKey := ""
+	if client != nil {
+		clientKey = client.peer.Snapshot().AgentID
+	}
+	m.mu.RUnlock()
+	if client == nil {
+		writeRemoteResponse(stream, remoteResponse{Status: http.StatusForbidden, Body: []byte("client session is no longer connected")})
+		return
+	}
+	action := actionContext{ActionClaims: request.Actor, ClientID: clientKey, ClientSessionID: clientID}
+	if action.Source != "gui" {
+		action.Source = "client_console"
+	}
+	action.ActionID = truncateClaim(action.ActionID, 128)
+	action.OperatorID = truncateClaim(action.OperatorID, 128)
+	action.DisplayName = truncateClaim(action.DisplayName, 128)
+	requestContext := context.WithValue(context.WithValue(ctx, jobOwnerKey{}, clientID), actionContextKey{}, action)
+	httpRequest, err := http.NewRequestWithContext(requestContext, request.Method, "http://localhost"+request.Path, bytes.NewReader(request.Body))
 	if err != nil {
 		writeRemoteResponse(stream, remoteResponse{Status: http.StatusBadRequest, Body: []byte("invalid API request")})
 		return
@@ -88,11 +116,69 @@ func clientRequestAllowed(request *http.Request, clientID uint64) bool {
 	if request.Method == http.MethodGet && path == "/v1/status" && request.URL.RawQuery == "" {
 		return true
 	}
+	if request.Method == http.MethodGet && path == "/v1/topology" && request.URL.RawQuery == "" {
+		return true
+	}
+	if request.Method == http.MethodGet && path == "/v1/history" && request.URL.RawQuery == "" {
+		return true
+	}
+	if request.URL.RawQuery == "" && (path == "/v1/transports" && request.Method == http.MethodGet || path == "/v1/relays" && request.Method == http.MethodGet || path == "/v1/routes" && request.Method == http.MethodPost) {
+		return true
+	}
+	if path == "/v1/routes" && request.Method == http.MethodDelete {
+		_, err := netip.ParsePrefix(request.URL.Query().Get("prefix"))
+		return err == nil
+	}
+	if strings.HasPrefix(path, "/v1/transports/") && request.URL.RawQuery == "" && (request.Method == http.MethodPost || request.Method == http.MethodDelete) {
+		return true
+	}
+	if strings.HasPrefix(path, "/v1/agents/") && strings.HasSuffix(path, "/relays") && request.URL.RawQuery == "" && request.Method == http.MethodPost {
+		return true
+	}
+	if strings.HasPrefix(path, "/v1/agents/") && strings.HasSuffix(path, "/relays") && request.Method == http.MethodDelete {
+		return true
+	}
 	if distributionRequest(request) || payloadChunkRequest(request) {
 		return true
 	}
 	if request.Method == http.MethodGet && strings.HasPrefix(path, "/v1/agents/") && strings.HasSuffix(path, "/events") && request.URL.RawQuery == "" {
 		return true
+	}
+	if request.Method == http.MethodGet && strings.HasPrefix(path, "/v1/agents/") && strings.HasSuffix(path, "/host-results") && request.URL.RawQuery == "" {
+		return true
+	}
+	if request.Method == http.MethodGet && strings.HasPrefix(path, "/v1/agents/") && strings.HasSuffix(path, "/files") {
+		query := request.URL.Query()
+		for key, values := range query {
+			if key != "path" && key != "offset" || len(values) != 1 {
+				return false
+			}
+		}
+		return len(query.Get("path")) <= 4096
+	}
+	if request.Method == http.MethodGet && strings.HasPrefix(path, "/v1/agents/") && strings.HasSuffix(path, "/screens") && request.URL.RawQuery == "" {
+		return true
+	}
+	if request.Method == http.MethodPost && strings.HasPrefix(path, "/v1/agents/") && strings.HasSuffix(path, "/screenshots") && request.URL.RawQuery == "" {
+		return true
+	}
+	if request.Method == http.MethodGet && path == "/v1/screenshots" {
+		query := request.URL.Query()
+		return len(query) == 0 || len(query) == 1 && len(query["agent_id"]) == 1
+	}
+	if request.Method == http.MethodGet && strings.HasPrefix(path, "/v1/screenshots/") {
+		parts := strings.Split(path, "/")
+		if len(parts) == 4 && parts[3] != "" && request.URL.RawQuery == "" {
+			return true
+		}
+		if len(parts) == 5 && parts[4] == "chunk" && parts[3] != "" {
+			query := request.URL.Query()
+			if len(query) != 1 || len(query["offset"]) != 1 {
+				return false
+			}
+			offset, err := strconv.ParseInt(query.Get("offset"), 10, 64)
+			return err == nil && offset >= 0
+		}
 	}
 	if request.Method == http.MethodGet && (path == "/v1/jobs" || strings.HasPrefix(path, "/v1/jobs/")) {
 		return true
@@ -186,7 +272,7 @@ func CallRemote(ctx context.Context, session *mux.Mux, method, path string, body
 		case <-done:
 		}
 	}()
-	if err := json.NewEncoder(stream).Encode(remoteRequest{Method: method, Path: path, Body: raw}); err != nil {
+	if err := json.NewEncoder(stream).Encode(remoteRequest{Method: method, Path: path, Body: raw, Actor: claimsFromContext(ctx)}); err != nil {
 		return nil, err
 	}
 	if err := stream.CloseWrite(); err != nil {

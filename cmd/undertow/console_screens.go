@@ -28,9 +28,11 @@ func fetchScreens(ctx context.Context, call consoleCaller, agentID string) ([]pi
 	if result.Error != "" {
 		return nil, errors.New(result.Error)
 	}
-	var screens []pivot.ScreenInfo
-	if err := json.Unmarshal([]byte(result.Stdout), &screens); err != nil {
-		return nil, fmt.Errorf("invalid agent screen list: %w", err)
+	screens := result.Screens
+	if screens == nil {
+		if err := json.Unmarshal([]byte(result.Stdout), &screens); err != nil {
+			return nil, fmt.Errorf("invalid agent screen list: %w", err)
+		}
 	}
 	return screens, nil
 }

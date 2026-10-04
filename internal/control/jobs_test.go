@@ -226,7 +226,25 @@ func TestJobLifecycleOutputAndOwnership(t *testing.T) {
 	}
 }
 
-func TestJobOutputSpillsOnlyAfterMemoryLimitAndStopsAtQuota(t *testing.T) {
+func TestConnectedOperatorsShareServerJobHistory(t *testing.T) {
+	m := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	m.jobs["shared"] = &jobState{info: JobInfo{ID: "shared", AgentID: "agent-a", State: "completed"}, owner: 1}
+	m.clients[2] = &clientState{}
+	if jobs := m.Jobs(2, "agent-a"); len(jobs) != 1 || jobs[0].ID != "shared" {
+		t.Fatalf("second operator cannot see team job: %+v", jobs)
+	}
+	if _, err := m.Job(2, "shared", true); err != nil {
+		t.Fatalf("second operator cannot read team job: %v", err)
+	}
+	if _, err := m.Job(3, "shared", false); err == nil {
+		t.Fatal("disconnected client read team job")
+	}
+	if err := m.DeleteJob(2, "shared"); err != nil {
+		t.Fatalf("second operator cannot manage team job: %v", err)
+	}
+}
+
+func TestJobOutputIsDurableFromFirstChunkAndStopsAtQuota(t *testing.T) {
 	m := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
 	root := t.TempDir()
 	if err := m.ConfigureJobOutput(root, 300<<10, 400<<10); err != nil {
@@ -235,12 +253,12 @@ func TestJobOutputSpillsOnlyAfterMemoryLimitAndStopsAtQuota(t *testing.T) {
 	job := &jobState{info: JobInfo{ID: "abc123", AgentID: "agent-a"}}
 	m.jobs[job.info.ID] = job
 	first := []byte(strings.Repeat("a", 200<<10))
-	if err := m.appendJobOutput(job, first); err != nil || job.outputFile != nil {
-		t.Fatalf("small output created a file: %v", err)
+	if err := m.appendJobOutput(job, first); err != nil || job.outputFile == nil {
+		t.Fatalf("small output was not retained on disk: %v", err)
 	}
 	chunk, err := m.JobChunk(0, job.info.ID, 0)
 	if err != nil || len(chunk.Data) != len(first) {
-		t.Fatalf("in-memory chunk size=%d error=%v", len(chunk.Data), err)
+		t.Fatalf("retained chunk size=%d error=%v", len(chunk.Data), err)
 	}
 	if err := m.appendJobOutput(job, []byte(strings.Repeat("b", 80<<10))); err != nil {
 		t.Fatal(err)
@@ -262,10 +280,7 @@ func TestJobOutputSpillsOnlyAfterMemoryLimitAndStopsAtQuota(t *testing.T) {
 		t.Fatalf("spilled content size=%d error=%v", len(contents), err)
 	}
 	second := &jobState{info: JobInfo{ID: "def456", AgentID: "agent-a"}}
-	if err := m.appendJobOutput(second, first); err != nil {
-		t.Fatal(err)
-	}
-	if err := m.appendJobOutput(second, []byte(strings.Repeat("b", 80<<10))); err == nil || !strings.Contains(err.Error(), "storage limit") {
+	if err := m.appendJobOutput(second, first); err == nil || !strings.Contains(err.Error(), "storage limit") {
 		t.Fatalf("total quota error=%v", err)
 	}
 	if second.outputFile != nil {
@@ -277,6 +292,9 @@ func TestJobOutputSpillsOnlyAfterMemoryLimitAndStopsAtQuota(t *testing.T) {
 	if _, err := os.Stat(job.info.OutputFile); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("deleted output still exists: %v", err)
 	}
+	if err := m.appendJobOutput(second, first); err != nil {
+		t.Fatalf("quota was not released: %v", err)
+	}
 	if err := m.appendJobOutput(second, []byte(strings.Repeat("b", 80<<10))); err != nil {
 		t.Fatalf("quota was not released: %v", err)
 	}
@@ -285,7 +303,7 @@ func TestJobOutputSpillsOnlyAfterMemoryLimitAndStopsAtQuota(t *testing.T) {
 	}
 }
 
-func TestJobOutputRemainsAvailableAfterSameKeyReconnect(t *testing.T) {
+func TestJobOutputAvailableToConnectedOperatorsAfterReconnect(t *testing.T) {
 	m := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
 	var keys security.Keys
 	same, err := session.New(2, keys, false)
@@ -306,7 +324,10 @@ func TestJobOutputRemainsAvailableAfterSameKeyReconnect(t *testing.T) {
 	if err != nil || string(chunk.Data) != "result" {
 		t.Fatalf("same key could not download job: %q, %v", chunk.Data, err)
 	}
-	if _, err := m.Job(3, "saved", true); err == nil {
-		t.Fatal("different key read job")
+	if _, err := m.Job(3, "saved", true); err != nil {
+		t.Fatalf("second connected operator could not read team job: %v", err)
+	}
+	if _, err := m.Job(4, "saved", true); err == nil {
+		t.Fatal("disconnected client read job")
 	}
 }

@@ -277,10 +277,12 @@ func handleServerPeer(ctx context.Context, manager *control.Manager, controlToke
 		pivot.ServeVPNInteractive(ctx, streamMux, func(destination netip.Addr) (*mux.Mux, bool) {
 			return manager.ResolveClientEgress(peer.Snapshot().ID, destination)
 		}, func() bool { return true }, func(ctx context.Context, stream *mux.Stream) {
-			if stream.Destination() == pivot.FileDestination {
+			if stream.Destination() == pivot.EventDestination {
+				manager.ServeEvents(ctx, stream)
+			} else if stream.Destination() == pivot.FileDestination {
 				manager.ServeFileRelay(ctx, stream)
 			} else if stream.Destination() == pivot.InteractiveRelayDestination {
-				manager.ServeInteractiveRelay(ctx, stream)
+				manager.ServeInteractiveRelayForClient(ctx, peer.Snapshot().ID, stream)
 			} else {
 				manager.ServeRemote(ctx, controlToken, peer.Snapshot().ID, stream)
 			}

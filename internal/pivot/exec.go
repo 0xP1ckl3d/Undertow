@@ -24,10 +24,12 @@ type ExecRequest struct {
 }
 
 type ExecResult struct {
-	Stdout   string `json:"stdout"`
-	Stderr   string `json:"stderr"`
-	ExitCode int    `json:"exit_code"`
-	Error    string `json:"error,omitempty"`
+	Stdout   string       `json:"stdout"`
+	Stderr   string       `json:"stderr"`
+	ExitCode int          `json:"exit_code"`
+	Error    string       `json:"error,omitempty"`
+	Files    *FileListing `json:"files,omitempty"`
+	Screens  []ScreenInfo `json:"screens,omitempty"`
 }
 
 type cappedWriter struct {

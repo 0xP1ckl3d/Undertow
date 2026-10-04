@@ -47,6 +47,9 @@ func attachClientAt(path string) error {
 		}
 		return fmt.Errorf("attach to VPN client: %w", err)
 	}
+	if gui, err := callClientConsole(path, consoleRPCRequest{Action: "gui"}); err == nil && gui.Output != "" {
+		fmt.Fprintf(os.Stdout, "Browser GUI: %s\nOpen this URL on the client host. Use 'undertow client gui' to show it again.\n\n", gui.Output)
+	}
 	ctx, cancel := commandContext()
 	defer cancel()
 	caller := func(_ context.Context, method, route string, body any) ([]byte, error) {

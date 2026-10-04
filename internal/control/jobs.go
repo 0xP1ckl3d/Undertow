@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -217,7 +218,17 @@ func (m *Manager) registerJob(owner uint64, agentID string, agent *mux.Mux, sess
 		return JobInfo{}, errors.New("server job output storage is full; remove old job output before starting another job")
 	}
 	m.jobs[job.info.ID] = job
+	store := m.operations
 	m.mu.Unlock()
+	if store != nil {
+		if err := store.SaveJob(job.info, job.ownerKey, ""); err != nil {
+			m.mu.Lock()
+			delete(m.jobs, job.info.ID)
+			m.mu.Unlock()
+			_ = session.Close()
+			return JobInfo{}, fmt.Errorf("persist job index: %w", err)
+		}
+	}
 	go m.collectJob(job)
 	return job.info, nil
 }
@@ -289,7 +300,7 @@ func (m *Manager) appendJobOutput(job *jobState, data []byte) error {
 		if length > store.perJobLimit-job.info.OutputBytes {
 			return fmt.Errorf("server job output limit reached (%d bytes per job)", store.perJobLimit)
 		}
-		if job.outputFile == nil && job.info.OutputBytes+length > jobOutputLimit {
+		if job.outputFile == nil {
 			if job.info.OutputBytes+length > store.totalLimit-store.used {
 				return fmt.Errorf("server job output storage limit reached (%d bytes total)", store.totalLimit)
 			}
@@ -380,12 +391,19 @@ func (m *Manager) closeJobOutput(job *jobState) error {
 
 func (m *Manager) finishJob(job *jobState, state string, exitCode *int) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if job.info.State != "running" {
+		m.mu.Unlock()
 		return
 	}
 	now := time.Now().UTC()
 	job.info.State, job.info.Ended, job.info.ExitCode = state, &now, exitCode
+	info, ownerKey, outputPath, store := job.info, job.ownerKey, job.outputPath, m.operations
+	m.mu.Unlock()
+	if store != nil {
+		if err := store.SaveJob(info, ownerKey, outputPath); err != nil {
+			log.Printf("persist job result: %v", err)
+		}
+	}
 }
 
 func (m *Manager) CancelJob(owner uint64, id string) error {
@@ -404,10 +422,16 @@ func (m *Manager) CancelJob(owner uint64, id string) error {
 	file := job.outputFile
 	job.outputFile = nil
 	session := job.session
+	info, ownerKey, outputPath, store := job.info, job.ownerKey, job.outputPath, m.operations
 	m.mu.Unlock()
 	if file != nil {
 		_ = file.Sync()
 		_ = file.Close()
+	}
+	if store != nil {
+		if err := store.SaveJob(info, ownerKey, outputPath); err != nil {
+			log.Printf("persist cancelled job: %v", err)
+		}
 	}
 	return session.Close()
 }
@@ -434,6 +458,11 @@ func (m *Manager) DeleteJob(owner uint64, id string) error {
 			}
 		}
 		_ = os.Remove(filepath.Dir(job.outputPath))
+	}
+	if m.operations != nil {
+		if err := m.operations.DeleteJob(id); err != nil {
+			return err
+		}
 	}
 	delete(m.jobs, id)
 	return nil
@@ -470,14 +499,14 @@ func (m *Manager) Jobs(owner uint64, agentID string) []JobInfo {
 	return out
 }
 
-// The authenticated client key remains the same after a VPN reconnect even
-// though the transport session number changes.
+// Jobs are server-owned team history. Under the current enrollment trust model,
+// a connected operator client may inspect or manage them; future authenticated
+// permissions can narrow this without moving the job index to the client.
 func (m *Manager) jobVisibleTo(job *jobState, owner uint64) bool {
 	if owner == 0 || owner == job.owner {
 		return true
 	}
-	client := m.clients[owner]
-	return client != nil && job.ownerKey != "" && client.peer.Snapshot().AgentID == job.ownerKey
+	return m.clients[owner] != nil
 }
 
 type jobOwnerKey struct{}

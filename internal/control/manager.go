@@ -43,6 +43,7 @@ type AgentInfo struct {
 	Hostname           string                  `json:"hostname,omitempty"`
 	OS                 string                  `json:"os,omitempty"`
 	Arch               string                  `json:"arch,omitempty"`
+	Privilege          string                  `json:"privilege,omitempty"`
 	Interfaces         []string                `json:"interfaces,omitempty"`
 	AdvertisedRoutes   []string                `json:"advertised_routes,omitempty"`
 	Routes             []NetworkRoute          `json:"routes,omitempty"`
@@ -154,6 +155,7 @@ type agentState struct {
 	peer           transport.Peer
 	mux            *mux.Mux
 	inventory      AgentInfo
+	privilege      string
 	inventoryReady bool
 	rateAt         time.Time
 	rateRX         uint64
@@ -163,6 +165,8 @@ type agentState struct {
 }
 type Manager struct {
 	mu                sync.RWMutex
+	operations        *OperationsStore
+	eventBus          *EventBroker
 	lifecycleEvents   []LifecycleEvent
 	artifactLookup    func(string) (string, string, bool)
 	agentDistribution http.Handler
@@ -182,6 +186,12 @@ type Manager struct {
 	proxyIP           netip.Addr
 	virtualByAgent    map[string]netip.Addr
 	virtualUsed       map[netip.Addr]bool
+}
+
+func (m *Manager) SetOperationsStore(store *OperationsStore) {
+	m.mu.Lock()
+	m.operations = store
+	m.mu.Unlock()
 }
 
 func (m *Manager) SetArtifactLookup(lookup func(string) (string, string, bool)) {
@@ -245,19 +255,22 @@ func (m *Manager) SetRelayAcceptor(accept func(context.Context, string, *mux.Str
 }
 
 func NewManager(routes *routing.Table, device RouteDevice, virtualNetwork netip.Prefix, proxyIP netip.Addr) *Manager {
-	return &Manager{agents: make(map[string]*agentState), clients: make(map[uint64]*clientState), forwards: make(map[string]*forwardState), jobs: make(map[string]*jobState), relays: make(map[string]map[string]*mux.Stream), routes: routes, device: device, virtualNetwork: virtualNetwork.Masked(), proxyIP: proxyIP, virtualByAgent: make(map[string]netip.Addr), virtualUsed: make(map[netip.Addr]bool)}
+	return &Manager{eventBus: NewEventBroker(), agents: make(map[string]*agentState), clients: make(map[uint64]*clientState), forwards: make(map[string]*forwardState), jobs: make(map[string]*jobState), relays: make(map[string]map[string]*mux.Stream), routes: routes, device: device, virtualNetwork: virtualNetwork.Masked(), proxyIP: proxyIP, virtualByAgent: make(map[string]netip.Addr), virtualUsed: make(map[netip.Addr]bool)}
 }
 
 func (m *Manager) RegisterClient(peer transport.Peer, streamMux *mux.Mux, internal bool, hostname string) {
 	m.mu.Lock()
 	m.clients[peer.Snapshot().ID] = &clientState{peer: peer, mux: streamMux, internal: internal, hostname: safeHostname(hostname), accepted: make(map[netip.Prefix]AcceptedRoute)}
 	m.mu.Unlock()
+	m.PublishEvent("client.connected", peer.Snapshot().AgentID)
 }
 
 func (m *Manager) UnregisterClient(sessionID uint64, streamMux *mux.Mux) {
 	m.mu.Lock()
 	var closed []*mux.Stream
+	removed := false
 	if state := m.clients[sessionID]; state != nil && state.mux == streamMux {
+		removed = true
 		delete(m.clients, sessionID)
 		for id, forward := range m.forwards {
 			if forward.ClientID == sessionID {
@@ -267,6 +280,9 @@ func (m *Manager) UnregisterClient(sessionID uint64, streamMux *mux.Mux) {
 		}
 	}
 	m.mu.Unlock()
+	if removed {
+		m.PublishEvent("client.disconnected", strconv.FormatUint(sessionID, 10))
+	}
 	for _, stream := range closed {
 		_ = stream.Close()
 	}
@@ -473,6 +489,7 @@ func (m *Manager) Register(peer transport.Peer, streamMux *mux.Mux) {
 	m.agents[id] = &agentState{peer: peer, mux: streamMux, inventory: AgentInfo{Via: peer.Snapshot().Via, Depth: depth}}
 	m.recordLifecycleLocked(LifecycleEvent{AgentID: id, Kind: "connected", Transport: peer.Snapshot().Carrier, SessionID: peer.Snapshot().ID})
 	m.mu.Unlock()
+	m.PublishEvent("agent.connected", id)
 	if old != nil {
 		old.mux.Close()
 	}
@@ -737,6 +754,7 @@ func (m *Manager) Unregister(id string, streamMux *mux.Mux) {
 		}
 	}
 	m.mu.Unlock()
+	m.PublishEvent("agent.disconnected", id)
 	for _, stream := range closed {
 		_ = stream.Close()
 	}
@@ -794,6 +812,7 @@ func (m *Manager) AgentList() []AgentInfo {
 		p := state.peer.Snapshot()
 		info := state.inventory
 		info.ID = p.AgentID
+		info.Privilege = state.privilege
 		info.Transport = p.Carrier
 		info.Via = p.Via
 		info.SessionID = p.ID
@@ -1085,6 +1104,24 @@ func (m *Manager) handler(token string) http.Handler {
 		handler.ServeHTTP(w, r)
 	}))
 	m.jobHTTPHandlers(muxer)
+	muxer.HandleFunc("GET /v1/history", func(w http.ResponseWriter, r *http.Request) {
+		m.mu.RLock()
+		store := m.operations
+		m.mu.RUnlock()
+		if store == nil {
+			jsonReply(w, http.StatusOK, []AuditRecord{})
+			return
+		}
+		records, err := store.AuditHistory(200)
+		if err != nil {
+			http.Error(w, "history unavailable", http.StatusInternalServerError)
+			return
+		}
+		jsonReply(w, http.StatusOK, records)
+	})
+	muxer.HandleFunc("GET /v1/topology", func(w http.ResponseWriter, r *http.Request) {
+		jsonReply(w, http.StatusOK, m.Topology())
+	})
 	muxer.HandleFunc("GET /v1/status", func(w http.ResponseWriter, r *http.Request) {
 		m.mu.RLock()
 		selected := m.selected
@@ -1173,6 +1210,13 @@ func (m *Manager) handler(token string) http.Handler {
 	muxer.HandleFunc("GET /v1/agents/{id}/events", func(w http.ResponseWriter, r *http.Request) {
 		jsonReply(w, http.StatusOK, m.LifecycleEvents(r.PathValue("id")))
 	})
+	muxer.HandleFunc("GET /v1/agents/{id}/host-results", m.hostResultsHandler)
+	muxer.HandleFunc("GET /v1/agents/{id}/files", m.filesHandler)
+	muxer.HandleFunc("GET /v1/agents/{id}/screens", m.screensHandler)
+	muxer.HandleFunc("POST /v1/agents/{id}/screenshots", m.captureScreenshotHandler)
+	muxer.HandleFunc("GET /v1/screenshots", m.screenshotsHandler)
+	muxer.HandleFunc("GET /v1/screenshots/{id}", m.screenshotHandler)
+	muxer.HandleFunc("GET /v1/screenshots/{id}/chunk", m.screenshotChunkHandler)
 	muxer.HandleFunc("POST /v1/agents/{id}/shutdown", func(w http.ResponseWriter, r *http.Request) {
 		if err := m.ShutdownAgent(r.Context(), r.PathValue("id")); err != nil {
 			http.Error(w, err.Error(), http.StatusConflict)
@@ -1195,6 +1239,9 @@ func (m *Manager) handler(token string) http.Handler {
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
+		}
+		if retainedHostOperation(request.Builtin) && len(request.Args) == 0 {
+			m.retainHostResult(r.PathValue("id"), request.Builtin, result)
 		}
 		jsonReply(w, http.StatusOK, result)
 	})
@@ -1345,8 +1392,58 @@ func (m *Manager) handler(token string) http.Handler {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
+		if r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodDelete {
+			m.mu.RLock()
+			store := m.operations
+			m.mu.RUnlock()
+			var auditID string
+			if store != nil {
+				var bytes [16]byte
+				if _, err := rand.Read(bytes[:]); err != nil {
+					http.Error(w, "audit unavailable", http.StatusInternalServerError)
+					return
+				}
+				auditID = hex.EncodeToString(bytes[:])
+				actor := boundActionFromContext(r.Context())
+				source, trust := actor.Source, "local_unverified"
+				if source == "" {
+					source = "server_console"
+				}
+				if actor.ClientID != "" {
+					trust = "client_bound_operator_claim"
+				}
+				record := AuditRecord{ID: auditID, ActionID: actor.ActionID, At: time.Now().UTC(), Action: r.Method, Target: r.URL.Path, ClientID: actor.ClientID, ClientSessionID: actor.ClientSessionID, OperatorID: actor.OperatorID, DisplayName: actor.DisplayName, Source: source, IdentityTrust: trust}
+				if err := store.RecordAudit(record); err != nil {
+					log.Printf("audit start: %v", err)
+					http.Error(w, "audit unavailable", http.StatusInternalServerError)
+					return
+				}
+			}
+			tracked := &statusResponseWriter{ResponseWriter: w, status: http.StatusOK}
+			muxer.ServeHTTP(tracked, r)
+			if store != nil {
+				if err := store.CompleteAudit(auditID, tracked.status); err != nil {
+					log.Printf("audit result: %v", err)
+				}
+				m.PublishEvent("audit.recorded", auditID)
+			}
+			if tracked.status < 400 {
+				m.PublishEvent("operation.changed", r.URL.Path)
+			}
+			return
+		}
 		muxer.ServeHTTP(w, r)
 	})
+}
+
+type statusResponseWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusResponseWriter) WriteHeader(status int) {
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
 }
 
 func jsonReply(w http.ResponseWriter, status int, value any) {

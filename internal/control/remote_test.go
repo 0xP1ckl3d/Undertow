@@ -58,6 +58,12 @@ func TestConnectedVPNClientHasLimitedAPI(t *testing.T) {
 	defer server.Close()
 	defer client.Close()
 	manager := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	var keys security.Keys
+	sess, err := session.New(704, keys, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.RegisterClient(&dns.Peer{Session: sess, AgentID: "client", Connected: time.Now()}, server, false, "")
 	go pivot.ServeVPNInteractive(ctx, server, manager.ResolveEgress, func() bool { return false }, func(ctx context.Context, stream *mux.Stream) {
 		manager.ServeRemote(ctx, "operator-secret", 704, stream)
 	})
@@ -75,13 +81,11 @@ func TestConnectedVPNClientHasLimitedAPI(t *testing.T) {
 		method, path string
 		body         any
 	}{
-		{"POST", "/v1/routes", map[string]string{"prefix": "10.20.0.0/16", "agent_id": "agent-a"}},
 		{"POST", "/v1/selection", map[string]string{"agent_id": "agent-a"}},
 		{"POST", "/v1/clients/999/internal", map[string]bool{"enabled": true}},
 		{"POST", "/v1/clients/999/routes", AcceptedRoute{Prefix: "10.10.0.0/16", AgentID: "agent-a", Manual: true}},
 		{"POST", "/v1/clients/999/forwards", map[string]string{"agent_id": "agent-a", "bind": "0.0.0.0:8080", "target": "127.0.0.1:8080"}},
 		{"DELETE", "/v1/clients/999/forwards?agent_id=agent-a&bind=0.0.0.0:8080", nil},
-		{"DELETE", "/v1/routes?prefix=10.20.0.0%2F16", nil},
 	} {
 		if _, err := CallRemote(ctx, client, request.method, request.path, request.body); err == nil || !strings.Contains(err.Error(), "403") {
 			t.Fatalf("VPN client was not denied %s %s: %v", request.method, request.path, err)
@@ -89,6 +93,15 @@ func TestConnectedVPNClientHasLimitedAPI(t *testing.T) {
 	}
 	if len(manager.routes.List()) != 0 {
 		t.Fatal("VPN client changed server routes")
+	}
+	if _, err := CallRemote(ctx, client, "POST", "/v1/routes", map[string]string{"prefix": "10.20.0.0/16", "agent_id": "agent-a"}); err != nil {
+		t.Fatalf("operator client could not add shared route: %v", err)
+	}
+	if len(manager.routes.List()) != 1 {
+		t.Fatal("shared route was not added")
+	}
+	if _, err := CallRemote(ctx, client, "DELETE", "/v1/routes?prefix=10.20.0.0%2F16", nil); err != nil {
+		t.Fatalf("operator client could not remove shared route: %v", err)
 	}
 }
 
@@ -152,6 +165,12 @@ func TestRemoteResponseWaitsForRequestFin(t *testing.T) {
 	defer server.Close()
 	defer client.Close()
 	manager := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	var keys security.Keys
+	sess, err := session.New(704, keys, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.RegisterClient(&dns.Peer{Session: sess, AgentID: "client", Connected: time.Now()}, server, false, "")
 	go pivot.ServeVPNInteractive(ctx, server, manager.ResolveEgress, func() bool { return false }, func(ctx context.Context, stream *mux.Stream) {
 		manager.ServeRemote(ctx, "operator-secret", 704, stream)
 	})
@@ -194,6 +213,13 @@ func TestVPNClientJobPathsAreScopedToJobAPI(t *testing.T) {
 		{"GET", "/v1/routes", false},
 		{"POST", "/v1/agents/agent-a/shutdown", true},
 		{"GET", "/v1/agents/agent-a/events", true},
+		{"GET", "/v1/agents/agent-a/screens", true},
+		{"POST", "/v1/agents/agent-a/screenshots", true},
+		{"GET", "/v1/screenshots?agent_id=agent-a", true},
+		{"GET", "/v1/screenshots/0123456789abcdef0123456789abcdef", true},
+		{"GET", "/v1/screenshots/0123456789abcdef0123456789abcdef/chunk?offset=0", true},
+		{"GET", "/v1/screenshots/0123456789abcdef0123456789abcdef/chunk?offset=-1", false},
+		{"GET", "/v1/agents/agent-a/files?path=C%3A%5C", true},
 		{"POST", "/v1/sessions/agent-a/kill", true},
 	} {
 		request, err := http.NewRequest(tc.method, "http://localhost"+tc.path, nil)
