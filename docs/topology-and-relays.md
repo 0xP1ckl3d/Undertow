@@ -14,7 +14,7 @@ flowchart LR
 
 ## Enable a relay only where needed
 
-Relays have **zero listeners by default**. In the server console, select the parent agent:
+Relays have **zero listeners by default**. In the server or connected client console, select the parent agent:
 
 ```text
 agents
@@ -24,11 +24,9 @@ relay list
 topology
 ```
 
-The bind must be a numeric IPv4 address and port on that parent. Omit it for the safe loopback default `127.0.0.1:8443`; specify an internal interface address for a child on another host. `0.0.0.0:8443` accepts on all IPv4 interfaces only when explicitly entered. Permit the port in the parent host's firewall only for intended children. Stop it with `relay stop 10.20.1.15:8443`; `relay stop` without a bind works when exactly one relay is active on that agent. A listener closes when its parent agent disconnects.
+For a TCP relay, the bind must be a numeric IPv4 address and port on that parent. Omit it for the safe loopback default `127.0.0.1:8443`; specify an internal interface address for a child on another host. `0.0.0.0:8443` accepts on all IPv4 interfaces only when explicitly entered. Permit the port in the parent host's firewall only for intended children. Stop it with `relay stop 10.20.1.15:8443`; `relay stop` without a bind works when exactly one relay is active on that agent. A listener closes when its parent agent disconnects.
 
-Start the child with its **own** agent key and the original server's enrollment token and fingerprint:
-
-For a configured child payload, create a profile with `server=INTERNAL_IP:PORT transport=relay` after starting the parent listener. Set `payload retrieval-host set PUBLIC_SERVER_HOST` in the server console before hosting it, so the download URL points to the server's HTTPS listener rather than the child's relay address. The embedded relay address remains `INTERNAL_IP:PORT`. See [payload deployment](agent-distribution.md#public-https-download-host).
+Start a manual child with its **own** agent key and the original server's enrollment token and fingerprint:
 
 ```sh
 undertow agent --transport relay --server 10.20.1.15:8443 \
@@ -37,11 +35,16 @@ undertow agent --transport relay --server 10.20.1.15:8443 \
 
 The child connects only to the parent address. The parent carries its bytes over the existing session to the original server. The child authenticates directly to that server using the normal Undertow identity and enrollment handshake; the parent does not inherit the child's routes, inventory, files or permissions. `--transport relay` uses Undertow's end-to-end encrypted session rather than a separate TLS certificate at the internal listener. Provide `--fingerprint` or a trusted `--fingerprint-file`; relay cannot discover a trustworthy fingerprint by itself.
 
+For a configured child payload, create a profile with `server=INTERNAL_IP:PORT transport=relay` after starting the parent listener. Build for the child's OS and architecture. You have two explicit delivery choices:
+
+- **Server HTTPS listener:** run `payload retrieval-host set PUBLIC_SERVER_HOST`, then `payload host PAYLOAD_ID`. The download URL points at the server while the built agent still connects through the parent's relay. See [public HTTPS download host](agent-distribution.md#public-https-download-host).
+- **Parent's existing TCP relay listener:** run `payload host-agent PAYLOAD_ID PARENT_AGENT_ID RELAY_BIND PUBLIC_HOST`. The parent fetches artifact bytes through its current Undertow session and serves the opaque HTTPS URL on the **same relay address and port** that accepts children. Use `payload deploy-script-agent HOST_ID powershell|shell` for a pinned, hash-checking helper. See [host a payload through a connected agent](agent-distribution.md#host-a-payload-through-a-connected-agent). No additional server HTTPS listener is involved.
+
 The server presents each child as a separate agent. Use `topology` or `agents` to see `direct` and `via PARENT` paths. Select a child normally with `use NUMBER`; its `show`, `routes`, `shell`, `exec`, files, jobs, scripts, WASM and forwards target that child. Client route acceptance also selects the child, so the client can reach its deeper network through the parent automatically.
 
 An agent can itself host a relay after it joins through another relay. Depth is limited to eight relay links, and an agent cannot relay to itself or create a parent loop. The server rejects an invalid or excessive chain. A parent disconnect closes its descendant sessions and deactivates their routes; children reconnect through the parent when it returns. Relay listeners are session scoped and must be started again after the parent reconnects.
 
-On Windows, a parent can instead listen on an SMB named pipe. The child uses `--transport relay-smb` with a UNC pipe path; the same end-to-end Undertow session and separate child identity apply. **Relays** in the GUI can start either TCP or SMB named-pipe listeners. The named pipe is not an HTTPS download URL; use [Payload deployment](agent-distribution.md) for artifact delivery choices. Follow the [Windows SMB named-pipe relay guide](smb-named-pipe-relays.md) for exact paths, Windows access requirements, profile build, and stop procedure.
+On Windows, a parent can instead listen on an SMB named pipe. The child uses `--transport relay-smb` with a UNC pipe path; the same end-to-end Undertow session and separate child identity apply. The terminal `relay start \\.\pipe\NAME` command and **Relays** in the GUI can start this listener. A named pipe is not an HTTPS download URL; use `payload download PAYLOAD_ID` or another delivery channel for the Windows child build. Follow the [Windows SMB named-pipe relay guide](smb-named-pipe-relays.md) for exact paths, Windows access requirements, profile build, and stop procedure.
 
 `--deny=relay` on an agent rejects relay listener requests while leaving its other capabilities available. `relay` is independent of `listeners`, which controls agent-side TCP forwards for client services. No relay port is opened just because the capability is allowed. The relay listener and child session do not change host adapters or routes.
 

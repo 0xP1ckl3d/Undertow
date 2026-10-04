@@ -677,14 +677,13 @@ func runConsoleCommand(ctx context.Context, output io.Writer, call consoleCaller
 		return runConsoleAgentDistribution(ctx, output, call, args)
 	}
 	if args[0] == "relay" || args[0] == "topology" {
-		if vpnClient {
-			return errors.New("relay management and topology require a server console")
-		}
 		return runConsoleRelayCommand(ctx, output, call, args)
 	}
 	if args[0] == "transports" || args[0] == "start" || args[0] == "stop" {
-		if vpnClient {
-			return errors.New("transport management requires a server console")
+		if vpnClient && args[0] == "stop" {
+			if err := checkClientCarrierStop(ctx, call, ownClientID, args); err != nil {
+				return err
+			}
 		}
 		return runConsoleTransportCommand(ctx, output, call, args)
 	}

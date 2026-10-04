@@ -41,7 +41,7 @@ func runConsoleRelayCommand(ctx context.Context, output io.Writer, call consoleC
 		if len(args) != 3 {
 			return errors.New("use relay list")
 		}
-		data, err := call(ctx, http.MethodGet, "/v1/relays?agent_id="+url.QueryEscape(agentID), nil)
+		data, err := call(ctx, http.MethodGet, "/v1/relays", nil)
 		if err != nil {
 			return err
 		}
@@ -49,8 +49,14 @@ func runConsoleRelayCommand(ctx context.Context, output io.Writer, call consoleC
 		if err := json.Unmarshal(data, &relays); err != nil {
 			return err
 		}
-		fmt.Fprintf(output, "Relay listeners (%d):\n", len(relays))
+		var selected []control.RelayInfo
 		for _, relay := range relays {
+			if relay.AgentID == agentID {
+				selected = append(selected, relay)
+			}
+		}
+		fmt.Fprintf(output, "Relay listeners (%d):\n", len(selected))
+		for _, relay := range selected {
 			fmt.Fprintf(output, "  %s\n", relay.Bind)
 		}
 		return nil

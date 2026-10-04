@@ -28,7 +28,8 @@ func printPayloadWorkflow(out io.Writer) {
   1. payload profile create NAME server=HOST:PORT transport=quic
      Save reusable connection settings. Use "payload profiles" to find names.
   2. payload build NAME windows amd64
-     Create a new binary with its own agent identity and credential.
+     Create a new binary with its own enrollment credential. Each running
+     copy creates an independent agent identity when it starts.
   3. payload host PAYLOAD_ID
      Enable HTTPS download and print its opaque URL and path.
   4. Download, verify SHA-256, and run the binary without arguments.

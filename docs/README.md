@@ -7,6 +7,7 @@ New to Undertow? Follow [Getting started](getting-started.md) first. It takes yo
 | I want to… | Start here |
 | --- | --- |
 | Build, host, download, or deploy a headless agent | [Payload deployment](agent-distribution.md) |
+| Host a child payload through its parent agent's TCP relay | [Agent-hosted payloads](agent-distribution.md#host-a-payload-through-a-connected-agent) |
 | Choose VPN egress, internal routing, or a carrier | [Networking modes and transports](networking-modes.md) |
 | Use the console for agents, routes, files, jobs, screenshots, and forwards | [Console guide](console.md) |
 | Use the local browser workspace for topology and agent workflows | [Browser GUI](gui.md) |

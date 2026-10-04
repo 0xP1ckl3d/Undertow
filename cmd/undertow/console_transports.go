@@ -96,3 +96,31 @@ func runConsoleTransportCommand(ctx context.Context, output io.Writer, call cons
 	fmt.Fprintf(output, "%s listening on %s (%s, TLS %s).\n", strings.ToUpper(info.Transport), info.Listen, info.Network, info.TLSMode)
 	return nil
 }
+
+// A client console follows the same local safety rule as the browser service:
+// it cannot stop the server carrier carrying its own control session.
+func checkClientCarrierStop(ctx context.Context, call consoleCaller, ownClientID uint64, args []string) error {
+	if ownClientID == 0 || len(args) < 3 || args[1] != "transport" {
+		return nil
+	}
+	name, err := canonicalTransport(args[2])
+	if err != nil {
+		return err
+	}
+	data, err := call(ctx, http.MethodGet, "/v1/status", nil)
+	if err != nil {
+		return err
+	}
+	var status struct {
+		Clients []control.ClientInfo `json:"clients"`
+	}
+	if err := json.Unmarshal(data, &status); err != nil {
+		return err
+	}
+	for _, client := range status.Clients {
+		if client.SessionID == ownClientID && client.Transport == name {
+			return errors.New("switch this client to another carrier before stopping its current carrier")
+		}
+	}
+	return nil
+}

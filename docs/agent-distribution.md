@@ -40,7 +40,12 @@ Optional `payload deploy-script PAYLOAD_ID powershell|shell` prints a helper tha
 When a child can reach a parent agent but cannot reach the server's HTTPS payload listener, enable downloads on the parent's **existing relay listener**. The server keeps the artifact. For each download the parent requests its bytes through its current authenticated Undertow session and streams them to the child. The parent does not store the binary or run a shell. The relay listener continues to carry child agent sessions on the same address and port. Downloads are disabled until an operator explicitly enables them for an artifact.
 
 ```text
+agents
+use 1
+show
 relay start 192.168.10.20:8443
+relay list
+back
 payload profile create branch server=192.168.10.20:8443 transport=relay
 payload build branch windows amd64
 payload host-agent PAYLOAD_ID PARENT_AGENT_ID 192.168.10.20:8443 192.168.10.20
@@ -49,9 +54,11 @@ payload deploy-script-agent HOST_ID powershell
 payload unhost-agent HOST_ID
 ```
 
-`RELAY_BIND` must match an active relay listener on the chosen parent. Choose an interface and port reachable by the child when starting that relay. `PUBLIC_HOST` is the IP address or DNS hostname the child uses for the download URL, without a port. Undertow adds the relay listener's port. A loopback relay bind is appropriate only for a child running on the parent host. The payload profile's `server` is the child's **Undertow relay carrier** destination. Its host and port may match the download URL, but the URL has an opaque HTTPS path.
+Run these commands in the **server or connected client console**. Replace `1` with the parent agent's current number and use its full ID from `show` for `PARENT_AGENT_ID`. `RELAY_BIND` must exactly match an active TCP relay listener on that parent. Choose an interface and port reachable by the child when starting that relay. `PUBLIC_HOST` is the IP address or DNS hostname the child uses for the download URL, without a scheme or port; Undertow adds the relay listener's port. A loopback relay bind is appropriate only for a child running on the parent host. The payload profile's `server` is the child's **Undertow relay carrier** destination. Its host and port may match the download URL, but the URL has an opaque HTTPS path. `payload retrieval-host` and `payload retrieval-path` configure the separate server HTTPS download listener; they do not change this agent-hosted URL.
 
-The returned host ID identifies one active download URL. It works only while that relay listener and parent session are active. `payload agent-hosts` lists active download URLs. `payload unhost-agent` invalidates one URL while leaving the relay listener and child sessions intact. Artifact revocation or deletion invalidates its relay download URLs. A server restart stops active relays and their downloads; start them again explicitly. The server audit log records operator actions, while the active download list reflects current state. The generated PowerShell helper pins the temporary agent HTTPS certificate and checks the artifact SHA-256; the POSIX helper pins its public key and checks SHA-256. Review the URL and target host before executing a helper on an endpoint.
+The returned host ID identifies one active download URL. It works only while that relay listener and parent session are active. `payload agent-hosts` lists active download URLs. `payload unhost-agent` invalidates one URL while leaving the relay listener and child sessions intact. `relay stop RELAY_BIND` closes that listener, blocking new child connections and downloads; already established child sessions follow the normal session lifecycle. Artifact revocation or deletion invalidates its relay download URLs. A server restart stops active relays and their downloads; start them again explicitly. The server audit log records operator actions, while the active download list reflects current state. The generated PowerShell helper pins the temporary agent HTTPS certificate and checks the artifact SHA-256; the POSIX helper pins its public key and checks SHA-256. The listener serves HTTPS and framed Undertow child sessions on the **same port**; no extra server HTTPS handler is started for this workflow. Review the URL and target host before executing a helper on an endpoint.
+
+`payload deploy-script-agent HOST_ID shell` is also available for a Linux child. The helper is printed for review; generating it does not start the child. To save the build to the console host for another delivery channel, use `payload download PAYLOAD_ID [OUTPUT]`. An SMB named-pipe relay has no HTTPS download URL: build a Windows `relay-smb` payload and deliver it through the server download or your chosen channel. See [Windows SMB named-pipe relays](smb-named-pipe-relays.md).
 
 In the GUI, open **Payloads → Artifacts**, select the build, then use **Host through an agent**. Choose the connected parent, one of its active relay listeners, and a child-reachable host. The page lists current URLs and offers preview, download, and explicit disable controls. **Relays → Create child payload** preselects the parent and relay address for this workflow, but does not enable downloads automatically.
 
@@ -67,7 +74,7 @@ This uses the authenticated control connection, so an unhosted build can be down
 
 ## Public HTTPS download host
 
-By default, Undertow builds a hosted URL using the payload profile's `server` host and the server's active HTTPS listener port. A relay agent may instead connect to a parent at `127.0.0.1:8443` or an internal address that cannot serve public downloads. On the server console, set the external HTTPS host separately before printing its deploy script:
+By default, Undertow builds a hosted URL using the payload profile's `server` host and the server's active HTTPS listener port. A relay agent may instead connect to a parent at `127.0.0.1:8443` or an internal address that cannot serve public downloads. In the server or connected client console, set the external HTTPS host separately before printing its deploy script:
 
 ```text
 payload retrieval-host set SERVER_IP

@@ -117,12 +117,12 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 				return matches
 			}
 		}
-		commands := []string{"agents", "agent", "payload", "session", "use", "status", "routes", "help", "clear", "cls", "quit", "exit"}
+		commands := []string{"agents", "agent", "payload", "session", "use", "status", "routes", "topology", "transports", "start", "stop", "help", "clear", "cls", "quit", "exit"}
 		if selected {
 			commands = append(commands, loadedNames...)
 		}
 		if selected {
-			commands = append(commands, "show", "back", "route", "jobs", "job", "exec", "shell", "run-script", "run-wasm", "run-native", "run-bof", "pwd", "ls", "stat", "mkdir", "rm", "whoami", "ps", "privileges", "env", "interfaces", "dns", "route-table", "screens", "load", "unload", "bofs", "modules")
+			commands = append(commands, "show", "back", "relay", "route", "jobs", "job", "exec", "shell", "run-script", "run-wasm", "run-native", "run-bof", "pwd", "ls", "stat", "mkdir", "rm", "whoami", "ps", "privileges", "env", "interfaces", "dns", "route-table", "screens", "load", "unload", "bofs", "modules")
 		}
 		if vpn {
 			commands = append(commands, "background", "internal", "vpn")
@@ -130,10 +130,7 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 				commands = append(commands, "forward", "upload", "download", "screenshot")
 			}
 		} else {
-			commands = append(commands, "transports", "topology", "start", "stop", "client")
-			if selected {
-				commands = append(commands, "relay")
-			}
+			commands = append(commands, "client")
 			if attached {
 				commands = append(commands, "background", "logs")
 			}
@@ -222,7 +219,7 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 		}
 	case "help":
 		if len(before) == 1 {
-			topics := []string{"agents", "agent", "payload", "profile", "artifacts", "status", "route", "lifecycle", "clear", "load", "unload", "bofs", "modules"}
+			topics := []string{"agents", "agent", "payload", "profile", "artifacts", "status", "route", "relay", "topology", "transport", "transports", "lifecycle", "clear", "load", "unload", "bofs", "modules"}
 			topics = append(topics, loadedNames...)
 			if selected {
 				topics = append(topics, "shell", "exec", "run-script", "run-wasm", "run-native", "run-bof", "jobs", "host")
@@ -232,11 +229,8 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 				if selected {
 					topics = append(topics, "files", "forward")
 				}
-			} else {
-				topics = append(topics, "relay", "transport")
-				if attached {
-					topics = append(topics, "logs")
-				}
+			} else if attached {
+				topics = append(topics, "logs")
 			}
 			return wordCompletions(topics, partial)
 		}

@@ -120,10 +120,7 @@ when applications on the server host itself should use these routes.
 `)
 		}
 	case "relay", "topology":
-		if vpnClient {
-			return fmt.Errorf("relay and topology are managed in the server console")
-		}
-		fmt.Fprint(output, `Agent relays (server console; enter each command separately):
+		fmt.Fprint(output, `Agent relays (server or client console; enter each command separately):
   topology                  Show parent and child agent paths.
   agents                    Find the parent agent's number.
   use NUMBER                Select that parent agent.
@@ -140,16 +137,14 @@ the child end to end. See docs/smb-named-pipe-relays.md.
 The parent must allow the relay capability; --deny=relay blocks it.
 `)
 	case "transport", "transports", "start", "stop":
-		if vpnClient {
-			return fmt.Errorf("transport listeners are managed in the server console")
-		}
 		fmt.Fprint(output, `Server transport listeners:
   transports                Show every listener, TLS mode and session count.
   start transport NAME [self-signed|tls-cert FILE tls-key FILE] [listen ADDR]
   stop transport NAME       Close an idle listener.
   stop transport NAME force Disconnect its sessions, then close it.
 NAME is dns, websocket or quic. The server starts all three by default.
-Bare stop gracefully shuts down the server worker.
+An attached client cannot stop the carrier carrying its own session.
+Bare stop gracefully shuts down the server worker only from its server console.
 `)
 	case "shell", "interactive":
 		fmt.Fprint(output, `Live agent shell (enter each command separately):

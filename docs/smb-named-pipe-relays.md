@@ -13,13 +13,14 @@ Nothing starts by default. An operator must start a named-pipe relay on a connec
 
 ## Start from the terminal console
 
-Select the connected Windows parent in the server console, then start the pipe:
+Select the connected Windows parent in the server or connected client console, then start the pipe:
 
 ```text
 agents
 use 1
 relay start \\.\pipe\branch_ops
 relay list
+topology
 ```
 
 On the Windows child, run the full agent with a separate identity key:
@@ -37,6 +38,8 @@ payload download PAYLOAD_ID
 ```
 
 The `server` field here is the child's pipe address, not the Undertow server's network address. The build still embeds the original server fingerprint and a new artifact enrollment credential. A Linux target is rejected for `relay-smb`.
+
+`payload download PAYLOAD_ID` saves the build on the console host through the authenticated control connection. The pipe does not provide an HTTPS artifact URL, so `payload host-agent` cannot target it. Deliver the saved Windows binary through your chosen channel; starting the pipe or building a payload does not launch the child. Use `relay stop \\.\pipe\branch_ops` to close the listener after it is no longer needed.
 
 ## Use the browser GUI
 

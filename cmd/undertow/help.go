@@ -190,7 +190,7 @@ Usage: undertow agent --server HOST:PORT|PIPE_PATH [--fingerprint HEX | --trust-
 
 Example: undertow agent --server 203.0.113.10:53 --fingerprint HEX --token-file token.key --background
 
-For a child agent, select its parent in the SERVER console, run
+For a child agent, select its parent in a server or connected client console, run
 'relay start INTERNAL_IP:8443', then start the child with
 '--transport relay --server INTERNAL_IP:8443 --fingerprint HEX'.
 Use a separate --agent-key. No relay listener opens by default;
@@ -221,7 +221,8 @@ Usage: undertow client (--vpn | --internal | --vpn --internal) --server HOST:POR
   --internal               Use agent routes accepted or added in the client
                            console; server global routes are optional. Alone,
                            this leaves Internet/default routes unchanged.
-  --server HOST:PORT       Server host and carrier port; DNS needs numeric IPv4.
+  --server ADDRESS         Host:port for network carriers; relay-smb uses a
+                           Windows named-pipe path.
   --transport MODE         dns (default), websocket, quic, relay, or relay-smb.
   --websocket-path PATH    Match server path for WebSocket (default /undertow).
   --tls-server-name NAME   Verify a DNS name in the TLS certificate.

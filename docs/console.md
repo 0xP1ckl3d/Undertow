@@ -1,6 +1,6 @@
 # Interactive consoles
 
-Undertow has two interactive consoles. Run `undertow server` in a terminal on the **server host** to start its worker and open the operator console. Run `undertow client --vpn --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify` on the **VPN client host** to start its worker and open the client console when using the server's default self-signed TLS certificate. Both consoles can select and operate agents and manage deployment payloads. The server console manages global routes and listeners; the client console manages that client's routes, VPN mode, and agent-side forwards. The server needs `--tun` only if applications on the server host itself need routed agent access.
+Undertow has two interactive consoles. Run `undertow server` in a terminal on the **server host** to start its worker and open the operator console. Run `undertow client --vpn --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify` on the **VPN client host** to start its worker and open the client console when using the server's default self-signed TLS certificate. Use `client --operator-only` to connect and operate agents without a TUN device. Both consoles can select and operate agents, manage deployment payloads, inspect topology, and start or stop relay and server carrier listeners. The client console manages that client's routes, VPN mode, and agent-side forwards; it refuses to stop the server carrier carrying its own session. The server needs `--tun` only if applications on the server host itself need routed agent access.
 
 See [getting started](getting-started.md) for enrollment, fingerprint, and privilege setup. In the examples below, `undertow` means `./bin/undertow` on Linux or `.\bin\undertow.exe` on Windows. Use `sudo` for server console access if the elevated server owns `control.key`; a VPN client needs elevation to install routes.
 
@@ -49,11 +49,11 @@ agent shutdown
 
 `payload build` prints a 24-character **payload ID** for the build and the binary's **server file** path. Each running copy creates a separate 32-character agent ID when it connects. The server file is not an endpoint install path. `payload host` prints the endpoint **download URL** and opaque **download path**; `payload show` and `payload url` retrieve them again. Use `payload retrieval-path` to view the public prefix and `payload retrieval-path set /downloads/` to change it without restarting. Changing it rotates hosted download tokens, permanently invalidating earlier URLs; `payload hosted` lists the new URLs. Use `payload profile delete NAME` to remove a reusable profile. Editing one leaves existing payloads unchanged. Verify the download's SHA-256 before launching it with no arguments. `session kill` closes a connection and permits reconnect; `agent shutdown` stops the configured process. `payload unhost`, `revoke`, and `delete` separately control download, future enrollment, and the server-side file/record. Normal packaged-agent operation writes no local runtime files; the server retains bounded lifecycle events. Older `agent profile/build/artifacts/host` forms still work as aliases. See [payload deployment](agent-distribution.md) for authentication and endpoint state.
 
-For a child behind a TCP parent relay, use `payload host-agent PAYLOAD_ID PARENT_AGENT_ID RELAY_BIND PUBLIC_HOST` after starting the relay. `payload agent-hosts [PAYLOAD_ID]` lists active URLs, `payload deploy-script-agent HOST_ID powershell|shell` prints a pinned helper, and `payload unhost-agent HOST_ID` disables one URL without stopping the relay. The parent fetches each artifact from the server over its existing session. Follow the [payload deployment guide](agent-distribution.md#host-a-payload-through-a-connected-agent) for a complete example.
+For a child behind a TCP parent relay, use `payload host-agent PAYLOAD_ID PARENT_AGENT_ID RELAY_BIND PUBLIC_HOST` after starting the relay. `payload agent-hosts [PAYLOAD_ID]` lists active URLs, `payload deploy-script-agent HOST_ID powershell|shell` prints a pinned helper, and `payload unhost-agent HOST_ID` disables one URL without stopping the relay. The parent fetches each artifact from the server over its existing session and serves downloads on the relay's existing address and port. These commands work in either console. Follow the [payload deployment guide](agent-distribution.md#host-a-payload-through-a-connected-agent) for a complete example.
 
 ## Server listeners and agent topology
 
-The default server opens DNS UDP/53, WebSocket TCP/443 and QUIC UDP/443. Use these commands in the **server** console:
+The default server opens DNS UDP/53, WebSocket TCP/443 and QUIC UDP/443. These commands work in the **server or connected client** console:
 
 ```text
 transports
@@ -63,9 +63,9 @@ start transport websocket tls-cert ./server.crt tls-key ./server.key
 topology
 ```
 
-`transports` shows network, listen address, TLS mode and active session count. An active carrier cannot be stopped normally; the error shows agent and client counts. `stop transport NAME force` deliberately closes its sessions, while other carriers continue. A stopped listener can be restarted. `start transport NAME listen IP:PORT` chooses a nondefault address; transport names ignore case. Certificate paths are resolved on the server worker host. `status` and `undertow status` also show the listener table and each peer's carrier.
+`transports` shows network, listen address, TLS mode and active session count. An active carrier cannot be stopped normally; the error shows agent and client counts. `stop transport NAME force` deliberately closes its sessions, while other carriers continue. A client console refuses to stop its own active carrier even with `force`; connect it through another carrier first. A stopped listener can be restarted. `start transport NAME listen IP:PORT` chooses a nondefault address; transport names ignore case. Certificate paths are resolved on the server worker host. `status` and `undertow status` also show the listener table and each peer's carrier. Bare `stop` shuts down the server worker only in its attached server console; use `quit` or `background` on a client.
 
-Select a parent agent to open a child-agent relay:
+Select a parent agent in either console to open a child-agent relay:
 
 ```text
 agents
@@ -77,6 +77,8 @@ relay stop 10.20.1.15:8443
 ```
 
 No agent listens for children until `relay start` succeeds. The omitted bind defaults to loopback `127.0.0.1:8443`; specify an internal interface for another host. The child runs `undertow agent --transport relay --server 10.20.1.15:8443 --fingerprint FINGERPRINT --token-file token.key` with its own agent key. `topology` shows it under the selected parent; it can be selected and controlled as an independent agent. `--deny=relay` on a parent rejects the listener command. See [topology and relay guidance](topology-and-relays.md).
+
+For a Windows parent, `relay start \\.\pipe\NAME` opens a named pipe. A Windows child uses `--transport relay-smb --server \\PARENT_HOST\pipe\NAME`; build a Windows payload with `transport=relay-smb`. The named pipe has no HTTPS download URL, so use `payload download PAYLOAD_ID` to retrieve the build locally. See the [SMB named-pipe guide](smb-named-pipe-relays.md).
 
 Agent numbers can change after connections change. Run `agents` again before selecting by number. Type `help` after `use` to see that agent's menu. Quote a path or argument containing spaces with single or double quotes. The console parses quotes; it does not expand shell variables or run shell syntax.
 

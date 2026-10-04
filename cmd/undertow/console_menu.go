@@ -70,7 +70,7 @@ func printConsoleOverview(output io.Writer, vpnClient, selected, serverAttached 
 	m.section("PAYLOAD DEPLOYMENT")
 	m.row("payload", "Show the profile → build → host → run workflow")
 	m.row("payload profiles", "Find a reusable profile name")
-	m.row("payload build NAME OS ARCH", "Create a binary with a new identity")
+	m.row("payload build NAME OS ARCH", "Create a binary with new enrollment")
 	m.row("payload list", "List builds with full payload IDs")
 	m.row("payload show PAYLOAD_ID", "See the server file, download URL and status")
 	m.row("payload host PAYLOAD_ID", "Enable HTTPS download")
@@ -127,6 +127,16 @@ func printConsoleOverview(output io.Writer, vpnClient, selected, serverAttached 
 	}
 
 	if vpnClient {
+		m.section("SERVER PATHS")
+		m.row("topology", "Show direct and relayed agent paths")
+		m.row("transports", "Show DNS, WebSocket and QUIC listeners")
+		m.row("start transport NAME ...", "Add a server listener")
+		m.row("stop transport NAME [force]", "Close a listener, except this client's carrier")
+		if selected {
+			m.row("relay start [BIND]", "Open a child-agent relay here")
+			m.row("relay list", "List this agent's relays")
+			m.row("relay stop [BIND]", "Close a relay")
+		}
 		m.section("CLIENT ROUTING")
 		m.row("routes", "Show available and accepted routes")
 		if selected {

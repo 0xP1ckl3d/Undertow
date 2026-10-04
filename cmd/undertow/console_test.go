@@ -78,7 +78,7 @@ func TestConsoleHelpTopics(t *testing.T) {
 	if err := printConsoleHelp(&clientSummary, true, false, false, ""); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"VPN CLIENT / MAIN MENU", "internal on|off|status", "vpn on|off|status", "use NUMBER|ID|HOSTNAME", "quit / exit"} {
+	for _, want := range []string{"VPN CLIENT / MAIN MENU", "internal on|off|status", "vpn on|off|status", "topology", "transports", "use NUMBER|ID|HOSTNAME", "quit / exit"} {
 		if !strings.Contains(clientSummary.String(), want) {
 			t.Fatalf("client main menu missing %q: %q", want, clientSummary.String())
 		}
@@ -89,7 +89,7 @@ func TestConsoleHelpTopics(t *testing.T) {
 	if err := printConsoleHelp(&agentSummary, true, true, false, "", consoleHelpOptions{agent: "TALON"}); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"VPN CLIENT / AGENT TALON", "AGENT SESSION", "AGENT HOST", "AGENT FILES AND SERVICES", "upload LOCAL REMOTE", "download REMOTE [LOCAL]", "screenshot [NUMBER]", "forward add BIND TARGET", "route accept CIDR", "back"} {
+	for _, want := range []string{"VPN CLIENT / AGENT TALON", "AGENT SESSION", "AGENT HOST", "AGENT FILES AND SERVICES", "relay start [BIND]", "upload LOCAL REMOTE", "download REMOTE [LOCAL]", "screenshot [NUMBER]", "forward add BIND TARGET", "route accept CIDR", "back"} {
 		if !strings.Contains(agentSummary.String(), want) {
 			t.Fatalf("selected agent menu missing %q: %q", want, agentSummary.String())
 		}
@@ -99,6 +99,9 @@ func TestConsoleHelpTopics(t *testing.T) {
 	}
 	if err := printConsoleHelp(&relay, false, true, true, "relay"); err != nil {
 		t.Fatal(err)
+	}
+	if err := printConsoleHelp(io.Discard, true, true, false, "relay"); err != nil {
+		t.Fatalf("client relay help unavailable: %v", err)
 	}
 	for _, want := range []string{"relay start [BIND]", "relay list", "relay stop [BIND]", "--transport relay", "--deny=relay"} {
 		if !strings.Contains(relay.String(), want) {
