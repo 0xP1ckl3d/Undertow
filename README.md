@@ -20,6 +20,8 @@ Undertow carries the same encrypted sessions over QUIC, HTTPS/WebSocket, or dire
 
 Browse the [documentation home](docs/README.md) to find guides by task.
 
+The client also serves an optional local [browser operator workspace](docs/gui.md) by default. It shows live topology and agent workspaces while the terminal console remains fully usable; pass `--no-gui` for terminal-only operation.
+
 ## What can it do?
 
 | Need | Undertow provides | Guide |

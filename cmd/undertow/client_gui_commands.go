@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -21,6 +22,40 @@ type guiCommandResult struct {
 	Output    string               `json:"output"`
 	OpenShell bool                 `json:"open_shell,omitempty"`
 	ModuleRun *guiModuleCommandRun `json:"module_run,omitempty"`
+}
+
+func (g *guiServer) agentGUIHelp() string {
+	var out strings.Builder
+	m := consoleMenu{out: &out, color: false}
+	m.title("GUI CLIENT", "AGENT COMMANDS")
+	section := func(title string, commands [][2]string) {
+		m.section(title)
+		for _, item := range commands {
+			m.row(item[0], item[1])
+		}
+	}
+	section("AGENT SESSION", [][2]string{{"show", "Inspect this agent"}, {"agent events", "Recent lifecycle events"}, {"agent shutdown", "Ask this agent to exit"}, {"session kill", "Close this session; agent may reconnect"}, {"shell", "Open the separate live shell panel"}})
+	section("HOST", [][2]string{{"pwd; ls [PATH]; stat PATH", "Browse this agent's files"}, {"mkdir PATH; rm PATH", "Create or remove a path"}, {"whoami; ps; privileges", "Identity, processes and privileges"}, {"env [NAME]", "Environment variables"}, {"interfaces; dns; route-table", "Network configuration"}, {"screens; screenshot [NUMBER]", "List screens or capture explicitly"}})
+	section("FILES AND SERVICES", [][2]string{{"upload LOCAL REMOTE", "Send a client file to this agent"}, {"download REMOTE [LOCAL]", "Save an agent file on this client"}, {"forward add BIND TARGET", "Expose a client service through this agent"}, {"forward list; forward del BIND", "Inspect or close forwards"}, {"relay start [BIND]", "Start a relay listener on this agent"}, {"relay list; relay stop BIND", "Inspect or close relay listeners"}})
+	section("EXECUTION AND JOBS", [][2]string{{"exec PROGRAM [ARGS]", "Run one program when requested"}, {"job start PROGRAM [ARGS]", "Start a background job"}, {"jobs; job show|output ID", "Inspect retained jobs and output"}, {"job cancel|stop|delete ID", "Manage a job"}, {"run-script [OPTIONS] FILE", "Run a client-side script file"}, {"run-wasm|run-native|run-bof ...", "Run a client-side module file"}})
+	section("CLIENT ROUTING", [][2]string{{"routes", "Show routes for this agent"}, {"route accept CIDR", "Accept an advertised route on this client"}, {"route add CIDR", "Add a custom route on this client"}, {"route del CIDR", "Remove this client's accepted route"}})
+	section("MODULE BANK", [][2]string{{"modules; bofs", "List loaded commands"}, {"help MODULE", "Show a loaded command's full help"}, {"load module|wasm|bof FILE [NAME]", "Register a client module"}, {"unload module|wasm|bof NAME", "Remove a loaded command"}, {"MODULE [ARGS] [--background]", "Run a loaded command on this agent"}})
+	if g.modules != nil {
+		for _, kind := range []struct{ key, title string }{{"bof", "LOADED BOFS"}, {"module", "LOADED NATIVE MODULES"}, {"wasm", "LOADED WASM MODULES"}} {
+			var items [][2]string
+			for _, module := range g.modules.list() {
+				if module.Kind == kind.key {
+					items = append(items, [2]string{module.Name, module.Description})
+				}
+			}
+			if len(items) > 0 {
+				section(kind.title, items)
+			}
+		}
+	}
+	m.hint("Commands are bound to this agent. Local paths refer to the Undertow client host.")
+	m.hint("Opening the workspace never starts an agent operation.")
+	return out.String()
 }
 
 func (g *guiServer) listGUIConsoleModules(verb string) guiCommandResult {
@@ -156,7 +191,7 @@ func (g *guiServer) runAgentGUICommand(ctx context.Context, agentID, line string
 		if len(args) != 1 {
 			return guiCommandResult{}, errors.New("use help [LOADED_MODULE]")
 		}
-		return guiCommandResult{Output: "AGENT COMMANDS\n  show                    Agent details\n  pwd, ls [PATH], stat PATH\n  whoami, ps, privileges, env [NAME]\n  interfaces, dns, route-table\n  screens; screenshot [NUMBER]  List screens or capture to server history\n  exec PROGRAM [ARGS]     Run one program\n  job start PROGRAM ...   Start background job\n  jobs; job show|output|cancel|delete ID\n  modules; bofs; help MODULE\n  load module|wasm|bof FILE [NAME] [--format FORMAT]\n  unload module|wasm|bof NAME\n  MODULE [ARGS] [--background] [--stdin|--data FILE]\n  run-script [--background] bash|powershell FILE\n  run-wasm [--background] [--stdin FILE] MODULE.wasm [ARGS]\n  run-native [--background] [--data FILE] MODULE.module [ARGS]\n  run-bof [--background] [--format FMT] OBJECT.o [ARGS]\n  relay start [BIND]; relay list; relay stop BIND\n  route accept CIDR; route add CIDR; route del CIDR\n  forward add BIND TARGET; forward list; forward del BIND\n  agent events            Recent connection events\n  shell                   Open the separate live shell panel\n\nCommands target this workspace agent. Quotes preserve spaces. Local file paths refer to the Undertow client host. No module or shell starts until requested.\n"}, nil
+		return guiCommandResult{Output: g.agentGUIHelp()}, nil
 	case "modules", "bofs":
 		if len(args) != 1 {
 			return guiCommandResult{}, fmt.Errorf("use %s", args[0])
@@ -267,6 +302,36 @@ func (g *guiServer) runAgentGUICommand(ctx context.Context, agentID, line string
 			return guiCommandResult{Output: result.Stdout + result.Stderr}, errors.New(result.Error)
 		}
 		return guiCommandResult{Output: result.Stdout + result.Stderr}, nil
+	case "upload", "download":
+		if len(args) != 3 && !(args[0] == "download" && len(args) == 2) {
+			return guiCommandResult{}, errors.New("use upload LOCAL REMOTE or download REMOTE [LOCAL]")
+		}
+		request := clientFileRequest{AgentID: agentID, Operation: args[0]}
+		if args[0] == "upload" {
+			request.LocalPath, request.RemotePath = args[1], args[2]
+		} else {
+			request.RemotePath = args[1]
+			if len(args) == 3 {
+				request.LocalPath = args[2]
+			} else {
+				request.LocalPath, err = defaultDownloadPath(agentID, request.RemotePath)
+				if err != nil {
+					return guiCommandResult{}, err
+				}
+				if err = prepareClientOutputDirectory(filepath.Dir(request.LocalPath)); err != nil {
+					return guiCommandResult{}, err
+				}
+			}
+		}
+		request.LocalPath, err = filepath.Abs(request.LocalPath)
+		if err != nil {
+			return guiCommandResult{}, err
+		}
+		result, err := g.client.transferProgress(ctx, mustGUIJSON(request), nil)
+		if err != nil {
+			return guiCommandResult{}, err
+		}
+		return guiCommandResult{Output: fmt.Sprintf("%s complete: %d bytes, SHA-256 %s\n", strings.Title(args[0]), result.Size, result.SHA256)}, nil
 	case "exec":
 		if len(args) < 2 {
 			return guiCommandResult{}, errors.New("use exec PROGRAM [ARGS]")
@@ -359,6 +424,13 @@ func (g *guiServer) runAgentGUICommand(ctx context.Context, agentID, line string
 			return guiCommandResult{}, errors.New("use job show|output|cancel|delete ID")
 		}
 	case "agent":
+		if len(args) == 2 && args[1] == "shutdown" {
+			_, err := call(http.MethodPost, base+"/shutdown", map[string]any{})
+			if err != nil {
+				return guiCommandResult{}, err
+			}
+			return guiCommandResult{Output: "Agent shutdown requested. The packaged agent will exit.\n"}, nil
+		}
 		if len(args) == 2 && args[1] == "events" {
 			data, err := call(http.MethodGet, base+"/events", nil)
 			if err != nil {
@@ -377,11 +449,86 @@ func (g *guiServer) runAgentGUICommand(ctx context.Context, agentID, line string
 			}
 			return guiCommandResult{Output: out.String()}, nil
 		}
-		return guiCommandResult{}, errors.New("use agent events")
+		return guiCommandResult{}, errors.New("use agent events or agent shutdown")
+	case "session":
+		if len(args) != 2 || args[1] != "kill" {
+			return guiCommandResult{}, errors.New("use session kill")
+		}
+		data, err := call(http.MethodGet, "/v1/status", nil)
+		if err != nil {
+			return guiCommandResult{}, err
+		}
+		var status struct {
+			Agents []control.AgentInfo `json:"agents"`
+		}
+		if err := json.Unmarshal(data, &status); err != nil {
+			return guiCommandResult{}, err
+		}
+		var agent control.AgentInfo
+		for _, candidate := range status.Agents {
+			if candidate.ID == agentID {
+				agent = candidate
+				break
+			}
+		}
+		if agent.SessionID == 0 {
+			return guiCommandResult{}, errors.New("agent has no active session")
+		}
+		_, err = call(http.MethodPost, fmt.Sprintf("/v1/sessions/%d/kill", agent.SessionID), map[string]any{})
+		if err != nil {
+			return guiCommandResult{}, err
+		}
+		return guiCommandResult{Output: "Agent session closed. The agent may reconnect.\n"}, nil
 	case "relay":
 		return g.runAgentGUIRelay(ctx, call, agentID, args)
 	case "route":
 		return g.runAgentGUIRoute(ctx, agentID, args)
+	case "routes":
+		if len(args) != 1 {
+			return guiCommandResult{}, errors.New("use routes")
+		}
+		data, err := call(http.MethodGet, "/v1/status", nil)
+		if err != nil {
+			return guiCommandResult{}, err
+		}
+		var status struct {
+			Agents []control.AgentInfo `json:"agents"`
+		}
+		if err := json.Unmarshal(data, &status); err != nil {
+			return guiCommandResult{}, err
+		}
+		var agent control.AgentInfo
+		for _, candidate := range status.Agents {
+			if candidate.ID == agentID {
+				agent = candidate
+				break
+			}
+		}
+		if agent.ID == "" {
+			return guiCommandResult{}, errors.New("agent is not connected")
+		}
+		var out strings.Builder
+		out.WriteString("Advertised by this agent:\n")
+		if len(agent.AdvertisedRoutes) == 0 {
+			out.WriteString("  (none)\n")
+		}
+		for _, prefix := range agent.AdvertisedRoutes {
+			fmt.Fprintf(&out, "  %s\n", prefix)
+		}
+		out.WriteString("Accepted on this client:\n")
+		g.client.routeMu.Lock()
+		count := 0
+		for _, route := range g.client.routes {
+			if route.AgentID == agentID {
+				fmt.Fprintf(&out, "  %s (%s)\n", route.Prefix, map[bool]string{true: "installed", false: "pending"}[g.client.active[route.Prefix]])
+				count++
+			}
+		}
+		g.client.routeMu.Unlock()
+		if count == 0 {
+			out.WriteString("  (none)\n")
+		}
+		return guiCommandResult{Output: out.String()}, nil
 	case "forward":
 		return g.runAgentGUIForward(call, agentID, args)
 	default:

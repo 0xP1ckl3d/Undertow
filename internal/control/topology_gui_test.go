@@ -1,0 +1,146 @@
+package control
+
+import (
+	"context"
+	"net/netip"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"undertow/internal/mux"
+	"undertow/internal/routing"
+	"undertow/internal/security"
+	"undertow/internal/session"
+	"undertow/internal/transport/dns"
+)
+
+func TestTopologyShowsEveryCarrierAndConfiguredServerHost(t *testing.T) {
+	topology := BuildTopology(nil, nil, nil, nil, nil, ServerInfo{PublicHost: "gateway.example.test", Listeners: []ListenerInfo{{Transport: "quic", Listen: "0.0.0.0:443", Sessions: 2}}})
+	if topology.Version < 3 || len(topology.Nodes) == 0 {
+		t.Fatalf("topology=%+v", topology)
+	}
+	server := topology.Nodes[0]
+	if server.PublicHost != "gateway.example.test" || len(server.Carriers) != 3 {
+		t.Fatalf("server=%+v", server)
+	}
+	if server.Carriers[0].Transport != "dns" || server.Carriers[0].Active || server.Carriers[1].Transport != "quic" || !server.Carriers[1].Active || server.Carriers[1].Sessions != 2 || server.Carriers[2].Transport != "websocket" || server.Carriers[2].Active {
+		t.Fatalf("carriers=%+v", server.Carriers)
+	}
+}
+
+func TestTopologyCarriesEachClientsRoutingModes(t *testing.T) {
+	clients := []ClientInfo{{ID: "vpn-client", SessionID: 41, VPN: true, Internal: false}, {ID: "internal-client", SessionID: 42, VPN: false, Internal: true}}
+	topology := BuildTopology(nil, clients, nil, nil, nil)
+	seen := map[string]TopologyEdge{}
+	for _, edge := range topology.Edges {
+		if edge.Kind == "carrier" {
+			seen[edge.ClientID] = edge
+		}
+	}
+	if !seen["vpn-client"].VPN || seen["vpn-client"].Internal || seen["internal-client"].VPN || !seen["internal-client"].Internal {
+		t.Fatalf("client modes in topology: %+v", seen)
+	}
+	if !VPNEnabled([]byte(`{"mode":"vpn","vpn":true}`)) || VPNEnabled([]byte(`{"mode":"vpn"}`)) {
+		t.Fatal("VPN handshake mode was not decoded")
+	}
+}
+
+func TestPublicHostPersistsAndRejectsInvalidNames(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ops.db")
+	store, err := OpenOperationsStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetPublicHost("gateway.example.test"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err = OpenOperationsStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	host, err := store.PublicHost()
+	if err != nil || host != "gateway.example.test" {
+		t.Fatalf("host=%q err=%v", host, err)
+	}
+	for _, invalid := range []string{"https://example.test", "example.test:443", "-bad.test", "a..b", "127.0.0.1:443"} {
+		if validServerPublicHost(invalid) {
+			t.Errorf("accepted %q", invalid)
+		}
+	}
+}
+
+func TestObservedPublicIPDoesNotGuessPrivateAddress(t *testing.T) {
+	if got := observedPublicIP("192.168.50.1:4141"); got != "" {
+		t.Fatalf("private IP=%q", got)
+	}
+	if got := observedPublicIP("8.8.8.8:4141"); got != "8.8.8.8" {
+		t.Fatalf("global IP=%q", got)
+	}
+}
+
+func TestDisconnectedAgentRemainsInServerCatalogAcrossRestart(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	path := filepath.Join(t.TempDir(), "ops.db")
+	store, err := OpenOperationsStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	if err := manager.SetOperationsStore(store); err != nil {
+		t.Fatal(err)
+	}
+	a, b := make(chan []byte, 256), make(chan []byte, 256)
+	serverMux := mux.New(ctx, &remoteTestTransport{in: a, out: b, done: make(chan struct{})}, true)
+	agentMux := mux.New(ctx, &remoteTestTransport{in: b, out: a, done: make(chan struct{})}, false)
+	defer serverMux.Close()
+	defer agentMux.Close()
+	var keys security.Keys
+	sess, err := session.New(888, keys, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.Register(&dns.Peer{Session: sess, AgentID: "agent-record", Connected: time.Now()}, serverMux)
+	manager.UpdateInventory("agent-record", serverMux, []byte(`{"hostname":"WS01","os":"windows","advertised_routes":["10.44.0.0/16"]}`))
+	manager.Unregister("agent-record", serverMux)
+	if len(manager.AgentList()) != 0 {
+		t.Fatal("offline agent remained operational")
+	}
+	catalog := manager.AgentCatalog()
+	if len(catalog) != 1 || catalog[0].Online || catalog[0].Hostname != "WS01" || len(catalog[0].AdvertisedRoutes) != 1 || catalog[0].DisconnectedAt.IsZero() {
+		t.Fatalf("catalog=%+v", catalog)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := OpenOperationsStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	restarted := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	if err := restarted.SetOperationsStore(reopened); err != nil {
+		t.Fatal(err)
+	}
+	catalog = restarted.AgentCatalog()
+	if len(catalog) != 1 || catalog[0].Online || catalog[0].Hostname != "WS01" {
+		t.Fatalf("restored=%+v", catalog)
+	}
+	topology := restarted.Topology()
+	found := false
+	for _, node := range topology.Nodes {
+		if node.ID == "agent:agent-record" {
+			found = true
+			if node.Active {
+				t.Fatal("offline topology node active")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("offline agent missing from topology")
+	}
+}

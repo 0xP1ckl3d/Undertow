@@ -18,24 +18,36 @@ type Topology struct {
 }
 
 type TopologyNode struct {
-	ID        string         `json:"id"`
-	Kind      string         `json:"kind"`
-	Label     string         `json:"label"`
-	AgentID   string         `json:"agent_id,omitempty"`
-	ClientID  string         `json:"client_id,omitempty"`
-	SessionID uint64         `json:"session_id,omitempty"`
-	Carrier   string         `json:"carrier,omitempty"`
-	Remote    string         `json:"remote,omitempty"`
-	LastSeen  time.Time      `json:"last_seen,omitempty"`
-	RTTNs     int64          `json:"rtt_ns,omitempty"`
-	Depth     int            `json:"depth,omitempty"`
-	OS        string         `json:"os,omitempty"`
-	Arch      string         `json:"arch,omitempty"`
-	Connected time.Time      `json:"connected,omitempty"`
-	Privilege string         `json:"privilege,omitempty"`
-	Internal  bool           `json:"internal,omitempty"`
-	Listeners []ListenerInfo `json:"listeners,omitempty"`
-	Active    bool           `json:"active"`
+	ID             string         `json:"id"`
+	Kind           string         `json:"kind"`
+	Label          string         `json:"label"`
+	AgentID        string         `json:"agent_id,omitempty"`
+	ClientID       string         `json:"client_id,omitempty"`
+	SessionID      uint64         `json:"session_id,omitempty"`
+	Carrier        string         `json:"carrier,omitempty"`
+	Remote         string         `json:"remote,omitempty"`
+	PublicIP       string         `json:"public_ip,omitempty"`
+	LastSeen       time.Time      `json:"last_seen,omitempty"`
+	RTTNs          int64          `json:"rtt_ns,omitempty"`
+	Depth          int            `json:"depth,omitempty"`
+	OS             string         `json:"os,omitempty"`
+	Arch           string         `json:"arch,omitempty"`
+	Connected      time.Time      `json:"connected,omitempty"`
+	DisconnectedAt time.Time      `json:"disconnected_at,omitempty"`
+	Privilege      string         `json:"privilege,omitempty"`
+	Internal       bool           `json:"internal,omitempty"`
+	VPN            bool           `json:"vpn,omitempty"`
+	Listeners      []ListenerInfo `json:"listeners,omitempty"`
+	Carriers       []CarrierState `json:"carriers,omitempty"`
+	PublicHost     string         `json:"public_host,omitempty"`
+	Active         bool           `json:"active"`
+}
+
+type CarrierState struct {
+	Transport string `json:"transport"`
+	Active    bool   `json:"active"`
+	Listen    string `json:"listen,omitempty"`
+	Sessions  int    `json:"sessions,omitempty"`
 }
 
 type TopologyEdge struct {
@@ -48,13 +60,14 @@ type TopologyEdge struct {
 	ClientID       string          `json:"client_id,omitempty"`
 	SessionID      uint64          `json:"session_id,omitempty"`
 	Internal       bool            `json:"internal,omitempty"`
+	VPN            bool            `json:"vpn,omitempty"`
 	AcceptedRoutes []AcceptedRoute `json:"accepted_routes,omitempty"`
 	RTTNs          int64           `json:"rtt_ns,omitempty"`
 	LastSeen       time.Time       `json:"last_seen,omitempty"`
 }
 
 func (m *Manager) Topology() Topology {
-	return BuildTopology(m.AgentList(), m.ClientList(), m.routes.List(), m.RelayList(""), m.allForwards(), m.ServerInfo())
+	return BuildTopology(m.AgentCatalog(), m.ClientList(), m.routes.List(), m.RelayList(""), m.allForwards(), m.ServerInfo())
 }
 
 func (m *Manager) allForwards() []forwardState {
@@ -71,8 +84,21 @@ func BuildTopology(agents []AgentInfo, clients []ClientInfo, routes []routing.Ro
 	server := TopologyNode{ID: "server", Kind: "server", Label: "Undertow server", Active: true}
 	if len(serverInfo) > 0 {
 		server.Listeners = serverInfo[0].Listeners
+		server.PublicHost = serverInfo[0].PublicHost
+		for _, kind := range []string{"dns", "quic", "websocket"} {
+			state := CarrierState{Transport: kind}
+			for _, listener := range server.Listeners {
+				if listener.Transport == kind {
+					state.Active = true
+					state.Listen = listener.Listen
+					state.Sessions = listener.Sessions
+					break
+				}
+			}
+			server.Carriers = append(server.Carriers, state)
+		}
 	}
-	t := Topology{Version: 2, At: time.Now().UTC(), Nodes: []TopologyNode{server}, Edges: []TopologyEdge{}}
+	t := Topology{Version: 4, At: time.Now().UTC(), Nodes: []TopologyNode{server}, Edges: []TopologyEdge{}}
 	_ = routes // Server configured routes remain in the Routes view; they do not imply client acceptance.
 	networks := make(map[string]bool)
 	addNetwork := func(prefix string) string {
@@ -89,12 +115,12 @@ func BuildTopology(agents []AgentInfo, clients []ClientInfo, routes []routing.Ro
 		if label == "" {
 			label = a.ID
 		}
-		t.Nodes = append(t.Nodes, TopologyNode{ID: id, Kind: "agent", Label: label, AgentID: a.ID, SessionID: a.SessionID, Carrier: a.Transport, Remote: a.Remote, LastSeen: a.LastSeen, RTTNs: int64(a.RTT), Depth: a.Depth, OS: a.OS, Arch: a.Arch, Connected: a.Connected, Privilege: a.Privilege, Active: true})
+		t.Nodes = append(t.Nodes, TopologyNode{ID: id, Kind: "agent", Label: label, AgentID: a.ID, SessionID: a.SessionID, Carrier: a.Transport, Remote: a.Remote, PublicIP: a.PublicIP, LastSeen: a.LastSeen, RTTNs: int64(a.RTT), Depth: a.Depth, OS: a.OS, Arch: a.Arch, Connected: a.Connected, DisconnectedAt: a.DisconnectedAt, Privilege: a.Privilege, Active: a.Online})
 		parent, kind := "server", "carrier"
 		if a.Via != "" {
 			parent, kind = "agent:"+a.Via, "relay_path"
 		}
-		t.Edges = append(t.Edges, TopologyEdge{ID: kind + ":" + parent + ":" + id, Kind: kind, Source: parent, Target: id, Label: a.Transport, Active: true, SessionID: a.SessionID, RTTNs: int64(a.RTT), LastSeen: a.LastSeen})
+		t.Edges = append(t.Edges, TopologyEdge{ID: kind + ":" + parent + ":" + id, Kind: kind, Source: parent, Target: id, Label: a.Transport, Active: a.Online, SessionID: a.SessionID, RTTNs: int64(a.RTT), LastSeen: a.LastSeen})
 	}
 	for _, c := range clients {
 		id := "client:" + c.ID
@@ -105,8 +131,8 @@ func BuildTopology(agents []AgentInfo, clients []ClientInfo, routes []routing.Ro
 		if label == "" {
 			label = c.ID
 		}
-		t.Nodes = append(t.Nodes, TopologyNode{ID: id, Kind: "client", Label: label, ClientID: c.ID, SessionID: c.SessionID, Carrier: c.Transport, Remote: c.Remote, LastSeen: c.LastSeen, RTTNs: int64(c.RTT), Connected: c.Connected, Internal: c.Internal, Active: true})
-		t.Edges = append(t.Edges, TopologyEdge{ID: "carrier:" + id, Kind: "carrier", Source: id, Target: "server", Label: c.Transport, Active: true, ClientID: c.ID, SessionID: c.SessionID, Internal: c.Internal, AcceptedRoutes: append([]AcceptedRoute(nil), c.AcceptedRoutes...), RTTNs: int64(c.RTT), LastSeen: c.LastSeen})
+		t.Nodes = append(t.Nodes, TopologyNode{ID: id, Kind: "client", Label: label, ClientID: c.ID, SessionID: c.SessionID, Carrier: c.Transport, Remote: c.Remote, LastSeen: c.LastSeen, RTTNs: int64(c.RTT), Connected: c.Connected, Internal: c.Internal, VPN: c.VPN, Active: true})
+		t.Edges = append(t.Edges, TopologyEdge{ID: "carrier:" + id, Kind: "carrier", Source: id, Target: "server", Label: c.Transport, Active: true, ClientID: c.ID, SessionID: c.SessionID, Internal: c.Internal, VPN: c.VPN, AcceptedRoutes: append([]AcceptedRoute(nil), c.AcceptedRoutes...), RTTNs: int64(c.RTT), LastSeen: c.LastSeen})
 		for _, r := range c.AcceptedRoutes {
 			target := addNetwork(r.Prefix)
 			t.Edges = append(t.Edges, TopologyEdge{ID: "accepted:" + id + ":" + r.Prefix, Kind: "accepted_route", Source: "agent:" + r.AgentID, Target: target, Label: "accepted by " + label, Active: true, ClientID: c.ID, SessionID: c.SessionID})

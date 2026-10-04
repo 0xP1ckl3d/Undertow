@@ -40,6 +40,10 @@ type AgentInfo struct {
 	SessionID          uint64                  `json:"session_id"`
 	VirtualIP          string                  `json:"virtual_ip"`
 	Remote             string                  `json:"remote"`
+	PublicIP           string                  `json:"public_ip,omitempty"`
+	Online             bool                    `json:"online"`
+	Offline            bool                    `json:"offline,omitempty"`
+	DisconnectedAt     time.Time               `json:"disconnected_at,omitempty"`
 	Hostname           string                  `json:"hostname,omitempty"`
 	OS                 string                  `json:"os,omitempty"`
 	Arch               string                  `json:"arch,omitempty"`
@@ -90,6 +94,7 @@ type ClientInfo struct {
 	Hostname       string          `json:"hostname,omitempty"`
 	Remote         string          `json:"remote"`
 	Internal       bool            `json:"internal"`
+	VPN            bool            `json:"vpn"`
 	AcceptedRoutes []AcceptedRoute `json:"accepted_routes,omitempty"`
 	Connected      time.Time       `json:"connected"`
 	LastSeen       time.Time       `json:"last_seen"`
@@ -107,6 +112,9 @@ type AcceptedRoute struct {
 	Prefix  string `json:"prefix"`
 	AgentID string `json:"agent_id"`
 	Manual  bool   `json:"manual,omitempty"`
+	// Disabled records a saved client-local choice. Disabled routes are never
+	// posted as server-accepted routes or installed on the client host.
+	Disabled bool `json:"disabled,omitempty"`
 }
 
 type ServerInfo struct {
@@ -117,6 +125,7 @@ type ServerInfo struct {
 	WebSocketPath string         `json:"websocket_path,omitempty"`
 	TLSMode       string         `json:"tls_mode,omitempty"`
 	Fingerprint   string         `json:"fingerprint,omitempty"`
+	PublicHost    string         `json:"public_host,omitempty"`
 	Listeners     []ListenerInfo `json:"listeners,omitempty"`
 }
 
@@ -147,6 +156,7 @@ type clientState struct {
 	peer     transport.Peer
 	mux      *mux.Mux
 	internal bool
+	vpn      bool
 	hostname string
 	accepted map[netip.Prefix]AcceptedRoute
 }
@@ -166,7 +176,9 @@ type agentState struct {
 type Manager struct {
 	mu                sync.RWMutex
 	operations        *OperationsStore
+	offlineAgents     map[string]AgentInfo
 	eventBus          *EventBroker
+	workerLogs        *WorkerLogBuffer
 	lifecycleEvents   []LifecycleEvent
 	artifactLookup    func(string) (string, string, bool)
 	agentDistribution http.Handler
@@ -188,9 +200,29 @@ type Manager struct {
 	virtualUsed       map[netip.Addr]bool
 }
 
-func (m *Manager) SetOperationsStore(store *OperationsStore) {
+func (m *Manager) SetOperationsStore(store *OperationsStore) error {
+	if err := store.RecoverTransfers(); err != nil {
+		return err
+	}
+	previous, err := store.LoadAgentSnapshots()
+	if err != nil {
+		return err
+	}
 	m.mu.Lock()
 	m.operations = store
+	m.offlineAgents = make(map[string]AgentInfo, len(previous))
+	for _, agent := range previous {
+		agent.Online = false
+		agent.Offline = true
+		m.offlineAgents[agent.ID] = agent
+	}
+	m.mu.Unlock()
+	return nil
+}
+
+func (m *Manager) SetWorkerLogs(logs *WorkerLogBuffer) {
+	m.mu.Lock()
+	m.workerLogs = logs
 	m.mu.Unlock()
 }
 
@@ -232,6 +264,33 @@ func (m *Manager) SetServerInfo(info ServerInfo) {
 	m.mu.Unlock()
 }
 
+func (m *Manager) SetPublicHost(host string) {
+	m.mu.Lock()
+	m.server.PublicHost = host
+	m.mu.Unlock()
+	m.PublishEvent("server.public_host", host)
+}
+
+func validServerPublicHost(host string) bool {
+	if host == "" || net.ParseIP(host) != nil {
+		return true
+	}
+	if len(host) > 253 {
+		return false
+	}
+	for _, label := range strings.Split(host, ".") {
+		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, c := range label {
+			if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func (m *Manager) ServerInfo() ServerInfo {
 	m.mu.RLock()
 	info, transports := m.server, m.transports
@@ -255,12 +314,13 @@ func (m *Manager) SetRelayAcceptor(accept func(context.Context, string, *mux.Str
 }
 
 func NewManager(routes *routing.Table, device RouteDevice, virtualNetwork netip.Prefix, proxyIP netip.Addr) *Manager {
-	return &Manager{eventBus: NewEventBroker(), agents: make(map[string]*agentState), clients: make(map[uint64]*clientState), forwards: make(map[string]*forwardState), jobs: make(map[string]*jobState), relays: make(map[string]map[string]*mux.Stream), routes: routes, device: device, virtualNetwork: virtualNetwork.Masked(), proxyIP: proxyIP, virtualByAgent: make(map[string]netip.Addr), virtualUsed: make(map[netip.Addr]bool)}
+	return &Manager{eventBus: NewEventBroker(), agents: make(map[string]*agentState), offlineAgents: make(map[string]AgentInfo), clients: make(map[uint64]*clientState), forwards: make(map[string]*forwardState), jobs: make(map[string]*jobState), relays: make(map[string]map[string]*mux.Stream), routes: routes, device: device, virtualNetwork: virtualNetwork.Masked(), proxyIP: proxyIP, virtualByAgent: make(map[string]netip.Addr), virtualUsed: make(map[netip.Addr]bool)}
 }
 
-func (m *Manager) RegisterClient(peer transport.Peer, streamMux *mux.Mux, internal bool, hostname string) {
+func (m *Manager) RegisterClient(peer transport.Peer, streamMux *mux.Mux, internal bool, hostname string, vpn ...bool) {
+	vpnEnabled := len(vpn) > 0 && vpn[0]
 	m.mu.Lock()
-	m.clients[peer.Snapshot().ID] = &clientState{peer: peer, mux: streamMux, internal: internal, hostname: safeHostname(hostname), accepted: make(map[netip.Prefix]AcceptedRoute)}
+	m.clients[peer.Snapshot().ID] = &clientState{peer: peer, mux: streamMux, internal: internal, vpn: vpnEnabled, hostname: safeHostname(hostname), accepted: make(map[netip.Prefix]AcceptedRoute)}
 	m.mu.Unlock()
 	m.PublishEvent("client.connected", peer.Snapshot().AgentID)
 }
@@ -282,6 +342,7 @@ func (m *Manager) UnregisterClient(sessionID uint64, streamMux *mux.Mux) {
 	m.mu.Unlock()
 	if removed {
 		m.PublishEvent("client.disconnected", strconv.FormatUint(sessionID, 10))
+		m.interruptTransfers(sessionID)
 	}
 	for _, stream := range closed {
 		_ = stream.Close()
@@ -297,12 +358,27 @@ func (m *Manager) ClientInternal(sessionID uint64) bool {
 
 func (m *Manager) SetClientInternal(sessionID uint64, enabled bool) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	state := m.clients[sessionID]
 	if state == nil {
+		m.mu.Unlock()
 		return errors.New("VPN client is not connected")
 	}
 	state.internal = enabled
+	m.mu.Unlock()
+	m.PublishEvent("client.mode", strconv.FormatUint(sessionID, 10))
+	return nil
+}
+
+func (m *Manager) SetClientVPN(sessionID uint64, enabled bool) error {
+	m.mu.Lock()
+	state := m.clients[sessionID]
+	if state == nil {
+		m.mu.Unlock()
+		return errors.New("VPN client is not connected")
+	}
+	state.vpn = enabled
+	m.mu.Unlock()
+	m.PublishEvent("client.mode", strconv.FormatUint(sessionID, 10))
 	return nil
 }
 
@@ -407,7 +483,7 @@ func (m *Manager) ClientList() []ClientInfo {
 		}
 		sort.Slice(accepted, func(i, j int) bool { return accepted[i].Prefix < accepted[j].Prefix })
 		out = append(out, ClientInfo{
-			ID: p.AgentID, Transport: p.Carrier, SessionID: p.ID, Hostname: state.hostname, Remote: p.Remote, Internal: state.internal,
+			ID: p.AgentID, Transport: p.Carrier, SessionID: p.ID, Hostname: state.hostname, Remote: p.Remote, Internal: state.internal, VPN: state.vpn,
 			AcceptedRoutes: accepted,
 			Connected:      p.Connected, LastSeen: p.LastSeen, RTT: p.Transport.RTT,
 			RXBytes: p.Transport.RXBytes, TXBytes: p.Transport.TXBytes,
@@ -487,6 +563,7 @@ func (m *Manager) Register(peer transport.Peer, streamMux *mux.Mux) {
 		depth = m.agents[parent].inventory.Depth + 1
 	}
 	m.agents[id] = &agentState{peer: peer, mux: streamMux, inventory: AgentInfo{Via: peer.Snapshot().Via, Depth: depth}}
+	delete(m.offlineAgents, id)
 	m.recordLifecycleLocked(LifecycleEvent{AgentID: id, Kind: "connected", Transport: peer.Snapshot().Carrier, SessionID: peer.Snapshot().ID})
 	m.mu.Unlock()
 	m.PublishEvent("agent.connected", id)
@@ -611,6 +688,7 @@ func (m *Manager) UpdateInventory(id string, streamMux *mux.Mux, b []byte) {
 		}
 	}
 	m.mu.Unlock()
+	m.persistAgentSnapshot(id)
 }
 
 func (m *Manager) updateNetworkRoutes(id string, streamMux *mux.Mux, update networkRouteUpdate) {
@@ -684,6 +762,14 @@ func VPNInternal(b []byte) bool {
 	return hello.Internal
 }
 
+func VPNEnabled(b []byte) bool {
+	var hello struct {
+		VPN bool `json:"vpn"`
+	}
+	_ = json.Unmarshal(b, &hello)
+	return hello.VPN
+}
+
 func VPNHostname(b []byte) string {
 	var hello struct {
 		Hostname string `json:"hostname"`
@@ -707,6 +793,13 @@ func safeHostname(value string) string {
 }
 
 func (m *Manager) Unregister(id string, streamMux *mux.Mux) {
+	var last AgentInfo
+	for _, agent := range m.AgentList() {
+		if agent.ID == id {
+			last = agent
+			break
+		}
+	}
 	m.mu.Lock()
 	if state := m.agents[id]; state == nil || state.mux != streamMux {
 		m.mu.Unlock()
@@ -720,6 +813,16 @@ func (m *Manager) Unregister(id string, streamMux *mux.Mux) {
 	}
 	m.recordLifecycleLocked(LifecycleEvent{AgentID: id, Kind: "disconnected", Transport: peerInfo.Carrier, ProfileID: state.inventory.ProfileID, ArtifactID: state.inventory.ArtifactID, SessionID: peerInfo.ID, DurationSeconds: duration})
 	delete(m.agents, id)
+	last.Online = false
+	last.Offline = true
+	last.DisconnectedAt = time.Now().UTC()
+	last.Streams = 0
+	last.ActiveForwards = 0
+	last.ActiveJobs = 0
+	if last.ID != "" {
+		m.offlineAgents[id] = last
+	}
+	store := m.operations
 	var closed []*mux.Stream
 	var descendants []struct {
 		id        string
@@ -754,6 +857,11 @@ func (m *Manager) Unregister(id string, streamMux *mux.Mux) {
 		}
 	}
 	m.mu.Unlock()
+	if store != nil && last.ID != "" {
+		if err := store.SaveAgentSnapshot(last); err != nil {
+			log.Printf("save disconnected agent %s: %v", id, err)
+		}
+	}
 	m.PublishEvent("agent.disconnected", id)
 	for _, stream := range closed {
 		_ = stream.Close()
@@ -812,12 +920,16 @@ func (m *Manager) AgentList() []AgentInfo {
 		p := state.peer.Snapshot()
 		info := state.inventory
 		info.ID = p.AgentID
+		info.Online = true
+		info.Offline = false
+		info.DisconnectedAt = time.Time{}
 		info.Privilege = state.privilege
 		info.Transport = p.Carrier
 		info.Via = p.Via
 		info.SessionID = p.ID
 		info.VirtualIP = p.VirtualIP
 		info.Remote = p.Remote
+		info.PublicIP = observedPublicIP(p.Remote)
 		info.Connected = p.Connected
 		info.LastSeen = p.LastSeen
 		info.RTT = p.Transport.RTT
@@ -855,6 +967,62 @@ func (m *Manager) AgentList() []AgentInfo {
 		out = append(out, info)
 	}
 	return out
+}
+
+// AgentCatalog adds retained disconnected agents to the live peer list.
+// Operational lookups continue to use m.agents and cannot target a snapshot.
+func (m *Manager) AgentCatalog() []AgentInfo {
+	live := m.AgentList()
+	seen := make(map[string]bool, len(live))
+	for _, agent := range live {
+		seen[agent.ID] = true
+	}
+	m.mu.RLock()
+	for id, agent := range m.offlineAgents {
+		if !seen[id] {
+			live = append(live, agent)
+		}
+	}
+	m.mu.RUnlock()
+	sort.Slice(live, func(i, j int) bool {
+		if live[i].Online != live[j].Online {
+			return live[i].Online
+		}
+		if live[i].Hostname != live[j].Hostname {
+			return live[i].Hostname < live[j].Hostname
+		}
+		return live[i].ID < live[j].ID
+	})
+	return live
+}
+
+func (m *Manager) persistAgentSnapshot(id string) {
+	m.mu.RLock()
+	store := m.operations
+	m.mu.RUnlock()
+	if store == nil {
+		return
+	}
+	for _, agent := range m.AgentList() {
+		if agent.ID == id {
+			if err := store.SaveAgentSnapshot(agent); err != nil {
+				log.Printf("save agent %s: %v", id, err)
+			}
+			return
+		}
+	}
+}
+
+func observedPublicIP(remote string) string {
+	host, _, err := net.SplitHostPort(remote)
+	if err != nil {
+		host = remote
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || !ip.IsGlobalUnicast() || ip.IsPrivate() {
+		return ""
+	}
+	return ip.String()
 }
 
 func (m *Manager) AddRoute(prefix netip.Prefix, agentID string) error {
@@ -1043,6 +1211,7 @@ func (m *Manager) ServeHTTP(ctx context.Context, address, token string) error {
 
 func (m *Manager) handler(token string) http.Handler {
 	muxer := http.NewServeMux()
+	m.registerTransferHandlers(muxer)
 	muxer.Handle("/v1/agent-profiles/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		m.mu.RLock()
 		handler := m.agentDistribution
@@ -1135,7 +1304,7 @@ func (m *Manager) handler(token string) http.Handler {
 				server.Transport, server.Network, server.Listen, server.TLSMode = listener.Transport, listener.Network, listener.Listen, listener.TLSMode
 			}
 		}
-		jsonReply(w, http.StatusOK, map[string]any{"server": server, "agents": m.AgentList(), "clients": m.ClientList(), "routes": m.routes.List(), "selected_agent": selected})
+		jsonReply(w, http.StatusOK, map[string]any{"server": server, "agents": m.AgentCatalog(), "clients": m.ClientList(), "routes": m.routes.List(), "selected_agent": selected})
 	})
 	muxer.HandleFunc("GET /v1/transports", func(w http.ResponseWriter, r *http.Request) {
 		if m.transports == nil {
@@ -1143,6 +1312,50 @@ func (m *Manager) handler(token string) http.Handler {
 			return
 		}
 		jsonReply(w, http.StatusOK, m.transports.List())
+	})
+	muxer.HandleFunc("GET /v1/server-public-host", func(w http.ResponseWriter, r *http.Request) {
+		jsonReply(w, http.StatusOK, map[string]string{"host": m.ServerInfo().PublicHost})
+	})
+	muxer.HandleFunc("PUT /v1/server-public-host", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Host string `json:"host"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&request); err != nil || !validServerPublicHost(request.Host) {
+			http.Error(w, "public host must be an IP address or DNS hostname without a port", http.StatusBadRequest)
+			return
+		}
+		m.mu.RLock()
+		store := m.operations
+		m.mu.RUnlock()
+		if store == nil {
+			http.Error(w, "server settings unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if err := store.SetPublicHost(request.Host); err != nil {
+			http.Error(w, "could not save public host", http.StatusInternalServerError)
+			return
+		}
+		m.SetPublicHost(request.Host)
+		jsonReply(w, http.StatusOK, map[string]string{"host": request.Host})
+	})
+	muxer.HandleFunc("GET /v1/worker-logs", func(w http.ResponseWriter, r *http.Request) {
+		m.mu.RLock()
+		logs := m.workerLogs
+		m.mu.RUnlock()
+		if logs == nil {
+			http.Error(w, "worker logs unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		after, err := strconv.ParseUint(r.URL.Query().Get("after"), 10, 64)
+		if r.URL.Query().Get("after") == "" {
+			after = 0
+			err = nil
+		}
+		if err != nil {
+			http.Error(w, "invalid log cursor", http.StatusBadRequest)
+			return
+		}
+		jsonReply(w, http.StatusOK, logs.Snapshot(after))
 	})
 	muxer.HandleFunc("POST /v1/transports/{name}", func(w http.ResponseWriter, r *http.Request) {
 		if m.transports == nil {
@@ -1279,6 +1492,21 @@ func (m *Manager) handler(token string) http.Handler {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
+	muxer.HandleFunc("POST /v1/clients/{id}/vpn", func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.ParseUint(r.PathValue("id"), 10, 64)
+		var body struct {
+			Enabled bool `json:"enabled"`
+		}
+		if err != nil || json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&body) != nil {
+			http.Error(w, "invalid client setting", http.StatusBadRequest)
+			return
+		}
+		if err := m.SetClientVPN(id, body.Enabled); err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
 	muxer.HandleFunc("POST /v1/clients/{id}/routes", func(w http.ResponseWriter, r *http.Request) {
 		id, err := strconv.ParseUint(r.PathValue("id"), 10, 64)
 		var body AcceptedRoute
@@ -1392,7 +1620,7 @@ func (m *Manager) handler(token string) http.Handler {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		if r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodDelete {
+		if (r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodDelete) && !(r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/v1/transfers/")) {
 			m.mu.RLock()
 			store := m.operations
 			m.mu.RUnlock()

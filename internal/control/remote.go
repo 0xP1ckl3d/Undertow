@@ -122,6 +122,27 @@ func clientRequestAllowed(request *http.Request, clientID uint64) bool {
 	if request.Method == http.MethodGet && path == "/v1/history" && request.URL.RawQuery == "" {
 		return true
 	}
+	if path == "/v1/transfers" && request.URL.RawQuery == "" && (request.Method == http.MethodGet || request.Method == http.MethodPost) {
+		return true
+	}
+	if request.Method == http.MethodPut && strings.HasPrefix(path, "/v1/transfers/") && request.URL.RawQuery == "" {
+		parts := strings.Split(path, "/")
+		return len(parts) == 4 && parts[3] != "" && !strings.ContainsAny(parts[3], "%\\")
+	}
+	if path == "/v1/server-public-host" && request.URL.RawQuery == "" && (request.Method == http.MethodGet || request.Method == http.MethodPut) {
+		return true
+	}
+	if request.Method == http.MethodGet && path == "/v1/worker-logs" {
+		if request.URL.RawQuery == "" {
+			return true
+		}
+		query := request.URL.Query()
+		if len(query) != 1 || len(query["after"]) != 1 {
+			return false
+		}
+		_, err := strconv.ParseUint(query.Get("after"), 10, 64)
+		return err == nil
+	}
 	if request.URL.RawQuery == "" && (path == "/v1/transports" && request.Method == http.MethodGet || path == "/v1/relays" && request.Method == http.MethodGet || path == "/v1/routes" && request.Method == http.MethodPost) {
 		return true
 	}
@@ -129,8 +150,13 @@ func clientRequestAllowed(request *http.Request, clientID uint64) bool {
 		_, err := netip.ParsePrefix(request.URL.Query().Get("prefix"))
 		return err == nil
 	}
-	if strings.HasPrefix(path, "/v1/transports/") && request.URL.RawQuery == "" && (request.Method == http.MethodPost || request.Method == http.MethodDelete) {
-		return true
+	if strings.HasPrefix(path, "/v1/transports/") {
+		if request.Method == http.MethodPost {
+			return request.URL.RawQuery == ""
+		}
+		if request.Method == http.MethodDelete {
+			return request.URL.RawQuery == "" || request.URL.RawQuery == "force=true"
+		}
 	}
 	if strings.HasPrefix(path, "/v1/agents/") && strings.HasSuffix(path, "/relays") && request.URL.RawQuery == "" && request.Method == http.MethodPost {
 		return true
@@ -143,6 +169,12 @@ func clientRequestAllowed(request *http.Request, clientID uint64) bool {
 	}
 	if request.Method == http.MethodGet && strings.HasPrefix(path, "/v1/agents/") && strings.HasSuffix(path, "/events") && request.URL.RawQuery == "" {
 		return true
+	}
+	if request.Method == http.MethodGet && request.URL.RawQuery == "" {
+		parts := strings.Split(path, "/")
+		if len(parts) == 4 && parts[1] == "v1" && parts[2] == "agents" && parts[3] != "" && !strings.ContainsAny(parts[3], "%\\") {
+			return true
+		}
 	}
 	if request.Method == http.MethodGet && strings.HasPrefix(path, "/v1/agents/") && strings.HasSuffix(path, "/host-results") && request.URL.RawQuery == "" {
 		return true
@@ -203,7 +235,7 @@ func clientRequestAllowed(request *http.Request, clientID uint64) bool {
 	if request.Method != http.MethodPost || request.URL.RawQuery != "" {
 		return false
 	}
-	if path == clientPrefix+"/internal" || path == clientPrefix+"/routes" || path == clientPrefix+"/forwards" {
+	if path == clientPrefix+"/internal" || path == clientPrefix+"/vpn" || path == clientPrefix+"/routes" || path == clientPrefix+"/forwards" {
 		return true
 	}
 	if strings.HasPrefix(path, "/v1/sessions/") && strings.HasSuffix(path, "/kill") {

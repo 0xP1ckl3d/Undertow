@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"undertow/internal/control"
 	"undertow/internal/pivot"
@@ -32,7 +33,10 @@ func (g *guiServer) agentCommandStream(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	w.Header().Set("Cache-Control", "no-store")
-	stream := guiCommandEventWriter{encode: json.NewEncoder(w), flush: flusher}
+	stream := guiCommandEventWriter{encode: json.NewEncoder(w), flush: flusher, store: g.store, agentID: r.PathValue("id"), source: "console"}
+	if strings.TrimSpace(body.Line) != "" {
+		_ = g.store.AppendConsoleEntry(r.PathValue("id"), "console", "command", body.Line)
+	}
 	args, err := splitConsoleCommand(body.Line)
 	if err != nil {
 		stream.event("error", err.Error())
@@ -83,16 +87,31 @@ func (g *guiServer) agentCommandStream(w http.ResponseWriter, r *http.Request) {
 }
 
 type guiCommandEventWriter struct {
-	encode *json.Encoder
-	flush  http.Flusher
+	encode  *json.Encoder
+	flush   http.Flusher
+	store   *clientGUIStore
+	agentID string
+	source  string
 }
 
 func (w *guiCommandEventWriter) event(kind, data string) error {
+	if w.store != nil && kind != "shell" {
+		_ = w.store.AppendConsoleEntry(w.agentID, w.source, kind, data)
+	}
 	if err := w.encode.Encode(map[string]string{"kind": kind, "data": data}); err != nil {
 		return err
 	}
 	w.flush.Flush()
 	return nil
+}
+
+func (g *guiServer) consoleHistory(w http.ResponseWriter, r *http.Request) {
+	entries, err := g.store.ConsoleEntries(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "console history unavailable", http.StatusInternalServerError)
+		return
+	}
+	guiJSON(w, http.StatusOK, entries)
 }
 
 func (w *guiCommandEventWriter) Write(data []byte) (int, error) {

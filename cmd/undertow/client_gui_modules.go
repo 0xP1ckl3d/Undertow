@@ -4,7 +4,6 @@ package main
 
 import (
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -325,7 +324,9 @@ func (g *guiServer) runModule(w http.ResponseWriter, r *http.Request) {
 		guiJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
 		return
 	}
+	_ = g.store.AppendConsoleEntry(r.PathValue("id"), "modules", "command", "module "+r.PathValue("name")+map[bool]string{true: " (background)", false: " (foreground)"}[request.Background])
 	if request.Background {
+		_ = g.store.AppendConsoleEntry(r.PathValue("id"), "modules", "output", "Started job "+job.ID+". Output is retained in Jobs.\n")
 		guiJSON(w, http.StatusCreated, map[string]any{"job": job})
 		return
 	}
@@ -337,35 +338,8 @@ func (g *guiServer) runModule(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	w.Header().Set("Cache-Control", "no-store")
-	enc := json.NewEncoder(w)
-	for {
-		kind, data, err := session.Read()
-		if err != nil {
-			_ = enc.Encode(map[string]string{"kind": "error", "data": err.Error()})
-			flusher.Flush()
-			return
-		}
-		label := "output"
-		switch kind {
-		case pivot.InteractiveStderr:
-			label = "stderr"
-		case pivot.InteractiveError:
-			label = "error"
-		case pivot.InteractiveExit:
-			label = "exit"
-		}
-		value := string(data)
-		if kind == pivot.InteractiveExit && len(data) == 4 {
-			value = fmt.Sprint(int32(binary.BigEndian.Uint32(data)))
-		}
-		if enc.Encode(map[string]string{"kind": label, "data": value}) != nil {
-			return
-		}
-		flusher.Flush()
-		if kind == pivot.InteractiveExit || kind == pivot.InteractiveError {
-			return
-		}
-	}
+	stream := guiCommandEventWriter{encode: json.NewEncoder(w), flush: flusher, store: g.store, agentID: r.PathValue("id"), source: "modules"}
+	streamGUISession(&stream, session)
 }
 
 func (g *guiServer) startModule(ctx context.Context, agentID, name string, args []string, input []byte, background bool) (control.JobInfo, *pivot.InteractiveSession, error) {

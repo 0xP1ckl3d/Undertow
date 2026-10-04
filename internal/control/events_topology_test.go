@@ -41,6 +41,11 @@ func TestTopologyShowsOnlyAcceptedRoutesAndRelayParent(t *testing.T) {
 
 func TestEventBrokerReplayAndGap(t *testing.T) {
 	b := NewEventBroker()
+	restarted, _, stopRestarted := b.Subscribe(900)
+	stopRestarted()
+	if len(restarted) != 1 || restarted[0].Kind != "resync_required" {
+		t.Fatalf("stale cursor after restart: %+v", restarted)
+	}
 	b.Publish("agent.connected", "a")
 	b.Publish("agent.disconnected", "a")
 	replay, _, stop := b.Subscribe(1)

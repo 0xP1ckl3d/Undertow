@@ -144,6 +144,16 @@ func (c *liveClientConsole) vpnCommand(ctx context.Context, args []string, outpu
 		publicIP = verifiedIP
 		fmt.Fprintf(output, "Public egress verified: %s\n", publicIP)
 	}
+	if sessionID == 0 {
+		_ = modeRoutes.set(enabled)
+		return errors.New("VPN client is not connected")
+	}
+	if _, err := c.call(ctx, http.MethodPost, fmt.Sprintf("/v1/clients/%d/vpn", sessionID), map[string]bool{"enabled": want}); err != nil {
+		if rollbackErr := modeRoutes.set(enabled); rollbackErr != nil {
+			return fmt.Errorf("report VPN mode: %w; restore local routes: %v", err, rollbackErr)
+		}
+		return fmt.Errorf("report VPN mode: %w", err)
+	}
 	c.mu.Lock()
 	c.vpn = want
 	c.publicIP = publicIP

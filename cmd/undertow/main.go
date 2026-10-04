@@ -273,6 +273,10 @@ func serve(args []string) error {
 	if cleanup != nil {
 		defer cleanup()
 	}
+	workerLogs := control.NewWorkerLogBuffer()
+	previousLogOutput := log.Writer()
+	log.SetOutput(io.MultiWriter(previousLogOutput, workerLogs))
+	defer log.SetOutput(previousLogOutput)
 	identity, err := security.LoadOrCreateKey(*identityPath)
 	if err != nil {
 		return err
@@ -317,12 +321,20 @@ func serve(args []string) error {
 		routeDevice = device
 	}
 	manager := control.NewManager(table, routeDevice, proxyNetwork, proxyPrefix.Addr())
+	manager.SetWorkerLogs(workerLogs)
+	workerLogs.OnWrite(func() { manager.PublishEvent("worker_log", "server") })
 	operations, err := control.OpenOperationsStore(*operationsDB)
 	if err != nil {
 		return err
 	}
 	defer operations.Close()
-	manager.SetOperationsStore(operations)
+	if err := manager.SetOperationsStore(operations); err != nil {
+		return fmt.Errorf("load agent history: %w", err)
+	}
+	publicHost, err := operations.PublicHost()
+	if err != nil {
+		return fmt.Errorf("load public host: %w", err)
+	}
 	if *jobOutputLimitMiB == 0 || *jobOutputTotalMiB < *jobOutputLimitMiB || *jobOutputTotalMiB > ^uint64(0)/(1<<20) {
 		return errors.New("invalid job output limits")
 	}
@@ -379,7 +391,7 @@ func serve(args []string) error {
 	}
 	ctx, stop := commandContext()
 	defer stop()
-	serverInfo := control.ServerInfo{Transport: *carrier.kind, Domain: *domain, WebSocketPath: *carrier.path, Fingerprint: security.Fingerprint(identity)}
+	serverInfo := control.ServerInfo{Transport: *carrier.kind, Domain: *domain, WebSocketPath: *carrier.path, Fingerprint: security.Fingerprint(identity), PublicHost: publicHost}
 	manager.SetServerInfo(serverInfo)
 	transportManager := newServerTransports(ctx, manager, identity, token, *domain, *carrier.path, func(peer transport.Peer) {
 		handleServerPeer(ctx, manager, controlToken, *probeEcho, peer)

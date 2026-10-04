@@ -189,7 +189,7 @@ func clientCommand(args []string) error {
 	if err != nil {
 		return err
 	}
-	live := &liveClientConsole{routeFile: *routesFile, routes: savedRoutes, serverIP: serverIP, tunnelPrefix: prefix.Masked(), localNetworks: networks, vpn: *vpn, internal: *internal, operatorOnly: *operatorOnly, transport: *carrier.kind, verifyURL: *verifyURL, events: make(chan string, 16)}
+	live := &liveClientConsole{routeFile: *routesFile, routes: savedRoutes, serverIP: serverIP, serverAddress: *server, tunnelPrefix: prefix.Masked(), localNetworks: networks, vpn: *vpn, internal: *internal, operatorOnly: *operatorOnly, transport: *carrier.kind, verifyURL: *verifyURL, events: make(chan string, 16)}
 	if *gui && !*noGUI {
 		guiURL, guiClose, err := startClientGUI(ctx, live, *guiListen, *guiStore)
 		if err != nil {
@@ -412,6 +412,7 @@ type liveClientConsole struct {
 	operatorOnly  bool
 	guiURL        string
 	transport     string
+	serverAddress string
 	publicIP      string
 	modeRoutes    *clientModeRoutes
 	verifyURL     string
@@ -525,8 +526,9 @@ func runVPN(parent context.Context, c transport.Connection, carrierIP, serverIP 
 	hello, _ := json.Marshal(struct {
 		Mode     string `json:"mode"`
 		Internal bool   `json:"internal"`
+		VPN      bool   `json:"vpn"`
 		Hostname string `json:"hostname"`
-	}{"vpn", internal, hostname})
+	}{"vpn", internal, vpn, hostname})
 	if err := m.SendControl(ctx, hello); err != nil {
 		return err
 	}

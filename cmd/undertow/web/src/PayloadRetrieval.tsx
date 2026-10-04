@@ -1,0 +1,14 @@
+import {useEffect, useState} from 'react';
+import {Globe2, Link2} from 'lucide-react';
+import {api} from './api';
+
+export function PayloadRetrieval(){
+  const [currentHost,setCurrentHost]=useState(''),[currentPath,setCurrentPath]=useState(''),[host,setHost]=useState(''),[path,setPath]=useState(''),[confirmPath,setConfirmPath]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
+  const load=async()=>{const [h,p]=await Promise.all([api<{host:string}>('/payload-retrieval-host'),api<{path:string}>('/payload-retrieval-path')]);setCurrentHost(h.host);setCurrentPath(p.path);setHost(h.host);setPath(p.path)};
+  useEffect(()=>{load().catch(e=>setError(String(e)))},[]);
+  const save=async(key:'host'|'path')=>{setBusy(true);setError('');setNotice('');try{const value=key==='host'?host.trim():path.trim();const result=await api<{changed:boolean}>(`/payload-retrieval-${key}`,'PUT',{[key]:value});await load();setConfirmPath(false);setNotice(result.changed?`${key==='host'?'Retrieval host':'Retrieval path'} updated on the server.`:'Setting was already current.')}catch(e){setError(String(e))}finally{setBusy(false)}};
+  return <div className="operations-grid"><section className="panel control-panel"><div className="control-heading"><Globe2 size={18}/><div><h2>Public retrieval host</h2><p>Hostname or IP address in new hosted payload URLs. No port.</p></div></div><div className="control-fields"><label>Server setting<input value={host} onChange={e=>setHost(e.target.value)} placeholder="downloads.example.com"/></label><button disabled={busy||!host.trim()||host===currentHost} onClick={()=>save('host')}>Save host</button></div><p className="control-note">Current: {currentHost||'Not set'}. Use a name that endpoints can reach.</p></section>
+    <section className="panel control-panel"><div className="control-heading"><Link2 size={18}/><div><h2>Public retrieval path</h2><p>Path prefix for the server’s hosted payload downloads.</p></div></div><div className="control-fields"><label>Server setting<input value={path} onChange={e=>{setPath(e.target.value);setConfirmPath(false)}} placeholder="/payloads"/></label><button disabled={busy||!path.trim()||path===currentPath} onClick={()=>setConfirmPath(true)}>Review change</button></div><p className="control-note">Current: {currentPath||'Not set'}</p>{confirmPath&&<div className="control-confirm" role="alertdialog" aria-label="Confirm retrieval path change"><div><strong>Change public retrieval path?</strong><p>Hosted download tokens will rotate. Previously issued URLs will stop working. Existing payloads and enrollment records remain.</p></div><button disabled={busy} onClick={()=>save('path')}>Confirm change</button><button onClick={()=>setConfirmPath(false)}>Cancel</button></div>}</section>
+    {(error||notice)&&<p className={error?'control-error':'control-note'} role={error?'alert':undefined}>{error||notice}</p>}
+  </div>
+}

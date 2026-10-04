@@ -97,7 +97,12 @@ func TestClientModeRoutes(t *testing.T) {
 func TestClientConsoleTogglesInternetRoutes(t *testing.T) {
 	device := &recordingRouteDevice{}
 	mode := &clientModeRoutes{device: device}
-	client := &liveClientConsole{modeRoutes: mode, verifyURL: ""}
+	client := &liveClientConsole{modeRoutes: mode, verifyURL: "", sessionID: 77, request: func(_ context.Context, method, path string, body any) ([]byte, error) {
+		if method != http.MethodPost || path != "/v1/clients/77/vpn" {
+			return nil, fmt.Errorf("unexpected VPN mode request: %s %s", method, path)
+		}
+		return nil, nil
+	}}
 	var output bytes.Buffer
 	for _, args := range [][]string{{"vpn", "status"}, {"vpn", "on"}, {"vpn", "status"}, {"vpn", "off"}} {
 		if err := client.routeCommand(context.Background(), args, &output); err != nil {
@@ -175,6 +180,40 @@ func TestClientRoutesPersistAcrossLoads(t *testing.T) {
 		if err != nil || !reflect.DeepEqual(got, want) {
 			t.Fatalf("routes=%+v err=%v", got, err)
 		}
+	}
+}
+
+func TestClientSavedRouteCanBeDisabledAndReenabled(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "routes.json")
+	route := control.AcceptedRoute{Prefix: "10.44.0.0/16", AgentID: "agent-a", Manual: true}
+	device := &recordingRouteDevice{}
+	client := &liveClientConsole{device: device, sessionID: 7, routeFile: path, serverIP: netip.MustParseAddr("203.0.113.10"), tunnelPrefix: netip.MustParsePrefix("172.16.253.0/24"), routes: []control.AcceptedRoute{route}, active: map[string]bool{route.Prefix: true}, global: make(map[string]bool)}
+	var methods []string
+	client.request = func(_ context.Context, method, path string, body any) ([]byte, error) {
+		methods = append(methods, method)
+		if method == http.MethodPost {
+			if posted, ok := body.(control.AcceptedRoute); !ok || posted.Disabled {
+				t.Fatalf("posted disabled route: %+v", body)
+			}
+		}
+		return nil, nil
+	}
+	if err := client.SetClientRouteEnabled(context.Background(), route.Prefix, route.AgentID, false); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := loadClientRoutes(path)
+	if err != nil || len(saved) != 1 || !saved[0].Disabled || client.active[route.Prefix] {
+		t.Fatalf("disabled: saved=%+v active=%v err=%v", saved, client.active, err)
+	}
+	if err := client.SetClientRouteEnabled(context.Background(), route.Prefix, route.AgentID, true); err != nil {
+		t.Fatal(err)
+	}
+	saved, err = loadClientRoutes(path)
+	if err != nil || len(saved) != 1 || saved[0].Disabled || !client.active[route.Prefix] {
+		t.Fatalf("enabled: saved=%+v active=%v err=%v", saved, client.active, err)
+	}
+	if !reflect.DeepEqual(methods, []string{http.MethodDelete, http.MethodPost}) || !reflect.DeepEqual(device.deleted, []string{route.Prefix}) || !reflect.DeepEqual(device.added, []string{route.Prefix}) {
+		t.Fatalf("methods=%v device=%+v", methods, device)
 	}
 }
 

@@ -55,7 +55,7 @@ func (b *EventBroker) Subscribe(after uint64) ([]Event, <-chan Event, func()) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	replay := make([]Event, 0)
-	if len(b.history) > 0 && after > 0 && after+1 < b.history[0].Seq {
+	if after > b.seq || len(b.history) > 0 && after > 0 && after+1 < b.history[0].Seq {
 		replay = append(replay, Event{Seq: b.seq, At: time.Now().UTC(), Kind: "resync_required"})
 	} else {
 		for _, event := range b.history {

@@ -126,6 +126,9 @@ func (c *liveClientConsole) restoreLoop(session *mux.Mux) {
 			return
 		}
 		for _, route := range c.routes {
+			if route.Disabled {
+				continue
+			}
 			if c.active[route.Prefix] {
 				continue
 			}
@@ -291,6 +294,9 @@ func (c *liveClientConsole) acceptClientRouteLocked(ctx context.Context, rawPref
 			continue
 		}
 		if existing.AgentID == agentID {
+			if existing.Disabled {
+				return false, c.setClientRouteEnabledLocked(ctx, i, true)
+			}
 			return false, fmt.Errorf("route %s is already accepted via this agent", prefix)
 		}
 		agents, err := consoleAgents(ctx, c.call)
@@ -327,6 +333,49 @@ func (c *liveClientConsole) RemoveClientRoute(ctx context.Context, prefix, agent
 	c.routeMu.Lock()
 	defer c.routeMu.Unlock()
 	return c.removeClientRouteLocked(ctx, prefix, agentID)
+}
+
+func (c *liveClientConsole) SetClientRouteEnabled(ctx context.Context, prefix, agentID string, enabled bool) error {
+	c.routeMu.Lock()
+	defer c.routeMu.Unlock()
+	parsed, err := netip.ParsePrefix(prefix)
+	if err != nil || !parsed.Addr().Is4() {
+		return errors.New("route requires an IPv4 CIDR")
+	}
+	for i, route := range c.routes {
+		if route.Prefix == parsed.Masked().String() && route.AgentID == agentID {
+			return c.setClientRouteEnabledLocked(ctx, i, enabled)
+		}
+	}
+	return errors.New("saved client route not found")
+}
+
+// The caller holds routeMu. Persist only after server and OS route state agree.
+func (c *liveClientConsole) setClientRouteEnabledLocked(ctx context.Context, index int, enabled bool) error {
+	route := c.routes[index]
+	if route.Disabled == !enabled {
+		return nil
+	}
+	if enabled {
+		route.Disabled = false
+		if err := c.activateRoute(ctx, route); err != nil {
+			return err
+		}
+	} else if err := c.removeActiveRoute(ctx, route); err != nil {
+		return err
+	}
+	updated := append([]control.AcceptedRoute(nil), c.routes...)
+	updated[index].Disabled = !enabled
+	if err := saveClientRoutes(c.routeFile, updated); err != nil {
+		if enabled {
+			_ = c.removeActiveRoute(ctx, route)
+		} else {
+			_ = c.activateRoute(ctx, route)
+		}
+		return fmt.Errorf("save client route: %w", err)
+	}
+	c.routes = updated
+	return nil
 }
 
 // The caller holds routeMu. An empty agentID means any current owner.
@@ -424,7 +473,7 @@ func (c *liveClientConsole) routeCommand(ctx context.Context, args []string, out
 				kind = "manual"
 			}
 			fmt.Fprintf(output, "  %s via %s\n", route.Prefix, agentRouteLabel(route.AgentID, status.Agents))
-			fmt.Fprintf(output, "    %s; active=%t\n", kind, c.active[route.Prefix])
+			fmt.Fprintf(output, "    %s; enabled=%t; active=%t\n", kind, !route.Disabled, c.active[route.Prefix])
 		}
 		return nil
 	}

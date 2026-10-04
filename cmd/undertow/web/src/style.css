@@ -23,6 +23,9 @@ body{min-width:0}.history-trust{display:block;color:var(--muted);font-size:8px;m
 .undertow-symbol.small{font-size:29px}
 .graph-inspector{position:absolute;z-index:5;right:13px;top:40px;max-width:min(310px,42%);max-height:65%;overflow:auto;pointer-events:none;border:1px solid #485248;background:#111714ee;padding:12px 14px;box-shadow:4px 4px 0 #060906;font-size:10px;line-height:1.45}
 .graph-inspector.hint{color:#859389;max-width:250px}
+.graph-fit{position:absolute;z-index:6;top:34px;right:12px;border:1px solid #485248;background:#111714;color:#d9e0d8;padding:6px 10px;font-size:10px}
+.graph-fit:hover{border-color:var(--amber);color:var(--amber)}
+.topology-frame .graph-inspector{top:72px}
 .graph-inspector>strong{display:block;color:#f0bd67;font-size:11px;margin-bottom:7px}
 .graph-inspector dl{margin:0}.graph-inspector dl div{display:grid;grid-template-columns:95px minmax(0,1fr);gap:7px;border-top:1px solid #303b33;padding:5px 0}.graph-inspector dt{color:#849387}.graph-inspector dd{margin:0;overflow-wrap:anywhere;color:#d9e0d8}
 .graph-help{position:absolute;z-index:4;left:14px;bottom:12px;display:flex;align-items:center;gap:7px;color:#98a49a;background:#101611e8;border:1px solid #334036;padding:7px 9px;font-size:9px;pointer-events:none}

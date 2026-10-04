@@ -15,8 +15,10 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/coder/websocket"
@@ -35,6 +37,9 @@ type guiServer struct {
 	launchSecret  string
 	sessionSecret string
 	csrfSecret    string
+	transferDir   string
+	transferMu    sync.Mutex
+	downloads     map[string]guiDownload
 }
 
 func randomGUISecret() (string, error) {
@@ -87,7 +92,13 @@ func startClientGUI(ctx context.Context, client *liveClientConsole, address, sto
 		store.Close()
 		return "", nil, err
 	}
-	app := &guiServer{client: client, store: store, modules: modules, host: listener.Addr().String(), launchSecret: launch, sessionSecret: session, csrfSecret: csrf}
+	transferDir, err := os.MkdirTemp("", "undertow-gui-transfers-*")
+	if err != nil {
+		listener.Close()
+		store.Close()
+		return "", nil, err
+	}
+	app := &guiServer{client: client, store: store, modules: modules, host: listener.Addr().String(), launchSecret: launch, sessionSecret: session, csrfSecret: csrf, transferDir: transferDir, downloads: make(map[string]guiDownload)}
 	server := &http.Server{Handler: app.handler(), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
 	go func() {
 		<-ctx.Done()
@@ -96,7 +107,7 @@ func startClientGUI(ctx context.Context, client *liveClientConsole, address, sto
 		_ = server.Shutdown(shutdownCtx)
 	}()
 	go func() { _ = server.Serve(listener) }()
-	return "http://" + listener.Addr().String() + "/#" + launch, func() { _ = server.Close(); _ = store.Close() }, nil
+	return "http://" + listener.Addr().String() + "/#" + launch, func() { _ = server.Close(); _ = store.Close(); cleanupGUITransferDir(transferDir) }, nil
 }
 
 func (g *guiServer) handler() http.Handler {
@@ -106,6 +117,13 @@ func (g *guiServer) handler() http.Handler {
 	mux.HandleFunc("GET /api/events", g.events)
 	mux.HandleFunc("GET /api/topology", g.remote(http.MethodGet, func(*http.Request) string { return "/v1/topology" }))
 	mux.HandleFunc("GET /api/history", g.remote(http.MethodGet, func(*http.Request) string { return "/v1/history" }))
+	mux.HandleFunc("GET /api/transfers", g.remote(http.MethodGet, func(*http.Request) string { return "/v1/transfers" }))
+	mux.HandleFunc("GET /api/worker-logs", g.remote(http.MethodGet, func(r *http.Request) string {
+		if after := r.URL.Query().Get("after"); after != "" {
+			return "/v1/worker-logs?after=" + url.QueryEscape(after)
+		}
+		return "/v1/worker-logs"
+	}))
 	mux.HandleFunc("GET /api/preferences", func(w http.ResponseWriter, r *http.Request) {
 		p, err := g.store.Preferences()
 		if err != nil {
@@ -147,6 +165,8 @@ func (g *guiServer) handler() http.Handler {
 		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("GET /api/agents/{id}", g.remote(http.MethodGet, func(r *http.Request) string { return "/v1/agents/" + url.PathEscape(r.PathValue("id")) }))
+	mux.HandleFunc("POST /api/agents/{id}/shutdown", g.remote(http.MethodPost, func(r *http.Request) string { return "/v1/agents/" + url.PathEscape(r.PathValue("id")) + "/shutdown" }))
+	mux.HandleFunc("POST /api/agents/{id}/session/kill", g.killAgentSession)
 	mux.HandleFunc("GET /api/agents/{id}/host-results", g.remote(http.MethodGet, func(r *http.Request) string {
 		return "/v1/agents/" + url.PathEscape(r.PathValue("id")) + "/host-results"
 	}))
@@ -164,6 +184,9 @@ func (g *guiServer) handler() http.Handler {
 		}
 		return endpoint
 	}))
+	mux.HandleFunc("POST /api/agents/{id}/files/upload", g.uploadFile)
+	mux.HandleFunc("POST /api/agents/{id}/files/download", g.downloadFile)
+	mux.HandleFunc("GET /api/transfers/{id}/download", g.serveTransferDownload)
 	mux.HandleFunc("GET /api/agents/{id}/screens", g.remote(http.MethodGet, func(r *http.Request) string {
 		return "/v1/agents/" + url.PathEscape(r.PathValue("id")) + "/screens"
 	}))
@@ -181,6 +204,7 @@ func (g *guiServer) handler() http.Handler {
 	mux.HandleFunc("GET /api/agents/{id}/terminal", g.terminal)
 	mux.HandleFunc("POST /api/agents/{id}/command", g.agentCommand)
 	mux.HandleFunc("POST /api/agents/{id}/command-stream", g.agentCommandStream)
+	mux.HandleFunc("GET /api/agents/{id}/console-history", g.consoleHistory)
 	mux.HandleFunc("POST /api/agents/{id}/exec", g.remote(http.MethodPost, func(r *http.Request) string { return "/v1/agents/" + url.PathEscape(r.PathValue("id")) + "/exec" }))
 	mux.HandleFunc("POST /api/agents/{id}/jobs", g.remote(http.MethodPost, func(r *http.Request) string { return "/v1/agents/" + url.PathEscape(r.PathValue("id")) + "/jobs" }))
 	mux.HandleFunc("GET /api/jobs", g.remote(http.MethodGet, func(r *http.Request) string {
@@ -203,6 +227,18 @@ func (g *guiServer) handler() http.Handler {
 	mux.HandleFunc("DELETE /api/routes", g.remote(http.MethodDelete, func(r *http.Request) string {
 		return "/v1/routes?prefix=" + url.QueryEscape(r.URL.Query().Get("prefix"))
 	}))
+	mux.HandleFunc("GET /api/forwards", g.clientForwards(http.MethodGet))
+	mux.HandleFunc("POST /api/forwards", g.clientForwards(http.MethodPost))
+	mux.HandleFunc("DELETE /api/forwards", g.clientForwards(http.MethodDelete))
+	mux.HandleFunc("GET /api/transports", g.remote(http.MethodGet, func(*http.Request) string { return "/v1/transports" }))
+	mux.HandleFunc("GET /api/server-public-host", g.remote(http.MethodGet, func(*http.Request) string { return "/v1/server-public-host" }))
+	mux.HandleFunc("PUT /api/server-public-host", g.remote(http.MethodPut, func(*http.Request) string { return "/v1/server-public-host" }))
+	mux.HandleFunc("POST /api/transports/{name}", g.remote(http.MethodPost, func(r *http.Request) string { return "/v1/transports/" + url.PathEscape(r.PathValue("name")) }))
+	mux.HandleFunc("DELETE /api/transports/{name}", g.stopTransport)
+	mux.HandleFunc("GET /api/payload-retrieval-host", g.remote(http.MethodGet, func(*http.Request) string { return "/v1/payload-retrieval-host" }))
+	mux.HandleFunc("PUT /api/payload-retrieval-host", g.remote(http.MethodPut, func(*http.Request) string { return "/v1/payload-retrieval-host" }))
+	mux.HandleFunc("GET /api/payload-retrieval-path", g.remote(http.MethodGet, func(*http.Request) string { return "/v1/payload-retrieval-path" }))
+	mux.HandleFunc("PUT /api/payload-retrieval-path", g.remote(http.MethodPut, func(*http.Request) string { return "/v1/payload-retrieval-path" }))
 	mux.HandleFunc("GET /api/profiles", g.remote(http.MethodGet, func(*http.Request) string { return "/v1/agent-profiles" }))
 	mux.HandleFunc("POST /api/profiles", g.remote(http.MethodPost, func(*http.Request) string { return "/v1/agent-profiles" }))
 	mux.HandleFunc("GET /api/profiles/{name}", g.remote(http.MethodGet, func(r *http.Request) string { return "/v1/agent-profiles/" + url.PathEscape(r.PathValue("name")) }))
@@ -236,7 +272,11 @@ func (g *guiServer) handler() http.Handler {
 			return
 		}
 		g.client.mu.RLock()
-		response := map[string]any{"session_id": g.client.sessionID, "transport": g.client.transport, "vpn": g.client.vpn, "internal": g.client.internal, "operator_only": g.client.operatorOnly, "csrf": g.csrfSecret}
+		sessionID := ""
+		if g.client.sessionID != 0 {
+			sessionID = strconv.FormatUint(g.client.sessionID, 10)
+		}
+		response := map[string]any{"session_id": sessionID, "transport": g.client.transport, "server_address": g.client.serverAddress, "vpn": g.client.vpn, "internal": g.client.internal, "operator_only": g.client.operatorOnly, "csrf": g.csrfSecret}
 		g.client.mu.RUnlock()
 		guiJSON(w, http.StatusOK, response)
 	})
@@ -244,7 +284,7 @@ func (g *guiServer) handler() http.Handler {
 		g.client.routeMu.Lock()
 		out := make([]map[string]any, 0, len(g.client.routes))
 		for _, route := range g.client.routes {
-			out = append(out, map[string]any{"prefix": route.Prefix, "agent_id": route.AgentID, "manual": route.Manual, "installed": g.client.active[route.Prefix]})
+			out = append(out, map[string]any{"prefix": route.Prefix, "agent_id": route.AgentID, "manual": route.Manual, "disabled": route.Disabled, "installed": g.client.active[route.Prefix]})
 		}
 		g.client.routeMu.Unlock()
 		guiJSON(w, http.StatusOK, out)
@@ -278,6 +318,28 @@ func (g *guiServer) handler() http.Handler {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
+	mux.HandleFunc("PUT /api/client/routes", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Prefix  string `json:"prefix"`
+			AgentID string `json:"agent_id"`
+			Enabled *bool  `json:"enabled"`
+		}
+		if r.Header.Get("Content-Type") != "application/json" || json.NewDecoder(http.MaxBytesReader(w, r.Body, 2048)).Decode(&request) != nil || request.AgentID == "" || request.Enabled == nil {
+			http.Error(w, "prefix, agent, and enabled are required", http.StatusBadRequest)
+			return
+		}
+		claims, err := g.actionClaims()
+		if err != nil {
+			http.Error(w, "preferences unavailable", http.StatusInternalServerError)
+			return
+		}
+		if err := g.client.SetClientRouteEnabled(control.WithActionClaims(r.Context(), claims), request.Prefix, request.AgentID, *request.Enabled); err != nil {
+			guiJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("PUT /api/client/mode/{name}", g.clientMode)
 	static, _ := fs.Sub(guiAssets, "web/dist")
 	mux.Handle("/", http.FileServer(http.FS(static)))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -359,6 +421,11 @@ func (g *guiServer) remote(method string, path func(*http.Request) string) http.
 			return
 		}
 		if !json.Valid(data) {
+			guiJSON(w, http.StatusBadGateway, map[string]string{"error": "invalid server response"})
+			return
+		}
+		data, err = guiExactSessionIDs(data)
+		if err != nil {
 			guiJSON(w, http.StatusBadGateway, map[string]string{"error": "invalid server response"})
 			return
 		}

@@ -273,7 +273,7 @@ func handleServerPeer(ctx context.Context, manager *control.Manager, controlToke
 			streamMux.Close()
 			return
 		}
-		manager.RegisterClient(peer, streamMux, internal, control.VPNHostname(hello))
+		manager.RegisterClient(peer, streamMux, internal, control.VPNHostname(hello), control.VPNEnabled(hello))
 		pivot.ServeVPNInteractive(ctx, streamMux, func(destination netip.Addr) (*mux.Mux, bool) {
 			return manager.ResolveClientEgress(peer.Snapshot().ID, destination)
 		}, func() bool { return true }, func(ctx context.Context, stream *mux.Stream) {

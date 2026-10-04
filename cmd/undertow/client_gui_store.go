@@ -47,7 +47,7 @@ func openClientGUIStore(path string) (*clientGUIStore, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	for _, statement := range []string{"PRAGMA journal_mode=WAL", "PRAGMA busy_timeout=5000", "CREATE TABLE IF NOT EXISTS preferences (key TEXT PRIMARY KEY, value TEXT NOT NULL)", "CREATE TABLE IF NOT EXISTS topology_layout (id TEXT PRIMARY KEY, x REAL NOT NULL, y REAL NOT NULL)", "CREATE TABLE IF NOT EXISTS gui_modules (name TEXT PRIMARY KEY, kind TEXT NOT NULL, path TEXT NOT NULL, filename TEXT NOT NULL, format TEXT NOT NULL)", "PRAGMA user_version=3"} {
+	for _, statement := range []string{"PRAGMA journal_mode=WAL", "PRAGMA busy_timeout=5000", "CREATE TABLE IF NOT EXISTS preferences (key TEXT PRIMARY KEY, value TEXT NOT NULL)", "CREATE TABLE IF NOT EXISTS topology_layout (id TEXT PRIMARY KEY, x REAL NOT NULL, y REAL NOT NULL)", "CREATE TABLE IF NOT EXISTS gui_modules (name TEXT PRIMARY KEY, kind TEXT NOT NULL, path TEXT NOT NULL, filename TEXT NOT NULL, format TEXT NOT NULL)", "CREATE TABLE IF NOT EXISTS console_entries (id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT NOT NULL, at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, source TEXT NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL)", "CREATE INDEX IF NOT EXISTS console_entries_agent ON console_entries(agent_id,id)", "PRAGMA user_version=4"} {
 		if _, err := db.Exec(statement); err != nil {
 			db.Close()
 			return nil, err
@@ -61,6 +61,52 @@ func openClientGUIStore(path string) (*clientGUIStore, error) {
 }
 
 func (s *clientGUIStore) Close() error { return s.db.Close() }
+
+type guiConsoleEntry struct {
+	ID     int64  `json:"id"`
+	At     string `json:"at"`
+	Source string `json:"source"`
+	Kind   string `json:"kind"`
+	Text   string `json:"text"`
+}
+
+func (s *clientGUIStore) ConsoleEntries(agentID string) ([]guiConsoleEntry, error) {
+	rows, err := s.db.Query("SELECT id,at,source,kind,text FROM (SELECT id,at,source,kind,text FROM console_entries WHERE agent_id=? ORDER BY id DESC LIMIT 1000) ORDER BY id", agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]guiConsoleEntry, 0)
+	for rows.Next() {
+		var entry guiConsoleEntry
+		if err := rows.Scan(&entry.ID, &entry.At, &entry.Source, &entry.Kind, &entry.Text); err != nil {
+			return nil, err
+		}
+		out = append(out, entry)
+	}
+	return out, rows.Err()
+}
+
+func (s *clientGUIStore) AppendConsoleEntry(agentID, source, kind, value string) error {
+	if agentID == "" || len(agentID) > 256 || strings.ContainsAny(agentID, "/\\\r\n\x00") {
+		return errors.New("invalid agent ID")
+	}
+	if source != "console" && source != "modules" {
+		return errors.New("invalid console source")
+	}
+	if kind != "command" && kind != "output" && kind != "error" && kind != "stderr" && kind != "exit" {
+		return errors.New("invalid console entry kind")
+	}
+	if len(value) > 64<<10 {
+		value = value[:64<<10] + "\n[output truncated in local history]"
+	}
+	_, err := s.db.Exec("INSERT INTO console_entries(agent_id,source,kind,text) VALUES(?,?,?,?)", agentID, source, kind, value)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec("DELETE FROM console_entries WHERE agent_id=? AND id NOT IN (SELECT id FROM console_entries WHERE agent_id=? ORDER BY id DESC LIMIT 1000)", agentID, agentID)
+	return err
+}
 
 func (s *clientGUIStore) ModuleRefs() ([]guiModuleRef, error) {
 	rows, err := s.db.Query("SELECT name,kind,path,filename,format FROM gui_modules ORDER BY name")

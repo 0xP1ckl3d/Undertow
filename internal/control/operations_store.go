@@ -54,8 +54,12 @@ func OpenOperationsStore(path string) (*OperationsStore, error) {
 		`CREATE TABLE IF NOT EXISTS job_records (id TEXT PRIMARY KEY, info_json BLOB NOT NULL, owner_key TEXT NOT NULL, output_path TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS host_results (agent_id TEXT NOT NULL, operation TEXT NOT NULL, session_id TEXT NOT NULL, at TEXT NOT NULL, result_json BLOB NOT NULL, PRIMARY KEY(agent_id,operation))`,
 		`CREATE TABLE IF NOT EXISTS screenshots (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, screen INTEGER NOT NULL, at TEXT NOT NULL, size INTEGER NOT NULL, sha256 TEXT NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL, client_id TEXT NOT NULL, client_session_id TEXT NOT NULL, operator_id TEXT NOT NULL, display_name TEXT NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS server_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS agent_snapshots (id TEXT PRIMARY KEY, saved_at TEXT NOT NULL, info_json BLOB NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS transfers (id TEXT PRIMARY KEY, record_json BLOB NOT NULL, client_session_id TEXT NOT NULL, started TEXT NOT NULL)`,
+		"CREATE INDEX IF NOT EXISTS transfers_started ON transfers(started DESC)",
 		"CREATE INDEX IF NOT EXISTS screenshots_agent_at ON screenshots(agent_id, at DESC)",
-		"PRAGMA user_version=4",
+		"PRAGMA user_version=7",
 	} {
 		if _, err := db.Exec(statement); err != nil {
 			db.Close()
@@ -126,11 +130,68 @@ func (s *OperationsStore) Close() error {
 	return s.db.Close()
 }
 
+func (s *OperationsStore) PublicHost() (string, error) {
+	var host string
+	err := s.db.QueryRow("SELECT value FROM server_settings WHERE key='public_host'").Scan(&host)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return host, err
+}
+
+func (s *OperationsStore) SetPublicHost(host string) error {
+	_, err := s.db.Exec("INSERT INTO server_settings(key,value) VALUES('public_host',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", host)
+	return err
+}
+
+func (s *OperationsStore) SaveAgentSnapshot(agent AgentInfo) error {
+	if agent.ID == "" {
+		return errors.New("agent ID required")
+	}
+	data, err := json.Marshal(agent)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec("INSERT INTO agent_snapshots(id,saved_at,info_json) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET saved_at=excluded.saved_at,info_json=excluded.info_json", agent.ID, time.Now().UTC().Format(time.RFC3339Nano), data)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec("DELETE FROM agent_snapshots WHERE id NOT IN (SELECT id FROM agent_snapshots ORDER BY saved_at DESC LIMIT 5000)")
+	return err
+}
+
+func (s *OperationsStore) LoadAgentSnapshots() ([]AgentInfo, error) {
+	rows, err := s.db.Query("SELECT info_json FROM agent_snapshots ORDER BY saved_at DESC LIMIT 5000")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]AgentInfo, 0)
+	for rows.Next() {
+		var data []byte
+		if err := rows.Scan(&data); err != nil {
+			return nil, err
+		}
+		var agent AgentInfo
+		if err := json.Unmarshal(data, &agent); err != nil {
+			return nil, err
+		}
+		agent.Online = false
+		agent.Offline = true
+		out = append(out, agent)
+	}
+	return out, rows.Err()
+}
+
 func (s *OperationsStore) RecordAudit(record AuditRecord) error {
 	if s == nil {
 		return errors.New("operations store is not configured")
 	}
 	_, err := s.db.Exec(`INSERT INTO audit (id,action_id,at,action,target,client_id,client_session_id,operator_id,display_name,source,identity_trust,status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, record.ID, record.ActionID, record.At.Format(time.RFC3339Nano), record.Action, record.Target, record.ClientID, fmt.Sprint(record.ClientSessionID), record.OperatorID, record.DisplayName, record.Source, record.IdentityTrust, record.Status)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`DELETE FROM audit WHERE id NOT IN (SELECT id FROM audit ORDER BY at DESC LIMIT 10000)`)
 	return err
 }
 

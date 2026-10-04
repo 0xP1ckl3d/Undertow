@@ -544,6 +544,13 @@ func consoleAgents(ctx context.Context, call consoleCaller) ([]control.AgentInfo
 	if err := json.Unmarshal(data, &status); err != nil {
 		return nil, err
 	}
+	connected := status.Agents[:0]
+	for _, agent := range status.Agents {
+		if !agent.Offline {
+			connected = append(connected, agent)
+		}
+	}
+	status.Agents = connected
 	sort.Slice(status.Agents, func(i, j int) bool {
 		if status.Agents[i].Hostname != status.Agents[j].Hostname {
 			return status.Agents[i].Hostname < status.Agents[j].Hostname
