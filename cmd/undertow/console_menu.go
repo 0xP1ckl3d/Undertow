@@ -67,6 +67,12 @@ func printConsoleOverview(output io.Writer, vpnClient, selected, serverAttached 
 	m.row("status [--json]", "Show listeners, peers, routes and counters")
 	m.row("help [TOPIC]", "Show detailed command help")
 	m.row("clear / cls", "Clear the screen")
+	if vpnClient {
+		m.section("OPERATOR ACCOUNT")
+		m.row("operators me", "Show this authenticated account")
+		m.row("operators list", "List accounts (Team Leader)")
+		m.row("operators create|role|disable|enable|reset|revoke", "Manage accounts (Team Leader)")
+	}
 	m.section("PAYLOAD DEPLOYMENT")
 	m.row("payload", "Show the profile → build → host → run workflow")
 	m.row("payload profiles", "Find a reusable profile name")

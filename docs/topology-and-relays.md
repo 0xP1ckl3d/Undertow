@@ -2,6 +2,8 @@
 
 An Undertow server has one identity, enrollment policy, operator API, route table and job manager. By default it listens on DNS UDP/53, HTTPS/WebSocket TCP/443 and QUIC UDP/443. An agent or client chooses any active carrier independently of other peers. `status` shows each peer's actual carrier, and `transports` lists the server's active listeners and session counts.
 
+The GUI retains disconnected agents and their last known topology paths. You can archive a lost agent from its **Overview** or the Topology right-click menu to hide it from the normal graph and agent list without deleting its history. **Settings → Agents** can show archived records on this client. If the agent calls back, the server automatically unarchives it for every operator.
+
 ```mermaid
 flowchart LR
   Client["Client · QUIC"] --> Server["One Undertow server"]

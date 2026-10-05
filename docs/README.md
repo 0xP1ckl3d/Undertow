@@ -11,6 +11,7 @@ New to Undertow? Follow [Getting started](getting-started.md) first. It takes yo
 | Choose VPN egress, internal routing, or a carrier | [Networking modes and transports](networking-modes.md) |
 | Configure carrier identities and agent callbacks | [Deployment profiles](deployment-profiles.md) |
 | Use the console for agents, routes, files, jobs, screenshots, and forwards | [Console guide](console.md) |
+| Bootstrap and manage operator accounts | [Operator authentication](operator-authentication.md) |
 | Use the local browser workspace for topology and agent workflows | [Browser GUI](gui.md) |
 | Expose one or several local services through an agent | [Remote port forwarding](remote-port-forwarding.md) |
 | Work through a complete network layout | [Deployment scenarios](scenarios.md) |

@@ -60,7 +60,7 @@ func TestAgentDistributionAPIAndRetrieval(t *testing.T) {
 		d.ServeHTTP(w, req)
 		return w
 	}
-	w := call(http.MethodPost, "/v1/agent-profiles", map[string]any{"name": "office"})
+	w := call(http.MethodPost, "/v1/agent-profiles", map[string]any{"name": "office", "sleep": map[string]int{"interval_seconds": 12, "jitter_percent": 20}})
 	if w.Code != http.StatusCreated {
 		t.Fatal(w.Code, w.Body.String())
 	}
@@ -99,7 +99,7 @@ func TestAgentDistributionAPIAndRetrieval(t *testing.T) {
 		t.Fatal(err)
 	}
 	embedded, err := agentprofile.Read(buildInfo.ServerPath)
-	if err != nil || embedded.Config.Deployment.QUIC.ALPN != "site/2" {
+	if err != nil || embedded.Config.Deployment.QUIC.ALPN != "site/2" || embedded.Config.Sleep.IntervalSeconds != 12 || embedded.Config.Sleep.JitterPercent != 20 {
 		t.Fatalf("server deployment profile not embedded: %v %+v", err, embedded.Config.Deployment)
 	}
 	chunkResponse := call(http.MethodGet, "/v1/agent-artifacts/"+a.ID+"/download/chunk?offset=0", nil)

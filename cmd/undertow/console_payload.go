@@ -258,6 +258,7 @@ func runPayloadProfile(ctx context.Context, out io.Writer, call consoleCaller, a
 			return err
 		}
 		fmt.Fprintf(out, "Profile name: %s (use this with payload build)\nProfile ID: %s (server metadata; not a payload ID)\nServer: %s\nTransport: %s\nServer fingerprint: %s\nAuthentication: %s\nDenied capabilities: %s\nAdvertised routes: %s\nCreated: %s\n", p.Name, p.ID, p.Server, p.Transport, p.Fingerprint, p.AuthMode, emptyDefault(p.DeniedCapabilities, "none"), emptyDefault(strings.Join(p.AdvertisedRoutes, ", "), "automatic"), p.Created.Format("2006-01-02 15:04 UTC"))
+		fmt.Fprintf(out, "Idle sleep: %d seconds, %d%% jitter (zero disables sleep)\n", p.Sleep.IntervalSeconds, p.Sleep.JitterPercent)
 		fmt.Fprintf(out, "Next: payload build %s windows amd64  (or linux amd64|arm64)\n", p.Name)
 		return nil
 	case "create", "edit":

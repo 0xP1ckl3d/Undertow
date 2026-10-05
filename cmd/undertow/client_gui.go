@@ -117,6 +117,11 @@ func (g *guiServer) handler() http.Handler {
 	mux.HandleFunc("GET /api/events", g.events)
 	mux.HandleFunc("GET /api/topology", g.remote(http.MethodGet, func(*http.Request) string { return "/v1/topology" }))
 	mux.HandleFunc("GET /api/history", g.remote(http.MethodGet, func(*http.Request) string { return "/v1/history" }))
+	mux.HandleFunc("GET /api/operator/me", g.remote(http.MethodGet, func(*http.Request) string { return "/v1/operator/me" }))
+	mux.HandleFunc("GET /api/operators", g.remote(http.MethodGet, func(*http.Request) string { return "/v1/operators" }))
+	mux.HandleFunc("POST /api/operators", g.remote(http.MethodPost, func(*http.Request) string { return "/v1/operators" }))
+	mux.HandleFunc("PUT /api/operators/{id}", g.remote(http.MethodPut, func(r *http.Request) string { return "/v1/operators/" + url.PathEscape(r.PathValue("id")) }))
+	mux.HandleFunc("DELETE /api/operators/{id}", g.remote(http.MethodDelete, func(r *http.Request) string { return "/v1/operators/" + url.PathEscape(r.PathValue("id")) }))
 	mux.HandleFunc("GET /api/transfers", g.remote(http.MethodGet, func(*http.Request) string { return "/v1/transfers" }))
 	mux.HandleFunc("GET /api/worker-logs", g.remote(http.MethodGet, func(r *http.Request) string {
 		if after := r.URL.Query().Get("after"); after != "" {
@@ -142,7 +147,28 @@ func (g *guiServer) handler() http.Handler {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		guiJSON(w, http.StatusOK, p)
+		saved, err := g.store.Preferences()
+		if err != nil {
+			http.Error(w, "preferences unavailable", http.StatusInternalServerError)
+			return
+		}
+		guiJSON(w, http.StatusOK, saved)
+	})
+	mux.HandleFunc("PUT /api/preferences/archived-visibility", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			ShowArchived *bool `json:"show_archived"`
+		}
+		decoder := json.NewDecoder(io.LimitReader(r.Body, 512))
+		decoder.DisallowUnknownFields()
+		if r.Header.Get("Content-Type") != "application/json" || decoder.Decode(&request) != nil || request.ShowArchived == nil {
+			http.Error(w, "invalid archived visibility preference", http.StatusBadRequest)
+			return
+		}
+		if err := g.store.SetArchivedVisibility(*request.ShowArchived); err != nil {
+			http.Error(w, "could not save archived visibility", http.StatusInternalServerError)
+			return
+		}
+		guiJSON(w, http.StatusOK, map[string]bool{"show_archived": *request.ShowArchived})
 	})
 	mux.HandleFunc("GET /api/layout", func(w http.ResponseWriter, r *http.Request) {
 		positions, err := g.store.Layout()
@@ -166,6 +192,8 @@ func (g *guiServer) handler() http.Handler {
 	})
 	mux.HandleFunc("GET /api/agents/{id}", g.remote(http.MethodGet, func(r *http.Request) string { return "/v1/agents/" + url.PathEscape(r.PathValue("id")) }))
 	mux.HandleFunc("PUT /api/agents/{id}/nickname", g.remote(http.MethodPut, func(r *http.Request) string { return "/v1/agents/" + url.PathEscape(r.PathValue("id")) + "/nickname" }))
+	mux.HandleFunc("PUT /api/agents/{id}/sleep", g.remote(http.MethodPut, func(r *http.Request) string { return "/v1/agents/" + url.PathEscape(r.PathValue("id")) + "/sleep" }))
+	mux.HandleFunc("PUT /api/agents/{id}/archive", g.remote(http.MethodPut, func(r *http.Request) string { return "/v1/agents/" + url.PathEscape(r.PathValue("id")) + "/archive" }))
 	mux.HandleFunc("POST /api/agents/{id}/shutdown", g.remote(http.MethodPost, func(r *http.Request) string { return "/v1/agents/" + url.PathEscape(r.PathValue("id")) + "/shutdown" }))
 	mux.HandleFunc("POST /api/agents/{id}/session/kill", g.killAgentSession)
 	mux.HandleFunc("GET /api/agents/{id}/host-results", g.remote(http.MethodGet, func(r *http.Request) string {
@@ -447,15 +475,11 @@ func (g *guiServer) remote(method string, path func(*http.Request) string) http.
 }
 
 func (g *guiServer) actionClaims() (control.ActionClaims, error) {
-	p, err := g.store.Preferences()
-	if err != nil {
-		return control.ActionClaims{}, err
-	}
 	id, err := randomGUISecret()
 	if err != nil {
 		return control.ActionClaims{}, err
 	}
-	return control.ActionClaims{ActionID: id, OperatorID: p.OperatorID, DisplayName: p.DisplayName, Source: "gui"}, nil
+	return control.ActionClaims{ActionID: id, Source: "gui"}, nil
 }
 
 func guiJSON(w http.ResponseWriter, status int, v any) {

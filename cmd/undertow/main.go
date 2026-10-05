@@ -78,6 +78,8 @@ func main() {
 		err = initKeys(os.Args[2:])
 	case "server":
 		err = serve(os.Args[2:])
+	case "operators":
+		err = operatorAccountsCommand(os.Args[2:])
 	case "agent":
 		if len(os.Args) > 2 && (os.Args[2] == "list" || os.Args[2] == "show" || os.Args[2] == "select") {
 			err = agentCommand(os.Args[2:])
@@ -291,7 +293,7 @@ func serve(args []string) error {
 	}
 	log.Printf("client enrollment mode: %s", *authMode)
 	if *authMode == "none" {
-		log.Print("WARNING: --auth none allows anyone who can reach this server to enroll, access the network, run commands, and transfer files on agents unless agents restrict those capabilities with --deny; use token or password enrollment for real deployments")
+		log.Print("WARNING: --auth none permits open agent enrollment; operator clients still require server-managed account credentials")
 	}
 	localNetworks, err := tun.ExistingNetworks()
 	if err != nil {
@@ -332,6 +334,13 @@ func serve(args []string) error {
 		return err
 	}
 	defer operations.Close()
+	accountCount, err := operations.OperatorCount()
+	if err != nil {
+		return err
+	}
+	if accountCount == 0 {
+		return errors.New("no operator accounts: run 'undertow operators bootstrap --operations-db PATH' before starting the server")
+	}
 	if err := manager.SetOperationsStore(operations); err != nil {
 		return fmt.Errorf("load agent history: %w", err)
 	}

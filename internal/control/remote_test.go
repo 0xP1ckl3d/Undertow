@@ -27,6 +27,26 @@ type remoteTestTransport struct {
 	once    sync.Once
 }
 
+func TestClientArchiveRequestPolicy(t *testing.T) {
+	for _, test := range []struct {
+		method, path string
+		allowed      bool
+	}{
+		{http.MethodPut, "/v1/agents/agent-a/archive", true},
+		{http.MethodGet, "/v1/agents/agent-a/archive", false},
+		{http.MethodPut, "/v1/agents/agent-a/archive?force=true", false},
+		{http.MethodPut, "/v1/agents/agent-a/extra/archive", false},
+	} {
+		request, err := http.NewRequest(test.method, "http://localhost"+test.path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := clientRequestAllowed(request, 1); got != test.allowed {
+			t.Fatalf("%s %s allowed=%t, want %t", test.method, test.path, got, test.allowed)
+		}
+	}
+}
+
 func (t *remoteTestTransport) Send(ctx context.Context, b []byte) error {
 	select {
 	case t.out <- append([]byte(nil), b...):

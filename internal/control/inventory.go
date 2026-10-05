@@ -30,6 +30,10 @@ type ArtifactIdentity struct {
 }
 
 func SendInventoryWithIdentity(ctx context.Context, streamMux *mux.Mux, explicit []string, caps pivot.Capabilities, identity ArtifactIdentity) error {
+	return SendInventoryWithPolicy(ctx, streamMux, explicit, caps, identity, SleepPolicy{})
+}
+
+func SendInventoryWithPolicy(ctx context.Context, streamMux *mux.Mux, explicit []string, caps pivot.Capabilities, identity ArtifactIdentity, sleep SleepPolicy) error {
 	hostname, _ := os.Hostname()
 	info := struct {
 		Hostname         string                 `json:"hostname"`
@@ -39,8 +43,10 @@ func SendInventoryWithIdentity(ctx context.Context, streamMux *mux.Mux, explicit
 		Interfaces       []string               `json:"interfaces,omitempty"`
 		AdvertisedRoutes []string               `json:"advertised_routes,omitempty"`
 		Capabilities     pivot.CapabilityReport `json:"capabilities"`
+		Sleep            SleepPolicy            `json:"sleep"`
+		SleepSupported   bool                   `json:"sleep_supported"`
 		ArtifactIdentity
-	}{Hostname: hostname, OS: runtime.GOOS, Arch: runtime.GOARCH, Privilege: currentPrivilege(), Capabilities: caps.Report(), ArtifactIdentity: identity}
+	}{Hostname: hostname, OS: runtime.GOOS, Arch: runtime.GOARCH, Privilege: currentPrivilege(), Capabilities: caps.Report(), Sleep: sleep, SleepSupported: true, ArtifactIdentity: identity}
 	seen := make(map[string]bool)
 	for _, raw := range explicit {
 		prefix, err := netip.ParsePrefix(raw)

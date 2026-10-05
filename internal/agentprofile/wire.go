@@ -7,24 +7,26 @@ import (
 	"io"
 
 	"undertow/internal/agent"
+	"undertow/internal/control"
 	"undertow/internal/deployment"
 )
 
 // The overlay uses short field names. Display names and descriptive profile
 // metadata stay in the server store rather than in the deployed executable.
 type wireConfig struct {
-	Server                string             `json:"s"`
-	Transport             string             `json:"t"`
-	Domain                string             `json:"d,omitempty"`
-	Fingerprint           string             `json:"f"`
-	Credential            []byte             `json:"e"`
-	PayloadProfile        string             `json:"q,omitempty"`
-	WebSocketPath         string             `json:"w,omitempty"`
-	TLSServerName         string             `json:"n,omitempty"`
-	TLSInsecureSkipVerify bool               `json:"x,omitempty"`
-	AdvertisedRoutes      []string           `json:"r,omitempty"`
-	DeniedCapabilities    string             `json:"b,omitempty"`
-	Deployment            deployment.Profile `json:"p,omitempty"`
+	Server                string              `json:"s"`
+	Transport             string              `json:"t"`
+	Domain                string              `json:"d,omitempty"`
+	Fingerprint           string              `json:"f"`
+	Credential            []byte              `json:"e"`
+	PayloadProfile        string              `json:"q,omitempty"`
+	WebSocketPath         string              `json:"w,omitempty"`
+	TLSServerName         string              `json:"n,omitempty"`
+	TLSInsecureSkipVerify bool                `json:"x,omitempty"`
+	AdvertisedRoutes      []string            `json:"r,omitempty"`
+	DeniedCapabilities    string              `json:"b,omitempty"`
+	Deployment            deployment.Profile  `json:"p,omitempty"`
+	Sleep                 control.SleepPolicy `json:"i,omitempty"`
 }
 
 type wireEmbedded struct {
@@ -43,6 +45,7 @@ func encodeEmbedded(e Embedded) ([]byte, error) {
 			TLSServerName: c.TLSServerName, TLSInsecureSkipVerify: c.TLSInsecureSkipVerify,
 			AdvertisedRoutes: c.AdvertisedRoutes, DeniedCapabilities: c.DeniedCapabilities,
 			Deployment: c.Deployment,
+			Sleep:      c.Sleep,
 		}})
 }
 
@@ -65,5 +68,6 @@ func decodeEmbedded(payload []byte) (Embedded, error) {
 			WebSocketPath: c.WebSocketPath, TLSServerName: c.TLSServerName,
 			TLSInsecureSkipVerify: c.TLSInsecureSkipVerify,
 			AdvertisedRoutes:      c.AdvertisedRoutes, DeniedCapabilities: c.DeniedCapabilities, Deployment: c.Deployment,
+			Sleep: c.Sleep,
 		}}, nil
 }

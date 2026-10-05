@@ -9,7 +9,36 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"undertow/internal/control"
 )
+
+func TestAgentGUISleepCommandUsesAgentPolicyAPI(t *testing.T) {
+	store, err := openClientGUIStore(filepath.Join(t.TempDir(), "ui.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	var saved control.SleepPolicy
+	client := &liveClientConsole{request: func(_ context.Context, method, path string, body any) ([]byte, error) {
+		switch method + " " + path {
+		case "GET /v1/agents/agent-a":
+			return []byte(`{"id":"agent-a","sleep_supported":true,"sleep":{"interval_seconds":3,"jitter_percent":10}}`), nil
+		case "PUT /v1/agents/agent-a/sleep":
+			saved = body.(control.SleepPolicy)
+			return []byte(`{"interval_seconds":7,"jitter_percent":20}`), nil
+		}
+		return nil, errors.New("unexpected request")
+	}}
+	gui := &guiServer{client: client, store: store}
+	shown, err := gui.runAgentGUICommand(context.Background(), "agent-a", "agent sleep")
+	if err != nil || !strings.Contains(shown.Output, "3 seconds, 10%") {
+		t.Fatalf("show: %+v %v", shown, err)
+	}
+	if _, err := gui.runAgentGUICommand(context.Background(), "agent-a", "agent sleep 7 20"); err != nil || saved != (control.SleepPolicy{IntervalSeconds: 7, JitterPercent: 20}) {
+		t.Fatalf("save: %+v %v", saved, err)
+	}
+}
 
 func TestAgentGUIConsoleRequiresExplicitAgentCommand(t *testing.T) {
 	store, err := openClientGUIStore(filepath.Join(t.TempDir(), "ui.db"))

@@ -14,8 +14,9 @@ import (
 )
 
 type guiPreferences struct {
-	OperatorID  string `json:"operator_id"`
-	DisplayName string `json:"display_name"`
+	OperatorID   string `json:"operator_id"`
+	DisplayName  string `json:"display_name"`
+	ShowArchived bool   `json:"show_archived"`
 }
 
 type clientGUIStore struct{ db *sql.DB }
@@ -162,7 +163,7 @@ func (s *clientGUIStore) SavePosition(p guiPosition) error {
 
 func (s *clientGUIStore) Preferences() (guiPreferences, error) {
 	var p guiPreferences
-	rows, err := s.db.Query("SELECT key,value FROM preferences WHERE key IN ('operator_id','display_name')")
+	rows, err := s.db.Query("SELECT key,value FROM preferences WHERE key IN ('operator_id','display_name','show_archived')")
 	if err != nil {
 		return p, err
 	}
@@ -174,11 +175,22 @@ func (s *clientGUIStore) Preferences() (guiPreferences, error) {
 		}
 		if key == "operator_id" {
 			p.OperatorID = value
-		} else {
+		} else if key == "display_name" {
 			p.DisplayName = value
+		} else if key == "show_archived" {
+			p.ShowArchived = value == "true"
 		}
 	}
 	return p, rows.Err()
+}
+
+func (s *clientGUIStore) SetArchivedVisibility(show bool) error {
+	value := "false"
+	if show {
+		value = "true"
+	}
+	_, err := s.db.Exec("INSERT INTO preferences(key,value) VALUES('show_archived',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", value)
+	return err
 }
 
 func (s *clientGUIStore) SavePreferences(p guiPreferences) error {

@@ -1,5 +1,7 @@
 # Interactive consoles
 
+Client consoles authenticate with the server using `--operator ID --operator-password-file PATH` in addition to the existing transport enrollment flags. The GUI launched by that client uses the same authenticated account. Team Leaders can type `operators me`, `operators list`, `operators create ID "Display Name" operator|team_leader PASSWORD_FILE`, `operators role ID operator|team_leader`, `operators disable ID`, `operators enable ID`, `operators reset ID PASSWORD_FILE`, or `operators revoke ID`. Operators can type `operators me`; account changes require a Team Leader. Password files are read on the client host. See [Operator authentication](operator-authentication.md).
+
 Undertow has two interactive consoles. Run `undertow server` in a terminal on the **server host** to start its worker and open the operator console. Run `undertow client --vpn --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify` on the **VPN client host** to start its worker and open the client console when using the server's default self-signed TLS certificate. Use `client --operator-only` to connect and operate agents without a TUN device. Both consoles can select and operate agents, manage deployment payloads, inspect topology, and start or stop relay and server carrier listeners. The client console manages that client's routes, VPN mode, and agent-side forwards; it refuses to stop the server carrier carrying its own session. The server needs `--tun` only if applications on the server host itself need routed agent access.
 
 See [getting started](getting-started.md) for enrollment, fingerprint, and privilege setup. In the examples below, `undertow` means `./bin/undertow` on Linux or `.\bin\undertow.exe` on Windows. Use `sudo` for server console access if the elevated server owns `control.key`; a VPN client needs elevation to install routes.
@@ -23,7 +25,7 @@ See [getting started](getting-started.md) for enrollment, fingerprint, and privi
 Type `payload` for the four-step profile → build → host → run guide. Both the server console and an authenticated client console can manage profiles and payloads, including downloading built binaries:
 
 ```text
-payload profile create office server=SERVER_IP:443 transport=quic
+payload profile create office server=SERVER_IP:443 transport=quic sleep-seconds=30 sleep-jitter=20
 payload profiles
 payload profile show office
 payload profile edit office routes=10.20.0.0/16
@@ -43,11 +45,15 @@ agents
 use 1
 show
 agent events
+agent sleep
+agent sleep 30 20
 session kill
 agent shutdown
 ```
 
 `payload build` prints a 24-character **payload ID** for the build and the binary's **server file** path. Each running copy creates a separate 32-character agent ID when it connects. The server file is not an endpoint install path. `payload host` prints the endpoint **download URL** and opaque **download path**; `payload show` and `payload url` retrieve them again. Use `payload retrieval-path` to view the public prefix and `payload retrieval-path set /downloads/` to change it without restarting. Changing it rotates hosted download tokens, permanently invalidating earlier URLs; `payload hosted` lists the new URLs. Use `payload profile delete NAME` to remove a reusable profile. Editing one leaves existing payloads unchanged. Verify the download's SHA-256 before launching it with no arguments. `session kill` closes a connection and permits reconnect; `agent shutdown` stops the configured process. `payload unhost`, `revoke`, and `delete` separately control download, future enrollment, and the server-side file/record. Normal packaged-agent operation writes no local runtime files; the server retains bounded lifecycle events. Older `agent profile/build/artifacts/host` forms still work as aliases. See [payload deployment](agent-distribution.md) for authentication and endpoint state.
+
+`sleep-seconds` accepts `0–86400`, with `0` preserving the existing persistent session; `sleep-jitter` accepts `0–50` percent. `payload profile show NAME` displays the values embedded in future builds. In the selected agent menu, `agent sleep` shows the effective values and `agent sleep SECONDS JITTER` saves an override for that agent across callbacks. At the top level, use `agent sleep AGENT_ID` and `agent sleep AGENT_ID SECONDS JITTER`. An active stream, job, relay, forward, or accepted route keeps the agent connected. Older binaries without sleep support must be rebuilt before these live controls can update them. See [Idle sleep](agent-distribution.md#idle-sleep) for the full lifecycle and carrier behavior.
 
 For a child behind a TCP parent relay, use `payload host-agent PAYLOAD_ID PARENT_AGENT_ID RELAY_BIND PUBLIC_HOST` after starting the relay. `payload agent-hosts [PAYLOAD_ID]` lists active URLs, `payload deploy-script-agent HOST_ID powershell|shell` prints a pinned helper, and `payload unhost-agent HOST_ID` disables one URL without stopping the relay. `payload verify-script-agent HOST_ID powershell|shell` prints an optional HEAD-only diagnostic for a workstation already reachable by the operator; it does not delay or enable hosting. The parent fetches each artifact from the server over its existing session and serves downloads on the relay's existing address and port. These commands work in either console. Follow the [payload deployment guide](agent-distribution.md#host-a-payload-through-a-connected-agent) for a complete example.
 

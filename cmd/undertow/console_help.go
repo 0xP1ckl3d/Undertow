@@ -37,11 +37,26 @@ func printConsoleHelp(output io.Writer, vpnClient, selected, serverAttached bool
 		}
 	}
 	switch topic {
+	case "operators":
+		if !vpnClient {
+			return fmt.Errorf("operator accounts are managed from a connected client console")
+		}
+		fmt.Fprint(output, `Server-managed operator accounts:
+  operators me                       Show your authenticated identity.
+  operators list                     List accounts (Team Leader).
+  operators create ID "NAME" ROLE FILE Create an account (Team Leader).
+  operators role ID ROLE             Set operator or team_leader.
+  operators disable|enable ID        Change account state.
+  operators reset ID FILE            Rotate the password.
+  operators revoke ID                Permanently revoke, retaining audit identity.
+FILE is a local password file. Account changes disconnect affected sessions.
+The final active Team Leader cannot be disabled, revoked, or demoted.
+`)
 	case "payload", "profile", "artifact", "artifacts", "retrieval-path", "retrieval-host":
 		printPayloadWorkflow(output)
 		fmt.Fprint(output, `
 Profile fields: server, transport, domain, fingerprint, auth, token-file,
-password-file, payload-profile, websocket-path, tls-server-name,
+password-file, payload-profile, sleep-seconds, sleep-jitter, websocket-path, tls-server-name,
 tls-insecure-skip-verify, deny, routes (comma-separated IPv4 CIDRs).
 If a listener binds 0.0.0.0 or ::, set server= to its reachable address.
 Connected VPN clients can manage profiles and payloads through the authenticated
@@ -54,6 +69,7 @@ control connection. Profile and payload views never show enrollment secrets.
   show                           Inspect the selected agent.
   agent events AGENT_ID          Read server-side lifecycle events.
   agent rename AGENT_ID NAME     Set a shared nickname; use "" to clear it.
+  agent sleep AGENT_ID [SECONDS JITTER]  View or set idle callback policy; zero disables it.
   agent shutdown AGENT_ID        Ask a running packaged agent to exit.
   session kill AGENT_ID          Close only its session; it may reconnect.
 For deployment binaries, use payload and type help payload for the workflow.

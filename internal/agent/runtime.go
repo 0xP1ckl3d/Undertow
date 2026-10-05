@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -49,6 +50,7 @@ type Config struct {
 	Metadata              control.ArtifactIdentity `json:"-"`
 	Packaged              bool                     `json:"-"`
 	Deployment            deployment.Profile       `json:"deployment,omitempty"`
+	Sleep                 control.SleepPolicy      `json:"sleep,omitempty"`
 }
 
 func (c Config) Validate() error {
@@ -113,6 +115,9 @@ func (c Config) Validate() error {
 		return errors.New("websocket path must begin with /")
 	}
 	if err := c.Deployment.Resolved().Validate(); err != nil {
+		return err
+	}
+	if err := c.Sleep.Validate(); err != nil {
 		return err
 	}
 	return nil
@@ -196,7 +201,7 @@ func Run(ctx context.Context, c Config, ready func() error) error {
 				metadata.ReconnectPolicy = "progressive"
 			}
 			inventoryReady := true
-			if err := control.SendInventoryWithIdentity(ctx, streamMux, c.AdvertisedRoutes, caps, metadata); err != nil {
+			if err := control.SendInventoryWithPolicy(ctx, streamMux, c.AdvertisedRoutes, caps, metadata, c.Sleep); err != nil {
 				inventoryReady = false
 				log.Printf("inventory: %v", err)
 			}
@@ -204,11 +209,59 @@ func Run(ctx context.Context, c Config, ready func() error) error {
 			if c.Packaged {
 				shutdown = stop
 			}
-			pivot.ServeAgentWithLifecycle(ctx, streamMux, caps, shutdown)
+			sleepRequested, stopSleep := idleSleep(ctx, streamMux, c.Sleep)
+			served := make(chan struct{})
+			go func() {
+				pivot.ServeAgentWithLifecycle(ctx, streamMux, caps, shutdown)
+				close(served)
+			}()
+			var idleDelay time.Duration
+		serving:
+			for {
+				select {
+				case idleDelay = <-sleepRequested:
+					stopSleep()
+					commitCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+					err := streamMux.SendControl(commitCtx, control.EncodeSleepMessage("commit", nil))
+					cancel()
+					if err == nil {
+						ackCtx, ackCancel := context.WithTimeout(ctx, 5*time.Second)
+						ack := receiveSleepMessage(ackCtx, streamMux, "committed", "denied")
+						ackCancel()
+						if ack == "committed" {
+							finalCtx, finalCancel := context.WithTimeout(ctx, 5*time.Second)
+							_ = streamMux.SendControl(finalCtx, control.EncodeSleepMessage("sleeping", nil))
+							final := receiveSleepMessage(finalCtx, streamMux, "final")
+							finalCancel()
+							streamMux.Close()
+							if final == "final" {
+								break serving
+							}
+							idleDelay = 0
+							break serving
+						}
+					}
+					// The server retained the session because new work appeared.
+					idleDelay = 0
+					sleepRequested, stopSleep = idleSleep(ctx, streamMux, c.Sleep)
+				case <-served:
+					stopSleep()
+					break serving
+				}
+			}
+			<-served
 			streamMux.Close()
 			conn.Close()
 			if ctx.Err() != nil {
 				return nil
+			}
+			if idleDelay > 0 {
+				failures = 0
+				log.Printf("agent idle; sleeping for %s", idleDelay)
+				if !waitReconnect(ctx, idleDelay) {
+					return nil
+				}
+				continue
 			}
 			failures = failureIndexAfterSessionWithProfile(failures, time.Since(started), inventoryReady, c.Deployment)
 			log.Print("agent session ended; reconnecting")
@@ -268,5 +321,23 @@ func waitReconnect(ctx context.Context, delay time.Duration) bool {
 		return false
 	case <-timer.C:
 		return true
+	}
+}
+
+func receiveSleepMessage(ctx context.Context, stream *mux.Mux, expected ...string) string {
+	for {
+		data, err := stream.RecvControl(ctx)
+		if err != nil {
+			return ""
+		}
+		var message control.SleepMessage
+		if json.Unmarshal(data, &message) != nil {
+			continue
+		}
+		for _, kind := range expected {
+			if message.Kind == kind {
+				return kind
+			}
+		}
 	}
 }

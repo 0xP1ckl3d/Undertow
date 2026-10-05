@@ -55,13 +55,16 @@ func OpenOperationsStore(path string) (*OperationsStore, error) {
 		`CREATE TABLE IF NOT EXISTS host_results (agent_id TEXT NOT NULL, operation TEXT NOT NULL, session_id TEXT NOT NULL, at TEXT NOT NULL, result_json BLOB NOT NULL, PRIMARY KEY(agent_id,operation))`,
 		`CREATE TABLE IF NOT EXISTS screenshots (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, screen INTEGER NOT NULL, at TEXT NOT NULL, size INTEGER NOT NULL, sha256 TEXT NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL, client_id TEXT NOT NULL, client_session_id TEXT NOT NULL, operator_id TEXT NOT NULL, display_name TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS server_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS operator_accounts (id TEXT PRIMARY KEY, display_name TEXT NOT NULL, role TEXT NOT NULL, password_hash BLOB NOT NULL, disabled INTEGER NOT NULL DEFAULT 0, version INTEGER NOT NULL DEFAULT 1)`,
 		`CREATE TABLE IF NOT EXISTS agent_snapshots (id TEXT PRIMARY KEY, saved_at TEXT NOT NULL, info_json BLOB NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS agent_nicknames (id TEXT PRIMARY KEY, nickname TEXT NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS agent_archives (id TEXT PRIMARY KEY, archived_at TEXT NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS agent_sleep (id TEXT PRIMARY KEY, interval_seconds INTEGER NOT NULL, jitter_percent INTEGER NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS relay_listeners (agent_id TEXT NOT NULL, bind TEXT NOT NULL, PRIMARY KEY(agent_id,bind))`,
 		`CREATE TABLE IF NOT EXISTS transfers (id TEXT PRIMARY KEY, record_json BLOB NOT NULL, client_session_id TEXT NOT NULL, started TEXT NOT NULL)`,
 		"CREATE INDEX IF NOT EXISTS transfers_started ON transfers(started DESC)",
 		"CREATE INDEX IF NOT EXISTS screenshots_agent_at ON screenshots(agent_id, at DESC)",
-		"PRAGMA user_version=9",
+		"PRAGMA user_version=11",
 	} {
 		if _, err := db.Exec(statement); err != nil {
 			db.Close()
@@ -158,12 +161,12 @@ func (s *OperationsStore) SaveAgentSnapshot(agent AgentInfo) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Exec("DELETE FROM agent_snapshots WHERE id NOT IN (SELECT id FROM agent_snapshots ORDER BY saved_at DESC LIMIT 5000)")
+	_, err = s.db.Exec("DELETE FROM agent_snapshots WHERE id NOT IN (SELECT id FROM agent_snapshots ORDER BY saved_at DESC LIMIT 5000) AND id NOT IN (SELECT id FROM agent_archives)")
 	return err
 }
 
 func (s *OperationsStore) LoadAgentSnapshots() ([]AgentInfo, error) {
-	rows, err := s.db.Query("SELECT info_json FROM agent_snapshots ORDER BY saved_at DESC LIMIT 5000")
+	rows, err := s.db.Query("SELECT info_json FROM agent_snapshots WHERE id IN (SELECT id FROM agent_snapshots ORDER BY saved_at DESC LIMIT 5000) OR id IN (SELECT id FROM agent_archives) ORDER BY saved_at DESC")
 	if err != nil {
 		return nil, err
 	}
@@ -208,6 +211,61 @@ func (s *OperationsStore) SetAgentNickname(id, nickname string) error {
 		return err
 	}
 	_, err := s.db.Exec(`INSERT INTO agent_nicknames(id,nickname) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET nickname=excluded.nickname`, id, nickname)
+	return err
+}
+
+func (s *OperationsStore) LoadAgentSleepOverrides() (map[string]SleepPolicy, error) {
+	rows, err := s.db.Query(`SELECT id,interval_seconds,jitter_percent FROM agent_sleep`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]SleepPolicy)
+	for rows.Next() {
+		var id string
+		var policy SleepPolicy
+		if err := rows.Scan(&id, &policy.IntervalSeconds, &policy.JitterPercent); err != nil {
+			return nil, err
+		}
+		if err := policy.Validate(); err != nil {
+			return nil, err
+		}
+		out[id] = policy
+	}
+	return out, rows.Err()
+}
+
+func (s *OperationsStore) SetAgentSleepOverride(id string, policy SleepPolicy) error {
+	if err := policy.Validate(); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(`INSERT INTO agent_sleep(id,interval_seconds,jitter_percent) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET interval_seconds=excluded.interval_seconds,jitter_percent=excluded.jitter_percent`, id, policy.IntervalSeconds, policy.JitterPercent)
+	return err
+}
+
+func (s *OperationsStore) LoadArchivedAgents() (map[string]bool, error) {
+	rows, err := s.db.Query(`SELECT id FROM agent_archives`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]bool)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out[id] = true
+	}
+	return out, rows.Err()
+}
+
+func (s *OperationsStore) SetAgentArchived(id string, archived bool) error {
+	if archived {
+		_, err := s.db.Exec(`INSERT INTO agent_archives(id,archived_at) VALUES(?,?) ON CONFLICT(id) DO NOTHING`, id, time.Now().UTC().Format(time.RFC3339Nano))
+		return err
+	}
+	_, err := s.db.Exec(`DELETE FROM agent_archives WHERE id=?`, id)
 	return err
 }
 

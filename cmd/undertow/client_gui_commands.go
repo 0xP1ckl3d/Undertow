@@ -34,7 +34,7 @@ func (g *guiServer) agentGUIHelp() string {
 			m.row(item[0], item[1])
 		}
 	}
-	section("AGENT SESSION", [][2]string{{"show", "Inspect this agent"}, {"agent events", "Recent lifecycle events"}, {"agent shutdown", "Ask this agent to exit"}, {"session kill", "Close this session; agent may reconnect"}, {"shell", "Open the separate live shell panel"}})
+	section("AGENT SESSION", [][2]string{{"show", "Inspect this agent"}, {"agent events", "Recent lifecycle events"}, {"agent sleep [SECONDS JITTER]", "View or set idle sleep"}, {"agent shutdown", "Ask this agent to exit"}, {"session kill", "Close this session; agent may reconnect"}, {"shell", "Open the separate live shell panel"}})
 	section("HOST", [][2]string{{"pwd; ls [PATH]; stat PATH", "Browse this agent's files"}, {"mkdir PATH; rm PATH", "Create or remove a path"}, {"whoami; ps; privileges", "Identity, processes and privileges"}, {"env [NAME]", "Environment variables"}, {"interfaces; dns; route-table", "Network configuration"}, {"screens; screenshot [NUMBER]", "List screens or capture explicitly"}})
 	section("FILES AND SERVICES", [][2]string{{"upload LOCAL REMOTE", "Send a client file to this agent"}, {"download REMOTE [LOCAL]", "Save an agent file on this client"}, {"forward add BIND TARGET", "Expose a client service through this agent"}, {"forward list; forward del BIND", "Inspect or close forwards"}, {"relay start [BIND]", "Start a relay listener on this agent"}, {"relay list; relay stop BIND", "Inspect or close relay listeners"}})
 	section("EXECUTION AND JOBS", [][2]string{{"exec PROGRAM [ARGS]", "Run one program when requested"}, {"job start PROGRAM [ARGS]", "Start a background job"}, {"jobs; job show|output ID", "Inspect retained jobs and output"}, {"job cancel|stop|delete ID", "Manage a job"}, {"run-script [OPTIONS] FILE", "Run a client-side script file"}, {"run-wasm|run-native|run-bof ...", "Run a client-side module file"}})
@@ -424,6 +424,41 @@ func (g *guiServer) runAgentGUICommand(ctx context.Context, agentID, line string
 			return guiCommandResult{}, errors.New("use job show|output|cancel|delete ID")
 		}
 	case "agent":
+		if len(args) >= 2 && args[1] == "sleep" {
+			if len(args) == 2 {
+				data, err := call(http.MethodGet, base, nil)
+				if err != nil {
+					return guiCommandResult{}, err
+				}
+				var agent control.AgentInfo
+				if err := json.Unmarshal(data, &agent); err != nil {
+					return guiCommandResult{}, err
+				}
+				if !agent.SleepSupported {
+					return guiCommandResult{Output: "Idle sleep is unavailable for this agent build; rebuild its payload.\n"}, nil
+				}
+				return guiCommandResult{Output: fmt.Sprintf("Idle sleep: %d seconds, %d%% jitter.\n", agent.Sleep.IntervalSeconds, agent.Sleep.JitterPercent)}, nil
+			}
+			if len(args) != 4 {
+				return guiCommandResult{}, errors.New("use agent sleep [SECONDS JITTER]")
+			}
+			seconds, err := strconv.Atoi(args[2])
+			if err != nil {
+				return guiCommandResult{}, err
+			}
+			jitter, err := strconv.Atoi(args[3])
+			if err != nil {
+				return guiCommandResult{}, err
+			}
+			policy := control.SleepPolicy{IntervalSeconds: seconds, JitterPercent: jitter}
+			if err := policy.Validate(); err != nil {
+				return guiCommandResult{}, err
+			}
+			if _, err := call(http.MethodPut, base+"/sleep", policy); err != nil {
+				return guiCommandResult{}, err
+			}
+			return guiCommandResult{Output: fmt.Sprintf("Idle sleep set to %d seconds, %d%% jitter.\n", seconds, jitter)}, nil
+		}
 		if len(args) == 2 && args[1] == "shutdown" {
 			_, err := call(http.MethodPost, base+"/shutdown", map[string]any{})
 			if err != nil {
@@ -449,7 +484,7 @@ func (g *guiServer) runAgentGUICommand(ctx context.Context, agentID, line string
 			}
 			return guiCommandResult{Output: out.String()}, nil
 		}
-		return guiCommandResult{}, errors.New("use agent events or agent shutdown")
+		return guiCommandResult{}, errors.New("use agent events, agent sleep, or agent shutdown")
 	case "session":
 		if len(args) != 2 || args[1] != "kill" {
 			return guiCommandResult{}, errors.New("use session kill")

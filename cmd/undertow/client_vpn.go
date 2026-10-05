@@ -78,6 +78,8 @@ func clientCommand(args []string) error {
 	authMode := f.String("auth", "token", "client enrollment: token, password, none")
 	password := f.String("password", "", "shared enrollment password; visible in process listings")
 	passwordFile := f.String("password-file", "", "read shared enrollment password from a file")
+	operatorID := f.String("operator", "", "server-managed operator account ID")
+	operatorPasswordFile := f.String("operator-password-file", "", "operator password file (kept separate from connection enrollment)")
 	keyPath := f.String("client-key", "client.key", "client identity key file")
 	tunName := f.String("tun-name", "undertow-vpn", "VPN TUN/Wintun adapter name")
 	address := f.String("tunnel-address", "172.16.253.1/24", "client TUN IPv4 address/prefix")
@@ -103,7 +105,42 @@ func clientCommand(args []string) error {
 	if *interactive && (*lifecycle.background || *lifecycle.foreground || *lifecycle.stop) {
 		return errors.New("--interactive cannot be combined with --foreground, --background, or --stop")
 	}
+	var operatorCredentials control.OperatorCredentials
+	if !*lifecycle.stop {
+		credentials, credentialErr := resolveClientOperatorCredentials(*operatorID, *operatorPasswordFile, !*lifecycle.background)
+		if credentialErr != nil {
+			return credentialErr
+		}
+		operatorCredentials = credentials
+		if os.Getenv(backgroundModeEnv) == "client" || *lifecycle.foreground {
+			_ = os.Unsetenv(operatorPasswordEnv)
+		}
+	}
 	if !*lifecycle.background && !*lifecycle.foreground && !*lifecycle.stop && os.Getenv(backgroundModeEnv) != "client" && (*interactive || isConsoleTerminal(os.Stdin)) {
+		oldID, hadID := os.LookupEnv(operatorIDEnv)
+		if err := os.Setenv(operatorIDEnv, operatorCredentials.ID); err != nil {
+			return err
+		}
+		defer func() {
+			if hadID {
+				_ = os.Setenv(operatorIDEnv, oldID)
+			} else {
+				_ = os.Unsetenv(operatorIDEnv)
+			}
+		}()
+		if *operatorPasswordFile == "" {
+			oldPassword, hadPassword := os.LookupEnv(operatorPasswordEnv)
+			if err := os.Setenv(operatorPasswordEnv, operatorCredentials.Password); err != nil {
+				return err
+			}
+			defer func() {
+				if hadPassword {
+					_ = os.Setenv(operatorPasswordEnv, oldPassword)
+				} else {
+					_ = os.Unsetenv(operatorPasswordEnv)
+				}
+			}()
+		}
 		logPath, err := filepath.Abs(*lifecycle.logFile)
 		if err != nil {
 			return err
@@ -367,9 +404,9 @@ func clientCommand(args []string) error {
 			vpnEnabled, internalEnabled := live.vpn, live.internal
 			live.mu.RUnlock()
 			if *operatorOnly {
-				err = runOperator(ctx, c, live.set)
+				err = runOperator(ctx, c, operatorCredentials, live.set)
 			} else {
-				err = runVPN(ctx, c, carrierIP, serverIP, vpnEnabled, internalEnabled, *tunName, *address, prefix, *verifyURL, live.set)
+				err = runVPN(ctx, c, carrierIP, serverIP, vpnEnabled, internalEnabled, *tunName, *address, prefix, *verifyURL, operatorCredentials, live.set)
 			}
 			c.Close()
 			if err != nil && !errors.Is(err, io.EOF) && ctx.Err() == nil {
@@ -430,16 +467,17 @@ type liveClientConsole struct {
 	tunnelPrefix  netip.Prefix
 }
 
-func runOperator(parent context.Context, c transport.Connection, onActive func(*mux.Mux, uint64, *tun.Device, *clientModeRoutes, string)) error {
+func runOperator(parent context.Context, c transport.Connection, credentials control.OperatorCredentials, onActive func(*mux.Mux, uint64, *tun.Device, *clientModeRoutes, string)) error {
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	m := mux.New(ctx, c, false)
 	defer m.Close()
 	hostname, _ := os.Hostname()
 	hello, _ := json.Marshal(struct {
-		Mode     string `json:"mode"`
-		Hostname string `json:"hostname"`
-	}{"vpn", hostname})
+		Mode     string                      `json:"mode"`
+		Hostname string                      `json:"hostname"`
+		Operator control.OperatorCredentials `json:"operator"`
+	}{"vpn", hostname, credentials})
 	if err := m.SendControl(ctx, hello); err != nil {
 		return err
 	}
@@ -452,8 +490,12 @@ func runOperator(parent context.Context, c transport.Connection, onActive func(*
 	var ready struct {
 		Mode  string `json:"mode"`
 		Ready bool   `json:"ready"`
+		Error string `json:"error"`
 	}
 	if json.Unmarshal(reply, &ready) != nil || ready.Mode != "vpn" || !ready.Ready {
+		if ready.Error != "" {
+			return errors.New(ready.Error)
+		}
 		return errors.New("operator server did not confirm readiness")
 	}
 	if err := markBackgroundReady(); err != nil {
@@ -520,7 +562,7 @@ func (c *liveClientConsole) transferProgress(ctx context.Context, encoded []byte
 	return pivot.TransferFileProgress(ctx, session, input.AgentID, input.Operation, input.LocalPath, input.RemotePath, progress)
 }
 
-func runVPN(parent context.Context, c transport.Connection, carrierIP, serverIP netip.Addr, vpn, internal bool, name, address string, prefix netip.Prefix, verifyURL string, onActive func(*mux.Mux, uint64, *tun.Device, *clientModeRoutes, string)) error {
+func runVPN(parent context.Context, c transport.Connection, carrierIP, serverIP netip.Addr, vpn, internal bool, name, address string, prefix netip.Prefix, verifyURL string, credentials control.OperatorCredentials, onActive func(*mux.Mux, uint64, *tun.Device, *clientModeRoutes, string)) error {
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	m := mux.New(ctx, c, false)
@@ -528,11 +570,12 @@ func runVPN(parent context.Context, c transport.Connection, carrierIP, serverIP 
 	go pivot.ServeClientForwards(ctx, m)
 	hostname, _ := os.Hostname()
 	hello, _ := json.Marshal(struct {
-		Mode     string `json:"mode"`
-		Internal bool   `json:"internal"`
-		VPN      bool   `json:"vpn"`
-		Hostname string `json:"hostname"`
-	}{"vpn", internal, vpn, hostname})
+		Mode     string                      `json:"mode"`
+		Internal bool                        `json:"internal"`
+		VPN      bool                        `json:"vpn"`
+		Hostname string                      `json:"hostname"`
+		Operator control.OperatorCredentials `json:"operator"`
+	}{"vpn", internal, vpn, hostname, credentials})
 	if err := m.SendControl(ctx, hello); err != nil {
 		return err
 	}
@@ -545,8 +588,12 @@ func runVPN(parent context.Context, c transport.Connection, carrierIP, serverIP 
 	var status struct {
 		Mode  string `json:"mode"`
 		Ready bool   `json:"ready"`
+		Error string `json:"error"`
 	}
 	if json.Unmarshal(reply, &status) != nil || status.Mode != "vpn" || !status.Ready {
+		if status.Error != "" {
+			return errors.New(status.Error)
+		}
 		return errors.New("VPN server did not confirm readiness")
 	}
 	probeCtx, probeCancel := context.WithTimeout(ctx, 10*time.Second)

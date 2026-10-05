@@ -111,6 +111,11 @@ func (s *Server) Peers() []PeerInfo {
 	defer s.mu.RUnlock()
 	out := make([]PeerInfo, 0, len(s.peers))
 	for _, p := range s.peers {
+		select {
+		case <-p.Session.Done():
+			continue
+		default:
+		}
 		if v := p.Snapshot(); v.Authenticated {
 			out = append(out, v)
 		}
@@ -175,6 +180,12 @@ func (s *Server) sweep(ctx context.Context) {
 			now := time.Now()
 			s.mu.Lock()
 			for id, p := range s.peers {
+				select {
+				case <-p.Session.Done():
+					delete(s.peers, id)
+					continue
+				default:
+				}
 				p.mu.Lock()
 				age := now.Sub(p.LastSeen)
 				auth := p.authenticated

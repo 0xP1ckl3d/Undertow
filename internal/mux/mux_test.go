@@ -60,6 +60,37 @@ func memoryPair() (*memoryTransport, *memoryTransport) {
 	b := make(chan []byte, 4096)
 	return &memoryTransport{in: b, out: a, done: make(chan struct{})}, &memoryTransport{in: a, out: b, done: make(chan struct{})}
 }
+
+func TestSleepGrantCancelsWhenNewStreamOpens(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	a, b := memoryPair()
+	server := New(ctx, a, true)
+	agent := New(ctx, b, false)
+	defer server.Close()
+	defer agent.Close()
+	if !server.TryQuiesce() {
+		t.Fatal("idle server could not quiesce")
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s, err := agent.Accept(ctx)
+		if err == nil {
+			_ = s.AcceptOpen(ctx)
+			_ = s.Close()
+		}
+	}()
+	s, err := server.Open(ctx, "example.invalid:1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if server.IsQuiesced() || server.CommitQuiesce() {
+		t.Fatal("new live stream did not cancel sleep grant")
+	}
+	_ = s.Close()
+	<-done
+}
 func (m *memoryTransport) Send(ctx context.Context, b []byte) error {
 	select {
 	case m.out <- append([]byte(nil), b...):

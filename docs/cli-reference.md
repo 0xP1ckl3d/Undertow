@@ -1,5 +1,7 @@
 # CLI reference
 
+Operator authentication is required for every client connection. Bootstrap the first Team Leader on the server with `undertow operators bootstrap --operations-db operations.db --id ID --display-name NAME --password-file PATH` before starting the server. Client startup accepts `--operator ID` or `UNDERTOW_OPERATOR_ID`, and `--operator-password-file PATH` or `UNDERTOW_OPERATOR_PASSWORD`; an interactive terminal prompts for missing values. Account state and password hashes persist in `--operations-db`; see [Operator authentication](operator-authentication.md) for roles, management, and session behavior.
+
 Use this page for terminal flags, startup options, diagnostics, and scripting. For day-to-day operations, start in the [server or client console](console.md): select an agent, configure routes, manage payloads, and run tools there. The [Getting started](getting-started.md) guide gives the full first-run workflow.
 
 For task-focused detail, see [payload deployment](agent-distribution.md), [networking modes](networking-modes.md), the [module bank](module-bank.md), and the [BOF](bof-compatibility.md), [native](native-modules.md), and [WASM](wasm-development.md) guides.
@@ -25,7 +27,7 @@ undertow doctor client --transport quic --server SERVER_IP:443 --fingerprint FIN
 
 | Flag | Modes | Meaning |
 | --- | --- | --- |
-| `--auth token\|password\|none` | server, agent, client | Enrollment policy; default `token`. `none` lets any reachable peer enroll. |
+| `--auth token\|password\|none` | server, agent, client | Enrollment policy; default `token`. `none` opens agent enrollment; clients still require operator accounts. |
 | `--token-file PATH` | server, agent, client | Enrollment token file for token mode; default `token.key`. |
 | `--token HEX` | server, agent, client | Pass the token value directly instead of a file. Cannot combine with `--token-file`; visible in process listings and shell history. |
 | `--password TEXT` | server, agent, client | Password mode only, at least 12 bytes; visible to process listings. |
@@ -100,7 +102,7 @@ Creates or reuses an Ed25519 server key at `identity.key`, creates or reuses a r
 | `--job-output-total-mib N` | `4096` | Maximum saved output across jobs, in MiB. |
 | `--probe-echo` | Off | Echo diagnostic probes; normal streams are disabled. |
 
-The server may require privilege to bind UDP/53 or create a proxy interface. TCP/443 and UDP/443 coexist. `--listen` with several selected transports is ambiguous and rejected; use the per-transport flags. If any requested listener cannot start, the server exits instead of silently omitting it. A second positional `server` is an error. For real deployments, use token or password enrollment. `--auth none` lets any reachable peer enroll, access network paths, and execute programs on agents that allow it; the server prints a warning at startup.
+The server may require privilege to bind UDP/53 or create a proxy interface. TCP/443 and UDP/443 coexist. `--listen` with several selected transports is ambiguous and rejected; use the per-transport flags. If any requested listener cannot start, the server exits instead of silently omitting it. A second positional `server` is an error. For real deployments, use token or password enrollment. `--auth none` opens agent enrollment, while client sessions still require operator credentials; the server prints a warning at startup.
 
 In a terminal, `server` starts a separate worker and opens its operator console. `transports` lists active listeners; `start transport NAME [self-signed|tls-cert FILE tls-key FILE] [listen ADDR]` adds one, and `stop transport NAME` removes one only when it has no sessions. `stop transport NAME force` disconnects that carrier's sessions. `background`, `quit`, and `exit` detach without stopping the worker. `undertow server attach` returns; `logs` shows recent worker logs, `logs follow` streams them until Enter, and bare `stop` shuts the worker down gracefully. `server --background` skips the console. `server --foreground` runs the worker directly for service managers or debugging. If startup used custom `--pid-file`, `--control-listen`, `--control-token-file`, or `--log-file`, provide the matching `--pid-file`, `--control`, `--control-token-file`, or `--log-file` on `server attach`.
 
@@ -140,9 +142,9 @@ For a child agent, explicitly start a relay listener on its selected parent in t
 Run on the elevated **VPN client** host. Choose at least one of `--vpn` and `--internal`:
 
 ```sh
-sudo undertow client --vpn --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify
-sudo undertow client --internal --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify
-sudo undertow client --vpn --internal --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify
+sudo undertow client --vpn --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify --operator alice --operator-password-file alice.password
+sudo undertow client --internal --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify --operator alice --operator-password-file alice.password
+sudo undertow client --vpn --internal --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify --operator alice --operator-password-file alice.password
 ```
 
 | Flag | Default | Meaning |
@@ -164,6 +166,8 @@ sudo undertow client --vpn --internal --transport quic --server SERVER_IP:443 --
 | `--client-key PATH` | `client.key` | Client Ed25519 identity. |
 | `--domain NAME` | `t.undertow.invalid` | DNS only; must match the server. |
 | `--auth`, `--token`, `--token-file`, `--password`, `--password-file` | See above | Enrollment. |
+| `--operator ID` | Prompt or environment fallback | Server-managed operator account for this client session. `UNDERTOW_OPERATOR_ID` is also accepted. |
+| `--operator-password-file PATH` | Prompt or environment fallback | Operator password file, separate from enrollment. `UNDERTOW_OPERATOR_PASSWORD` is also accepted. Noninteractive starts need one source. |
 | `--tun-name NAME` | `undertow-vpn` | Client TUN/Wintun name. |
 | `--tunnel-address CIDR` | `172.16.253.1/24` | Client interface IPv4 address/network. |
 | `--payload-profile auto\|large\|small` | `auto` | DNS only: automatic 128–800 byte path discovery, or a forced legacy profile. |

@@ -24,6 +24,7 @@ type TopologyNode struct {
 	Label          string         `json:"label"`
 	Hostname       string         `json:"hostname,omitempty"`
 	AgentID        string         `json:"agent_id,omitempty"`
+	Via            string         `json:"via,omitempty"`
 	ClientID       string         `json:"client_id,omitempty"`
 	SessionID      uint64         `json:"session_id,omitempty"`
 	Carrier        string         `json:"carrier,omitempty"`
@@ -38,6 +39,7 @@ type TopologyNode struct {
 	Connected      time.Time      `json:"connected,omitempty"`
 	DisconnectedAt time.Time      `json:"disconnected_at,omitempty"`
 	Privilege      string         `json:"privilege,omitempty"`
+	Archived       bool           `json:"archived,omitempty"`
 	Internal       bool           `json:"internal,omitempty"`
 	VPN            bool           `json:"vpn,omitempty"`
 	AcceptedCount  int            `json:"accepted_count,omitempty"`
@@ -103,7 +105,7 @@ func BuildTopology(agents []AgentInfo, clients []ClientInfo, routes []routing.Ro
 			server.Carriers = append(server.Carriers, state)
 		}
 	}
-	t := Topology{Version: 6, At: time.Now().UTC(), Nodes: []TopologyNode{server}, Edges: []TopologyEdge{}}
+	t := Topology{Version: 7, At: time.Now().UTC(), Nodes: []TopologyNode{server}, Edges: []TopologyEdge{}}
 	_ = routes // Server configured routes remain in the Routes view; they do not imply client acceptance.
 	type relayNode struct {
 		agentID, bind string
@@ -131,7 +133,7 @@ func BuildTopology(agents []AgentInfo, clients []ClientInfo, routes []routing.Ro
 		if label == "" {
 			label = a.ID
 		}
-		t.Nodes = append(t.Nodes, TopologyNode{ID: id, Kind: "agent", Label: label, Hostname: a.Hostname, AgentID: a.ID, SessionID: a.SessionID, Carrier: a.Transport, RelayBind: a.RelayBind, Remote: a.Remote, PublicIP: a.PublicIP, LastSeen: a.LastSeen, RTTNs: int64(a.RTT), Depth: a.Depth, OS: a.OS, Arch: a.Arch, Connected: a.Connected, DisconnectedAt: a.DisconnectedAt, Privilege: a.Privilege, Active: a.Online})
+		t.Nodes = append(t.Nodes, TopologyNode{ID: id, Kind: "agent", Label: label, Hostname: a.Hostname, AgentID: a.ID, Via: a.Via, SessionID: a.SessionID, Carrier: a.Transport, RelayBind: a.RelayBind, Remote: a.Remote, PublicIP: a.PublicIP, LastSeen: a.LastSeen, RTTNs: int64(a.RTT), Depth: a.Depth, OS: a.OS, Arch: a.Arch, Connected: a.Connected, DisconnectedAt: a.DisconnectedAt, Privilege: a.Privilege, Archived: a.Archived, Active: a.Online})
 		parent, kind := "server", "carrier"
 		if a.Via != "" {
 			parent, kind = "agent:"+a.Via, "relay_path"

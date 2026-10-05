@@ -86,22 +86,23 @@ func (d *agentDistribution) setPublicPath(path string) (bool, error) {
 
 // Profile responses deliberately omit the enrollment secret.
 type publicAgentProfile struct {
-	ID                    string    `json:"id"`
-	Name                  string    `json:"name"`
-	Created               time.Time `json:"created"`
-	UndertowVersion       string    `json:"undertow_version"`
-	FormatVersion         uint32    `json:"format_version"`
-	Server                string    `json:"server"`
-	Transport             string    `json:"transport"`
-	Domain                string    `json:"domain,omitempty"`
-	Fingerprint           string    `json:"fingerprint"`
-	AuthMode              string    `json:"auth_mode"`
-	PayloadProfile        string    `json:"payload_profile,omitempty"`
-	WebSocketPath         string    `json:"websocket_path,omitempty"`
-	TLSServerName         string    `json:"tls_server_name,omitempty"`
-	TLSInsecureSkipVerify bool      `json:"tls_insecure_skip_verify,omitempty"`
-	AdvertisedRoutes      []string  `json:"advertised_routes,omitempty"`
-	DeniedCapabilities    string    `json:"denied_capabilities,omitempty"`
+	ID                    string              `json:"id"`
+	Name                  string              `json:"name"`
+	Created               time.Time           `json:"created"`
+	UndertowVersion       string              `json:"undertow_version"`
+	FormatVersion         uint32              `json:"format_version"`
+	Server                string              `json:"server"`
+	Transport             string              `json:"transport"`
+	Domain                string              `json:"domain,omitempty"`
+	Fingerprint           string              `json:"fingerprint"`
+	AuthMode              string              `json:"auth_mode"`
+	PayloadProfile        string              `json:"payload_profile,omitempty"`
+	WebSocketPath         string              `json:"websocket_path,omitempty"`
+	TLSServerName         string              `json:"tls_server_name,omitempty"`
+	TLSInsecureSkipVerify bool                `json:"tls_insecure_skip_verify,omitempty"`
+	AdvertisedRoutes      []string            `json:"advertised_routes,omitempty"`
+	DeniedCapabilities    string              `json:"denied_capabilities,omitempty"`
+	Sleep                 control.SleepPolicy `json:"sleep"`
 }
 
 func publicProfile(p agentprofile.Profile) publicAgentProfile {
@@ -111,25 +112,28 @@ func publicProfile(p agentprofile.Profile) publicAgentProfile {
 		Fingerprint: c.Fingerprint, AuthMode: c.AuthMode, PayloadProfile: c.PayloadProfile,
 		WebSocketPath: c.WebSocketPath, TLSServerName: c.TLSServerName,
 		TLSInsecureSkipVerify: c.TLSInsecureSkipVerify, AdvertisedRoutes: c.AdvertisedRoutes,
-		DeniedCapabilities: c.DeniedCapabilities}
+		DeniedCapabilities: c.DeniedCapabilities, Sleep: c.Sleep}
 }
 
 type profileRequest struct {
-	Name                  string              `json:"name"`
-	Server                *string             `json:"server,omitempty"`
-	Transport             *string             `json:"transport,omitempty"`
-	Domain                *string             `json:"domain,omitempty"`
-	Fingerprint           *string             `json:"fingerprint,omitempty"`
-	AuthMode              *string             `json:"auth_mode,omitempty"`
-	Token                 *string             `json:"token,omitempty"`
-	Password              *string             `json:"password,omitempty"`
-	PayloadProfile        *string             `json:"payload_profile,omitempty"`
-	WebSocketPath         *string             `json:"websocket_path,omitempty"`
-	TLSServerName         *string             `json:"tls_server_name,omitempty"`
-	TLSInsecureSkipVerify *bool               `json:"tls_insecure_skip_verify,omitempty"`
-	AdvertisedRoutes      *[]string           `json:"advertised_routes,omitempty"`
-	DeniedCapabilities    *string             `json:"denied_capabilities,omitempty"`
-	Deployment            *deployment.Profile `json:"deployment,omitempty"`
+	Name                  string               `json:"name"`
+	Server                *string              `json:"server,omitempty"`
+	Transport             *string              `json:"transport,omitempty"`
+	Domain                *string              `json:"domain,omitempty"`
+	Fingerprint           *string              `json:"fingerprint,omitempty"`
+	AuthMode              *string              `json:"auth_mode,omitempty"`
+	Token                 *string              `json:"token,omitempty"`
+	Password              *string              `json:"password,omitempty"`
+	PayloadProfile        *string              `json:"payload_profile,omitempty"`
+	WebSocketPath         *string              `json:"websocket_path,omitempty"`
+	TLSServerName         *string              `json:"tls_server_name,omitempty"`
+	TLSInsecureSkipVerify *bool                `json:"tls_insecure_skip_verify,omitempty"`
+	AdvertisedRoutes      *[]string            `json:"advertised_routes,omitempty"`
+	DeniedCapabilities    *string              `json:"denied_capabilities,omitempty"`
+	Deployment            *deployment.Profile  `json:"deployment,omitempty"`
+	Sleep                 *control.SleepPolicy `json:"sleep,omitempty"`
+	SleepSeconds          *int                 `json:"sleep_seconds,omitempty"`
+	SleepJitter           *int                 `json:"sleep_jitter,omitempty"`
 }
 
 type artifactInfo struct {
@@ -258,6 +262,15 @@ func (d *agentDistribution) apply(c agentruntime.Config, req profileRequest) (ag
 		if req.WebSocketPath == nil {
 			c.WebSocketPath = c.Deployment.WebSocket.Path
 		}
+	}
+	if req.Sleep != nil {
+		c.Sleep = *req.Sleep
+	}
+	if req.SleepSeconds != nil {
+		c.Sleep.IntervalSeconds = *req.SleepSeconds
+	}
+	if req.SleepJitter != nil {
+		c.Sleep.JitterPercent = *req.SleepJitter
 	}
 	if req.Token != nil || req.Password != nil || req.AuthMode != nil {
 		if req.Token == nil && req.Password == nil && c.AuthMode == d.authMode {

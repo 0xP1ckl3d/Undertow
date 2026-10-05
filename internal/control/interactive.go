@@ -217,11 +217,22 @@ func (m *Manager) startInteractiveAudit(clientID uint64, request interactiveRela
 			source = "gui"
 		}
 	}
+	operatorID, displayName := "", ""
+	if client != nil {
+		operator, err := m.ActiveOperator(clientID)
+		if err != nil {
+			return nil, err
+		}
+		operatorID, displayName = operator.ID, operator.DisplayName
+		if operatorID != "" {
+			trust = "server_authenticated_operator"
+		}
+	}
 	path := "/v1/agents/" + request.AgentID + "/interactive"
 	if request.Kind != "" {
 		path = "/v1/agents/" + request.AgentID + "/" + request.Kind
 	}
-	record := AuditRecord{ID: id, ActionID: truncateClaim(request.Actor.ActionID, 128), At: time.Now().UTC(), Action: "CONNECT", Target: path, ClientID: key, ClientSessionID: clientID, OperatorID: truncateClaim(request.Actor.OperatorID, 128), DisplayName: truncateClaim(request.Actor.DisplayName, 128), Source: source, IdentityTrust: trust}
+	record := AuditRecord{ID: id, ActionID: truncateClaim(request.Actor.ActionID, 128), At: time.Now().UTC(), Action: "CONNECT", Target: path, ClientID: key, ClientSessionID: clientID, OperatorID: operatorID, DisplayName: displayName, Source: source, IdentityTrust: trust}
 	if err := store.RecordAudit(record); err != nil {
 		return nil, err
 	}

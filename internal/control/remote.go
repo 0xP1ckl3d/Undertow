@@ -38,9 +38,7 @@ func truncateClaim(value string, max int) string {
 	return value
 }
 
-// ServeRemote exposes client status, agent execution, deployment management,
-// and the caller's own pivot setting. Other server operator actions remain
-// on the loopback API.
+// ServeRemote exposes the established client API to an authenticated operator session.
 func (m *Manager) ServeRemote(ctx context.Context, token string, clientID uint64, stream *mux.Stream) {
 	defer stream.Close()
 	if err := stream.AcceptOpen(ctx); err != nil {
@@ -83,13 +81,18 @@ func (m *Manager) ServeRemote(ctx context.Context, token string, clientID uint64
 		writeRemoteResponse(stream, remoteResponse{Status: http.StatusForbidden, Body: []byte("client session is no longer connected")})
 		return
 	}
+	operator, err := m.ActiveOperator(clientID)
+	if err != nil {
+		writeRemoteResponse(stream, remoteResponse{Status: http.StatusForbidden, Body: []byte(err.Error())})
+		return
+	}
 	action := actionContext{ActionClaims: request.Actor, ClientID: clientKey, ClientSessionID: clientID}
 	if action.Source != "gui" {
 		action.Source = "client_console"
 	}
 	action.ActionID = truncateClaim(action.ActionID, 128)
-	action.OperatorID = truncateClaim(action.OperatorID, 128)
-	action.DisplayName = truncateClaim(action.DisplayName, 128)
+	action.OperatorID = operator.ID
+	action.DisplayName = operator.DisplayName
 	requestContext := context.WithValue(context.WithValue(ctx, jobOwnerKey{}, clientID), actionContextKey{}, action)
 	httpRequest, err := http.NewRequestWithContext(requestContext, request.Method, "http://localhost"+request.Path, bytes.NewReader(request.Body))
 	if err != nil {
@@ -113,6 +116,16 @@ func (m *Manager) ServeRemote(ctx context.Context, token string, clientID uint64
 
 func clientRequestAllowed(request *http.Request, clientID uint64) bool {
 	path := request.URL.EscapedPath()
+	if path == "/v1/operator/me" && request.Method == http.MethodGet && request.URL.RawQuery == "" {
+		return true
+	}
+	if path == "/v1/operators" && (request.Method == http.MethodGet || request.Method == http.MethodPost) && request.URL.RawQuery == "" {
+		return true
+	}
+	if strings.HasPrefix(path, "/v1/operators/") && (request.Method == http.MethodPut || request.Method == http.MethodDelete) && request.URL.RawQuery == "" {
+		parts := strings.Split(path, "/")
+		return len(parts) == 4 && parts[3] != "" && !strings.ContainsAny(parts[3], "%\\")
+	}
 	if request.Method == http.MethodGet && path == "/v1/status" && request.URL.RawQuery == "" {
 		return true
 	}
@@ -172,6 +185,14 @@ func clientRequestAllowed(request *http.Request, clientID uint64) bool {
 	}
 	if request.Method == http.MethodPut && strings.HasPrefix(path, "/v1/agents/") && strings.HasSuffix(path, "/nickname") && request.URL.RawQuery == "" {
 		return true
+	}
+	if request.Method == http.MethodPut && strings.HasPrefix(path, "/v1/agents/") && strings.HasSuffix(path, "/sleep") && request.URL.RawQuery == "" {
+		parts := strings.Split(path, "/")
+		return len(parts) == 5 && parts[3] != "" && !strings.ContainsAny(parts[3], "%\\")
+	}
+	if request.Method == http.MethodPut && strings.HasPrefix(path, "/v1/agents/") && strings.HasSuffix(path, "/archive") && request.URL.RawQuery == "" {
+		parts := strings.Split(path, "/")
+		return len(parts) == 5 && parts[3] != "" && !strings.ContainsAny(parts[3], "%\\")
 	}
 	if request.Method == http.MethodGet && request.URL.RawQuery == "" {
 		parts := strings.Split(path, "/")

@@ -52,6 +52,9 @@ type AgentInfo struct {
 	Arch               string                  `json:"arch,omitempty"`
 	Privilege          string                  `json:"privilege,omitempty"`
 	Nickname           string                  `json:"nickname,omitempty"`
+	Archived           bool                    `json:"archived,omitempty"`
+	Sleep              SleepPolicy             `json:"sleep"`
+	SleepSupported     bool                    `json:"sleep_supported,omitempty"`
 	Interfaces         []string                `json:"interfaces,omitempty"`
 	AdvertisedRoutes   []string                `json:"advertised_routes,omitempty"`
 	Routes             []NetworkRoute          `json:"routes,omitempty"`
@@ -159,6 +162,7 @@ type TransportController interface {
 type clientState struct {
 	peer     transport.Peer
 	mux      *mux.Mux
+	operator OperatorAccount
 	internal bool
 	vpn      bool
 	hostname string
@@ -184,6 +188,8 @@ type Manager struct {
 	operations         *OperationsStore
 	offlineAgents      map[string]AgentInfo
 	nicknames          map[string]string
+	archivedAgents     map[string]bool
+	sleepOverrides     map[string]SleepPolicy
 	eventBus           *EventBroker
 	workerLogs         *WorkerLogBuffer
 	lifecycleEvents    []LifecycleEvent
@@ -222,6 +228,14 @@ func (m *Manager) SetOperationsStore(store *OperationsStore) error {
 	if err != nil {
 		return err
 	}
+	archived, err := store.LoadArchivedAgents()
+	if err != nil {
+		return err
+	}
+	sleepOverrides, err := store.LoadAgentSleepOverrides()
+	if err != nil {
+		return err
+	}
 	privileges, err := store.LoadPrivilegeClassifications()
 	if err != nil {
 		return err
@@ -233,6 +247,8 @@ func (m *Manager) SetOperationsStore(store *OperationsStore) error {
 	m.mu.Lock()
 	m.operations = store
 	m.nicknames = nicknames
+	m.archivedAgents = archived
+	m.sleepOverrides = sleepOverrides
 	m.offlineAgents = make(map[string]AgentInfo, len(previous))
 	for _, agent := range previous {
 		if agent.Privilege == "" {
@@ -353,7 +369,37 @@ func (m *Manager) SetRelayPayloadAcceptor(accept func(context.Context, string, *
 }
 
 func NewManager(routes *routing.Table, device RouteDevice, virtualNetwork netip.Prefix, proxyIP netip.Addr) *Manager {
-	return &Manager{eventBus: NewEventBroker(), agents: make(map[string]*agentState), offlineAgents: make(map[string]AgentInfo), nicknames: make(map[string]string), clients: make(map[uint64]*clientState), forwards: make(map[string]*forwardState), jobs: make(map[string]*jobState), relays: make(map[string]map[string]*relayState), desiredRelays: make(map[string]map[string]bool), restoringRelays: make(map[string]map[string]bool), routes: routes, device: device, virtualNetwork: virtualNetwork.Masked(), proxyIP: proxyIP, virtualByAgent: make(map[string]netip.Addr), virtualUsed: make(map[netip.Addr]bool)}
+	return &Manager{eventBus: NewEventBroker(), agents: make(map[string]*agentState), offlineAgents: make(map[string]AgentInfo), nicknames: make(map[string]string), archivedAgents: make(map[string]bool), sleepOverrides: make(map[string]SleepPolicy), clients: make(map[uint64]*clientState), forwards: make(map[string]*forwardState), jobs: make(map[string]*jobState), relays: make(map[string]map[string]*relayState), desiredRelays: make(map[string]map[string]bool), restoringRelays: make(map[string]map[string]bool), routes: routes, device: device, virtualNetwork: virtualNetwork.Masked(), proxyIP: proxyIP, virtualByAgent: make(map[string]netip.Addr), virtualUsed: make(map[netip.Addr]bool)}
+}
+
+// SetAgentArchived changes visibility of a retained, disconnected agent only.
+// The record and its operational history remain available to every client.
+func (m *Manager) SetAgentArchived(id string, archived bool) error {
+	m.mu.Lock()
+	if m.agents[id] != nil {
+		m.mu.Unlock()
+		return errors.New("connected agents cannot be archived")
+	}
+	if _, exists := m.offlineAgents[id]; !exists {
+		m.mu.Unlock()
+		return errors.New("agent not found")
+	}
+	if m.operations == nil {
+		m.mu.Unlock()
+		return errors.New("operations store unavailable")
+	}
+	if err := m.operations.SetAgentArchived(id, archived); err != nil {
+		m.mu.Unlock()
+		return err
+	}
+	if archived {
+		m.archivedAgents[id] = true
+	} else {
+		delete(m.archivedAgents, id)
+	}
+	m.mu.Unlock()
+	m.PublishEvent("agent.updated", id)
+	return nil
 }
 
 func (m *Manager) SetAgentNickname(id, nickname string) error {
@@ -397,6 +443,15 @@ func (m *Manager) RegisterClient(peer transport.Peer, streamMux *mux.Mux, intern
 	m.clients[peer.Snapshot().ID] = &clientState{peer: peer, mux: streamMux, internal: internal, vpn: vpnEnabled, hostname: safeHostname(hostname), accepted: make(map[netip.Prefix]AcceptedRoute)}
 	m.mu.Unlock()
 	m.PublishEvent("client.connected", peer.Snapshot().AgentID)
+}
+
+func (m *Manager) RegisterAuthenticatedClient(peer transport.Peer, streamMux *mux.Mux, internal bool, hostname string, vpn bool, operator OperatorAccount) {
+	m.RegisterClient(peer, streamMux, internal, hostname, vpn)
+	m.mu.Lock()
+	if state := m.clients[peer.Snapshot().ID]; state != nil && state.mux == streamMux {
+		state.operator = operator
+	}
+	m.mu.Unlock()
 }
 
 func (m *Manager) UnregisterClient(sessionID uint64, streamMux *mux.Mux) {
@@ -648,6 +703,14 @@ func (m *Manager) Register(peer transport.Peer, streamMux *mux.Mux) {
 		privilege = snapshot.Privilege
 	}
 	m.agents[id] = &agentState{peer: peer, mux: streamMux, privilege: privilege, inventory: AgentInfo{Via: peer.Snapshot().Via, RelayBind: peer.Snapshot().RelayBind, Depth: depth}}
+	if m.archivedAgents[id] {
+		if m.operations != nil {
+			if err := m.operations.SetAgentArchived(id, false); err != nil {
+				log.Printf("unarchive reconnecting agent %s: %v", id, err)
+			}
+		}
+		delete(m.archivedAgents, id)
+	}
 	m.agentSessions.Add(1)
 	delete(m.offlineAgents, id)
 	m.recordLifecycleLocked(LifecycleEvent{AgentID: id, Kind: "connected", Transport: peer.Snapshot().Carrier, SessionID: peer.Snapshot().ID})
@@ -687,6 +750,25 @@ func (m *Manager) receiveInventory(id string, streamMux *mux.Mux) {
 		if err != nil {
 			return
 		}
+		var sleep SleepMessage
+		if json.Unmarshal(b, &sleep) == nil && sleep.Kind != "" {
+			switch sleep.Kind {
+			case "request":
+				m.handleSleepRequest(id, streamMux)
+			case "commit":
+				m.commitSleep(id, streamMux)
+			case "sleeping":
+				if streamMux.IsSleepCommitted() {
+					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					_ = streamMux.SendControl(ctx, EncodeSleepMessage("final", nil))
+					cancel()
+					m.Unregister(id, streamMux)
+				}
+			case "cancel":
+				streamMux.Unquiesce()
+			}
+			continue
+		}
 		m.UpdateInventory(id, streamMux, b)
 	}
 }
@@ -700,6 +782,9 @@ func (m *Manager) UpdateInventory(id string, streamMux *mux.Mux, b []byte) {
 	}
 	var info AgentInfo
 	if err := json.Unmarshal(b, &info); err != nil {
+		return
+	}
+	if err := info.Sleep.Validate(); err != nil {
 		return
 	}
 	if state := m.Get(id); state == streamMux {
@@ -770,6 +855,11 @@ func (m *Manager) UpdateInventory(id string, streamMux *mux.Mux, b []byte) {
 		state.inventory.AdvertisedRoutes = validRoutes
 		state.inventory.Capabilities = info.Capabilities
 		state.inventory.ArtifactIdentity = info.ArtifactIdentity
+		state.inventory.Sleep = info.Sleep
+		state.inventory.SleepSupported = info.SleepSupported
+		if override, ok := m.sleepOverrides[id]; ok {
+			state.inventory.Sleep = override
+		}
 		if m.artifactLookup != nil && info.ArtifactID != "" {
 			state.inventory.Profile, state.inventory.UndertowVersion, _ = m.artifactLookup(info.ArtifactID)
 		}
@@ -799,6 +889,14 @@ func (m *Manager) UpdateInventory(id string, streamMux *mux.Mux, b []byte) {
 	m.mu.Unlock()
 	m.persistAgentSnapshot(id)
 	m.PublishEvent("agent.updated", id)
+	m.mu.RLock()
+	policy, overridden := m.sleepOverrides[id]
+	m.mu.RUnlock()
+	if overridden && info.SleepSupported {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = streamMux.SendControl(ctx, EncodeSleepMessage("policy", &policy))
+		cancel()
+	}
 	m.restoreRelays(id, streamMux)
 }
 
@@ -1036,6 +1134,8 @@ func (m *Manager) AgentList() []AgentInfo {
 		info.DisconnectedAt = time.Time{}
 		info.Privilege = state.privilege
 		info.Nickname = m.nicknames[info.ID]
+		info.Archived = false
+		info.Sleep = state.inventory.Sleep
 		info.Transport = p.Carrier
 		info.Via = p.Via
 		info.RelayBind = p.RelayBind
@@ -1094,6 +1194,7 @@ func (m *Manager) AgentCatalog() []AgentInfo {
 	for id, agent := range m.offlineAgents {
 		if !seen[id] {
 			agent.Nickname = m.nicknames[id]
+			agent.Archived = m.archivedAgents[id]
 			live = append(live, agent)
 		}
 	}
@@ -1325,6 +1426,7 @@ func (m *Manager) ServeHTTP(ctx context.Context, address, token string) error {
 
 func (m *Manager) handler(token string) http.Handler {
 	muxer := http.NewServeMux()
+	m.operatorHTTPHandlers(muxer)
 	m.registerTransferHandlers(muxer)
 	muxer.Handle("/v1/agent-profiles/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		m.mu.RLock()
@@ -1562,6 +1664,36 @@ func (m *Manager) handler(token string) http.Handler {
 		}
 		jsonReply(w, http.StatusOK, map[string]string{"nickname": strings.TrimSpace(request.Nickname)})
 	})
+	muxer.HandleFunc("PUT /v1/agents/{id}/sleep", func(w http.ResponseWriter, r *http.Request) {
+		var policy SleepPolicy
+		decoder := json.NewDecoder(io.LimitReader(r.Body, 512))
+		decoder.DisallowUnknownFields()
+		if decoder.Decode(&policy) != nil || decoder.Decode(new(any)) != io.EOF {
+			http.Error(w, "invalid sleep policy", http.StatusBadRequest)
+			return
+		}
+		if err := m.SetAgentSleep(r.PathValue("id"), policy); err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		jsonReply(w, http.StatusOK, policy)
+	})
+	muxer.HandleFunc("PUT /v1/agents/{id}/archive", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Archived *bool `json:"archived"`
+		}
+		decoder := json.NewDecoder(io.LimitReader(r.Body, 512))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&request); err != nil || request.Archived == nil {
+			http.Error(w, "invalid archive request", http.StatusBadRequest)
+			return
+		}
+		if err := m.SetAgentArchived(r.PathValue("id"), *request.Archived); err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		jsonReply(w, http.StatusOK, map[string]bool{"archived": *request.Archived})
+	})
 	muxer.HandleFunc("GET /v1/agents/{id}/events", func(w http.ResponseWriter, r *http.Request) {
 		jsonReply(w, http.StatusOK, m.LifecycleEvents(r.PathValue("id")))
 	})
@@ -1781,6 +1913,9 @@ func (m *Manager) handler(token string) http.Handler {
 				}
 				if actor.ClientID != "" {
 					trust = "client_bound_operator_claim"
+					if actor.OperatorID != "" {
+						trust = "server_authenticated_operator"
+					}
 				}
 				record := AuditRecord{ID: auditID, ActionID: actor.ActionID, At: time.Now().UTC(), Action: r.Method, Target: r.URL.Path, ClientID: actor.ClientID, ClientSessionID: actor.ClientSessionID, OperatorID: actor.OperatorID, DisplayName: actor.DisplayName, Source: source, IdentityTrust: trust}
 				if err := store.RecordAudit(record); err != nil {

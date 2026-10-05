@@ -18,6 +18,8 @@ Undertow carries the same encrypted sessions over QUIC, HTTPS/WebSocket, or dire
 
 **New to Undertow?** Follow [Getting started](docs/getting-started.md). It walks through server initialization, a VPN client, a headless Windows agent, the first command and module, and an internal route.
 
+Client sessions use server-managed [operator accounts](docs/operator-authentication.md). Bootstrap the first Team Leader before starting a fresh server; the console and GUI inherit the authenticated account from the client connection.
+
 Browse the [documentation home](docs/README.md) to find guides by task.
 
 The client also serves an optional local [browser operator workspace](docs/gui.md) by default. It shows live topology and agent workspaces while the terminal console remains fully usable; pass `--no-gui` for terminal-only operation.

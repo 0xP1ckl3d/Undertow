@@ -1,8 +1,13 @@
 package control
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"net/netip"
 	"path/filepath"
 	"testing"
@@ -76,6 +81,118 @@ func TestLegacyAgentPrivilegeRestoredFromExplicitResult(t *testing.T) {
 	if len(saved) != 1 || saved[0].Online || saved[0].Privilege != "high" {
 		t.Fatalf("shutdown snapshot: %+v", saved)
 	}
+}
+
+func TestArchivedAgentRestoresOnCallback(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ops.db")
+	store, err := OpenOperationsStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveAgentSnapshot(AgentInfo{ID: "lost-agent", Hostname: "WS01"}); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	if err := manager.SetOperationsStore(store); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPut, "/v1/agents/lost-agent/archive", bytes.NewBufferString(`{"archived":true}`))
+	request.Header.Set("Authorization", "Bearer test-token")
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	manager.handler("test-token").ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("archive API: %d %s", response.Code, response.Body.String())
+	}
+	if catalog := manager.AgentCatalog(); len(catalog) != 1 || !catalog[0].Archived {
+		t.Fatalf("archived catalog: %+v", catalog)
+	}
+	audit, err := store.AuditHistory(5)
+	if err != nil || len(audit) == 0 || audit[0].Target != "/v1/agents/lost-agent/archive" || audit[0].Status != http.StatusOK {
+		t.Fatalf("archive audit: %v %+v", err, audit)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err = OpenOperationsStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	restarted := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	if err := restarted.SetOperationsStore(store); err != nil {
+		t.Fatal(err)
+	}
+	if catalog := restarted.AgentCatalog(); len(catalog) != 1 || !catalog[0].Archived {
+		t.Fatalf("archive did not survive restart: %+v", catalog)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	a, b := make(chan []byte, 64), make(chan []byte, 64)
+	serverMux := mux.New(ctx, &remoteTestTransport{in: a, out: b, done: make(chan struct{})}, true)
+	agentMux := mux.New(ctx, &remoteTestTransport{in: b, out: a, done: make(chan struct{})}, false)
+	defer agentMux.Close()
+	var keys security.Keys
+	sess, err := session.New(989, keys, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restarted.Register(&dns.Peer{Session: sess, AgentID: "lost-agent", Connected: time.Now()}, serverMux)
+	if catalog := restarted.AgentCatalog(); len(catalog) != 1 || catalog[0].Archived || !catalog[0].Online {
+		t.Fatalf("callback did not restore agent: %+v", catalog)
+	}
+	archived, err := store.LoadArchivedAgents()
+	if err != nil || archived["lost-agent"] {
+		t.Fatalf("callback did not clear durable archive: %v %+v", err, archived)
+	}
+	if err := restarted.SetAgentArchived("lost-agent", true); err == nil {
+		t.Fatal("connected agent was archived")
+	}
+	restarted.ShutdownAgentSessions()
+	if catalog := restarted.AgentCatalog(); len(catalog) != 1 || catalog[0].Archived || catalog[0].Online {
+		t.Fatalf("agent re-archived after disconnect: %+v", catalog)
+	}
+}
+
+func TestArchivedAgentSurvivesSnapshotRetention(t *testing.T) {
+	store, err := OpenOperationsStore(filepath.Join(t.TempDir(), "ops.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.SaveAgentSnapshot(AgentInfo{ID: "archived-first"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetAgentArchived("archived-first", true); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := store.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 5000; i++ {
+		id := fmt.Sprintf("agent-%04d", i)
+		data, _ := json.Marshal(AgentInfo{ID: id})
+		if _, err := tx.Exec(`INSERT INTO agent_snapshots(id,saved_at,info_json) VALUES(?,?,?)`, id, fmt.Sprintf("2099-01-01T%02d:%02d:%02dZ", i/3600, i/60%60, i%60), data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveAgentSnapshot(AgentInfo{ID: "retention-trigger"}); err != nil {
+		t.Fatal(err)
+	}
+	snapshots, err := store.LoadAgentSnapshots()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, snapshot := range snapshots {
+		if snapshot.ID == "archived-first" {
+			return
+		}
+	}
+	t.Fatal("archived agent was removed by snapshot retention")
 }
 
 func TestConfiguredRelayRestoresOnParentCheckin(t *testing.T) {

@@ -2,9 +2,8 @@ package control
 
 import "context"
 
-// ActionClaims are supplied by the operator client. The server binds the
-// authenticated client ID and session separately; these operator fields remain
-// unverified until server authentication is introduced.
+// ActionClaims carry an action ID and UI source. Operator identity supplied by
+// a client is ignored; the server obtains it from the authenticated session.
 type ActionClaims struct {
 	ActionID    string `json:"action_id,omitempty"`
 	OperatorID  string `json:"operator_id,omitempty"`

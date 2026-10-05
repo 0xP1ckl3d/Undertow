@@ -9,12 +9,15 @@ On the **server**:
 ```sh
 sh tools/build-release.sh bin
 ./bin/undertow init
+umask 077
+printf '%s\n' 'REPLACE_WITH_A_UNIQUE_LONG_PASSWORD' > leader.password
+./bin/undertow operators bootstrap --operations-db operations.db --id leader --display-name 'Team Leader' --password-file leader.password
 sudo ./bin/undertow server --tun
 ```
 
 The release build creates the operator binary **and thin-agent templates** used by `payload build`. Save the fingerprint printed by `init`. It also creates `token.key`, the default enrollment secret. The last command opens the server console. Its `status` command should show QUIC UDP/443 and HTTPS/WebSocket TCP/443 (and direct DNS UDP/53). The HTTPS listener is needed to host payloads. `--tun` lets applications on the **server itself** use agent routes; the separate client creates its own TUN. The server can omit `--tun` when its own applications need no agent route.
 
-Copy `token.key` securely into the Linux client's Undertow directory. Keep `identity.key` and `control.key` on the server. A detached server can start with `server --tun --background`; use `sudo ./bin/undertow server attach` to reopen its console.
+Copy `token.key` securely into the Linux client's Undertow directory. Create a private copy of the operator password file there for the first connection. Keep `identity.key`, `control.key`, and `operations.db` on the server. A detached server can start with `server --tun --background`; use `sudo ./bin/undertow server attach` to reopen its console. See [Operator authentication](operator-authentication.md) for account management and password rotation.
 
 ## 2. Connect the client and accept the server fingerprint
 
@@ -22,7 +25,7 @@ On the **Linux client**:
 
 ```sh
 sh tools/build-release.sh bin
-sudo ./bin/undertow client --vpn --internal --transport quic --server SERVER_IP:443 --token-file token.key --fingerprint FINGERPRINT --tls-insecure-skip-verify
+sudo ./bin/undertow client --vpn --internal --transport quic --server SERVER_IP:443 --token-file token.key --fingerprint FINGERPRINT --tls-insecure-skip-verify --operator leader --operator-password-file leader.password
 ```
 
 Get `FINGERPRINT` from the server through a trusted channel. Pass an explicit pin each time you start the client. The default TLS certificate is self-signed, hence `--tls-insecure-skip-verify`; Undertow still checks its separate identity fingerprint. If you cannot transfer the fingerprint first, substitute `--trust-on-first-use` for `--fingerprint FINGERPRINT`. After an authenticated connection, Undertow writes `server.fingerprint`; compare the saved value with the server's fingerprint before relying on it. Subsequent connections can load that saved pin automatically. The client creates its own `client.key`.
@@ -111,9 +114,9 @@ The key distinction is **which machine's traffic changes**. An agent exposes des
 Run one of these on the elevated **VPN client** host after starting the server and, for internal access, an agent:
 
 ```sh
-sudo undertow client --vpn --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify
-sudo undertow client --internal --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify
-sudo undertow client --vpn --internal --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify
+sudo undertow client --vpn --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify --operator leader --operator-password-file leader.password
+sudo undertow client --internal --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify --operator leader --operator-password-file leader.password
+sudo undertow client --vpn --internal --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify --operator leader --operator-password-file leader.password
 ```
 
 `--vpn` installs two IPv4 `/1` routes and verifies public egress. `--internal` alone pins the carrier server route and creates the TUN without changing the Internet/default route or requiring a public egress check. Once connected, type `agents`, `use 1`, and `routes` in the client console; use `route accept CIDR` for an advertised subnet or `route add CIDR` for another network reachable from that agent. This setup needs no server route command. Server configured routes are also supported when an operator wants global route management. Both flags provide VPN Internet egress and agent routes. At least one flag is required. See [deployment scenarios](scenarios.md) for tests.
@@ -132,13 +135,13 @@ All modes use an encrypted session and a server identity fingerprint. `--auth` c
 | --- | --- | --- | --- |
 | Token (default) | `--auth token --token-file token.key` or `--auth token --token TOKEN_HEX` | same token through either flag | Copy the file securely or share its hex value securely |
 | Password | `--auth password --password-file password.key` | same flags | Share the password securely; each host writes its own restricted file |
-| Open | `--auth none` | `--auth none` | No enrollment secret; anyone who reaches the carrier listener may enroll |
+| Open | `--auth none` | `--auth none` | No enrollment secret; agent enrollment is open, but clients still need operator accounts |
 
 You can copy `token.key` as a file, or paste the server's hex token into a PowerShell file with `echo "TOKEN_HEX" > token.key`. Undertow accepts PowerShell's UTF-16LE text as well as UTF-8. Use the exact token generated on the server; a different token will fail enrollment. Treat the token as a secret.
 
 To avoid creating a token file on a host, pass its hex value with `--token TOKEN_HEX` on that host. Both server and connecting hosts accept this flag; each must use the same value. Do not combine `--token` with `--token-file`. A literal `--token` value is visible in process listings and may remain in shell history, so a restricted token file is safer on shared hosts.
 
-Password mode requires at least 12 bytes. Use `--password-file` to avoid showing the password in a process command line; `--password TEXT` is available for temporary use. The password file's trailing newline is ignored. Token mode remains the default, and a `--token-file` is irrelevant to password or open mode. Open enrollment still encrypts transport and authenticates the server **when its fingerprint is pinned**; it provides no admission control. **For real deployments, use token or password enrollment.** With `--auth none`, anyone who can reach the listener can enroll, access network paths, and use operations that agents have not restricted with `--deny`.
+Password mode requires at least 12 bytes. Use `--password-file` to avoid showing the password in a process command line; `--password TEXT` is available for temporary use. The password file's trailing newline is ignored. Token mode remains the default, and a `--token-file` is irrelevant to password or open mode. Open enrollment still encrypts transport and authenticates the server **when its fingerprint is pinned**; it provides no admission control. **For real deployments, use token or password enrollment.** With `--auth none`, agent enrollment is open; client connections still need operator credentials.
 
 The server can be initialized once with `undertow init` even when you choose password or open mode. `init` also creates an unused token file; the server identity and fingerprint are what those modes need.
 

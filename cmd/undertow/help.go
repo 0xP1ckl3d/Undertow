@@ -40,13 +40,16 @@ advertised route or add a manual route in the client console.
 
 Setup:
   1. On the server: undertow init
-  2. Choose enrollment: token (default), password, or open (--auth none).
+  2. Bootstrap the first Team Leader: undertow operators bootstrap --id ID
+     --display-name NAME --password-file PATH.
+     Choose enrollment: token (default), password, or open (--auth none).
      Pin the server fingerprint or opt in to --trust-on-first-use.
   3. Start: undertow server (DNS UDP/53, WebSocket TCP/443, QUIC UDP/443)
   4. Start an agent or client using --server and matching --auth options.
 
 Commands:
   init       Create server identity and enrollment token.
+  operators Bootstrap the first server-managed Team Leader.
   server     Run shared carrier listeners and operator console; 'server attach' returns.
   agent      Connect an internal host without changing its routes.
   client     Run a privileged IPv4 tunnel; 'client attach' opens its console.
@@ -63,8 +66,8 @@ Transport: the server listens on QUIC UDP/443, WebSocket TCP/443 and DNS UDP/53
 by default. Each agent and client chooses one listener independently. Use DNS
 when direct UDP DNS is the available path. See docs/quickstart.md.
 Run 'undertow help COMMAND' for flags and examples, or see README.md.
-All sessions are encrypted and signed by the server. Open enrollment allows
-any reachable client; trust-on-first-use cannot verify the first contact.
+All sessions are encrypted and signed by the server. Client sessions also
+require a server-managed operator account, even with open enrollment.
 `
 	case "init":
 		body = `undertow init — create server credentials
@@ -77,6 +80,19 @@ Usage: undertow init [--identity PATH] [--token-file PATH]
 Run once on the server. Record the printed fingerprint. Copy token.key
 securely to agents and VPN clients; never copy identity.key to them.
 The identity file is reused on subsequent starts. An existing token is kept.
+`
+	case "operators":
+		body = `undertow operators bootstrap — create the first Team Leader locally
+
+Usage: undertow operators bootstrap [--operations-db PATH] [--id ID] [--display-name NAME] [--password-file PATH]
+
+Run before the first server start. The account database must be empty.
+Use the same --operations-db path as the server (default operations.db).
+The ID and password can also come from UNDERTOW_OPERATOR_ID and
+UNDERTOW_OPERATOR_PASSWORD, or hidden prompts in an interactive terminal.
+Passwords are stored as hashes. Later account
+management is available to connected Team Leaders in the client console and GUI.
+See docs/operator-authentication.md.
 `
 	case "server":
 		body = `undertow server — carrier listener and operator console
@@ -103,9 +119,8 @@ Connection and identity:
   --password TEXT           Password mode credential; visible in process list.
   --password-file PATH      Read password from file instead.
 
-Use token or password enrollment for real deployments. With --auth none,
-anyone who reaches the listener can join, access network paths, and run
-commands on agents unless those agents restrict capabilities with --deny.
+Bootstrap an operator account before starting the server. With --auth none,
+agent enrollment is open; clients still require operator credentials.
 
 Internal pivot:
   --tun                     Create server proxy TUN/Wintun for routed pivots.
@@ -240,6 +255,9 @@ Usage: undertow client (--vpn | --internal | --vpn --internal) --server HOST:POR
   --token HEX              Token value instead of a file; visible in process list.
   --password TEXT         Password mode credential; visible in process list.
   --password-file PATH    Read password from file instead.
+  --operator ID           Server-managed account (or UNDERTOW_OPERATOR_ID).
+  --operator-password-file PATH  Password file (or UNDERTOW_OPERATOR_PASSWORD).
+                           Missing values are prompted in an interactive terminal.
   --client-key PATH        Client Ed25519 identity (default client.key).
   --domain NAME            Match server --domain (DNS only).
   --tun-name NAME          Local adapter (default undertow-vpn).
@@ -258,9 +276,9 @@ Usage: undertow client (--vpn | --internal | --vpn --internal) --server HOST:POR
   --pid-file PATH          Default undertow-client.pid.
 
 Examples (on the client host):
-  sudo undertow client --vpn --server 203.0.113.10:53 --fingerprint HEX --token-file token.key
-  sudo undertow client --internal --server 203.0.113.10:53 --fingerprint HEX --token-file token.key
-  sudo undertow client --vpn --internal --server 203.0.113.10:53 --fingerprint HEX --token-file token.key
+  sudo undertow client --vpn --server 203.0.113.10:53 --fingerprint HEX --token-file token.key --operator alice --operator-password-file alice.password
+  sudo undertow client --internal --server 203.0.113.10:53 --fingerprint HEX --token-file token.key --operator alice --operator-password-file alice.password
+  sudo undertow client --vpn --internal --server 203.0.113.10:53 --fingerprint HEX --token-file token.key --operator alice --operator-password-file alice.password
 
 --internal alone pins the carrier server route without changing Internet/default
 routes or checking public egress. After connecting, type 'agents', 'use 1',
@@ -409,13 +427,13 @@ automatic self-signed TLS certificate and a pinned Undertow fingerprint.
 
 vpn — Internet egress from CLIENT (no AGENT and no SERVER --tun):
   SERVER  sudo undertow server
-  CLIENT  sudo undertow client --vpn --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify
+  CLIENT  sudo undertow client --vpn --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify --operator alice --operator-password-file alice.password
   CLIENT  curl -4 https://api.ipify.org
 
 internal — an AGENT network from CLIENT, keeping ordinary Internet unchanged:
   SERVER  sudo undertow server
   AGENT   undertow agent --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify --advertise-route 10.20.0.0/16
-  CLIENT  sudo undertow client --internal --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify
+  CLIENT  sudo undertow client --internal --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify --operator alice --operator-password-file alice.password
   CLIENT console (one command per line): agents, use 1, routes,
                                       route accept 10.20.0.0/16
   CLIENT  curl http://10.20.0.50/

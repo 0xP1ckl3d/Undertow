@@ -277,6 +277,11 @@ func renderAgentShow(w io.Writer, a control.AgentInfo) error {
 	if a.ReconnectPolicy != "" {
 		fmt.Fprintf(w, "Reconnect policy: %s  Attempts before session: %d\n", a.ReconnectPolicy, a.ReconnectAttempts)
 	}
+	if a.SleepSupported {
+		fmt.Fprintf(w, "Idle sleep: %d seconds, %d%% jitter (zero disables sleep)\n", a.Sleep.IntervalSeconds, a.Sleep.JitterPercent)
+	} else {
+		fmt.Fprintln(w, "Idle sleep: unavailable in this agent build")
+	}
 	if !a.LastSeen.IsZero() {
 		fmt.Fprintf(w, "Last seen: %s ago\n", time.Since(a.LastSeen).Round(time.Second))
 	}

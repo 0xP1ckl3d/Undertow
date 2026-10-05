@@ -125,7 +125,7 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 			commands = append(commands, "show", "back", "relay", "route", "jobs", "job", "exec", "shell", "run-script", "run-wasm", "run-native", "run-bof", "pwd", "ls", "stat", "mkdir", "rm", "whoami", "ps", "privileges", "env", "interfaces", "dns", "route-table", "screens", "load", "unload", "bofs", "modules")
 		}
 		if vpn {
-			commands = append(commands, "background", "internal", "vpn")
+			commands = append(commands, "background", "internal", "vpn", "operators")
 			if selected {
 				commands = append(commands, "forward", "upload", "download", "screenshot")
 			}
@@ -138,13 +138,17 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 		return wordCompletions(commands, partial)
 	}
 	switch before[0] {
+	case "operators":
+		if vpn && len(before) == 1 {
+			return wordCompletions([]string{"me", "list", "create", "role", "disable", "enable", "reset", "revoke"}, partial)
+		}
 	case "session":
 		if len(before) == 1 {
 			return wordCompletions([]string{"kill"}, partial)
 		}
 	case "agent":
 		if len(before) == 1 {
-			return wordCompletions([]string{"show", "shutdown", "events"}, partial)
+			return wordCompletions([]string{"show", "shutdown", "events", "rename", "sleep"}, partial)
 		}
 	case "payload":
 		if len(before) == 1 {
@@ -220,6 +224,9 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 	case "help":
 		if len(before) == 1 {
 			topics := []string{"agents", "agent", "payload", "profile", "artifacts", "status", "route", "relay", "topology", "transport", "transports", "lifecycle", "clear", "load", "unload", "bofs", "modules"}
+			if vpn {
+				topics = append(topics, "operators")
+			}
 			topics = append(topics, loadedNames...)
 			if selected {
 				topics = append(topics, "shell", "exec", "run-script", "run-wasm", "run-native", "run-bof", "jobs", "host")

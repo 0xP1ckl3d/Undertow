@@ -274,12 +274,21 @@ func handleServerPeer(ctx context.Context, manager *control.Manager, controlToke
 			return
 		}
 		internal := control.VPNInternal(hello)
-		log.Printf("VPN client ready: session=%d remote=%s internal=%t", peer.Snapshot().ID, peer.Snapshot().Remote, internal)
-		if err := streamMux.SendControl(ctx, []byte(`{"mode":"vpn","ready":true}`)); err != nil {
+		credentials := control.OperatorCredentialsFromHello(hello)
+		operator, err := manager.AuthenticateOperator(credentials.ID, credentials.Password)
+		if err != nil {
+			_ = streamMux.SendControl(ctx, []byte(`{"mode":"vpn","ready":false,"error":"invalid operator credentials"}`))
+			log.Printf("VPN client rejected: session=%d: %v", peer.Snapshot().ID, err)
 			streamMux.Close()
 			return
 		}
-		manager.RegisterClient(peer, streamMux, internal, control.VPNHostname(hello), control.VPNEnabled(hello))
+		log.Printf("VPN client ready: session=%d remote=%s internal=%t", peer.Snapshot().ID, peer.Snapshot().Remote, internal)
+		manager.RegisterAuthenticatedClient(peer, streamMux, internal, control.VPNHostname(hello), control.VPNEnabled(hello), operator)
+		if err := streamMux.SendControl(ctx, []byte(`{"mode":"vpn","ready":true}`)); err != nil {
+			manager.UnregisterClient(peer.Snapshot().ID, streamMux)
+			streamMux.Close()
+			return
+		}
 		pivot.ServeVPNInteractive(ctx, streamMux, func(destination netip.Addr) (*mux.Mux, bool) {
 			return manager.ResolveClientEgress(peer.Snapshot().ID, destination)
 		}, func() bool { return true }, func(ctx context.Context, stream *mux.Stream) {

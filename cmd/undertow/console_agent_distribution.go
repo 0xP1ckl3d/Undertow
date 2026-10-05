@@ -12,8 +12,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
+	"undertow/internal/control"
 	"undertow/internal/deployment"
 	"undertow/internal/namedpipe"
 )
@@ -46,6 +48,44 @@ func runConsoleAgentDistribution(ctx context.Context, out io.Writer, call consol
 		} else {
 			fmt.Fprintf(out, "Nickname for %s (%s) set to %q.\n", agent.Hostname, agent.ID, args[3])
 		}
+		return nil
+	}
+	if args[1] == "sleep" {
+		if len(args) != 3 && len(args) != 5 {
+			return errors.New("use agent sleep AGENT_ID [INTERVAL_SECONDS JITTER_PERCENT]")
+		}
+		agents, err := consoleAgents(ctx, call)
+		if err != nil {
+			return err
+		}
+		a, err := findConsoleAgent(agents, args[2])
+		if err != nil {
+			return err
+		}
+		if len(args) == 3 {
+			if !a.SleepSupported {
+				fmt.Fprintf(out, "Idle sleep is unavailable for %s (%s); rebuild its payload.\n", consoleAgentName(a), a.ID)
+				return nil
+			}
+			fmt.Fprintf(out, "Sleep for %s (%s): %d seconds, %d%% jitter.\n", consoleAgentName(a), a.ID, a.Sleep.IntervalSeconds, a.Sleep.JitterPercent)
+			return nil
+		}
+		interval, err := strconv.Atoi(args[3])
+		if err != nil {
+			return err
+		}
+		jitter, err := strconv.Atoi(args[4])
+		if err != nil {
+			return err
+		}
+		policy := control.SleepPolicy{IntervalSeconds: interval, JitterPercent: jitter}
+		if err := policy.Validate(); err != nil {
+			return err
+		}
+		if _, err := call(ctx, http.MethodPut, "/v1/agents/"+url.PathEscape(a.ID)+"/sleep", policy); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "Sleep for %s (%s): %d seconds, %d%% jitter.\n", consoleAgentName(a), a.ID, interval, jitter)
 		return nil
 	}
 	if args[1] != "shutdown" && args[1] != "events" {
@@ -157,6 +197,18 @@ func parseProfileOptions(args []string) (profileRequest, error) {
 			}
 		case "payload-profile":
 			req.PayloadProfile = &v
+		case "sleep-seconds":
+			seconds, err := strconv.Atoi(value)
+			if err != nil {
+				return req, err
+			}
+			req.SleepSeconds = &seconds
+		case "sleep-jitter":
+			percent, err := strconv.Atoi(value)
+			if err != nil {
+				return req, err
+			}
+			req.SleepJitter = &percent
 		case "websocket-path":
 			req.WebSocketPath = &v
 		case "deployment-profile":

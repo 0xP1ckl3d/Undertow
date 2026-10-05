@@ -396,8 +396,10 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 		if selectedID != "" {
 			switch args[0] {
 			case "agent":
-				if len(args) == 2 && (args[1] == "shutdown" || args[1] == "events") {
+				if len(args) == 2 && (args[1] == "shutdown" || args[1] == "events" || args[1] == "sleep") {
 					args = append(args, selectedID)
+				} else if len(args) == 4 && args[1] == "sleep" {
+					args = []string{"agent", "sleep", selectedID, args[2], args[3]}
 				} else if len(args) == 3 && args[1] == "rename" {
 					args = []string{"agent", "rename", selectedID, args[2]}
 				}
@@ -657,6 +659,12 @@ func splitConsoleCommand(line string) ([]string, error) {
 }
 
 func runConsoleCommand(ctx context.Context, output io.Writer, call consoleCaller, vpnClient bool, ownClientID uint64, clientRoutes clientRouteAction, args []string) error {
+	if args[0] == "operators" {
+		if !vpnClient {
+			return errors.New("operator accounts require a connected client console")
+		}
+		return runConsoleOperators(ctx, output, call, args)
+	}
 	if args[0] == "session" {
 		if len(args) != 3 || args[1] != "kill" {
 			return errors.New("use session kill AGENT_NUMBER|ID|HOSTNAME, or select an agent first")

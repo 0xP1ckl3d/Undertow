@@ -17,21 +17,23 @@ import (
 const streamWindow = 32 << 10
 
 type Mux struct {
-	transport transport.SessionTransport
-	ctx       context.Context
-	cancel    context.CancelFunc
-	mu        sync.Mutex
-	streams   map[uint64]*Stream
-	order     []uint64
-	nextID    uint64
-	round     int
-	initiator bool
-	control   chan frame
-	controlIn chan []byte
-	accepted  chan *Stream
-	wake      chan struct{}
-	done      chan struct{}
-	once      sync.Once
+	transport      transport.SessionTransport
+	ctx            context.Context
+	cancel         context.CancelFunc
+	mu             sync.Mutex
+	streams        map[uint64]*Stream
+	order          []uint64
+	nextID         uint64
+	round          int
+	initiator      bool
+	control        chan frame
+	controlIn      chan []byte
+	accepted       chan *Stream
+	wake           chan struct{}
+	done           chan struct{}
+	once           sync.Once
+	quiesced       bool
+	sleepCommitted bool
 }
 
 // New starts independent reader and fair sender loops over one reliable session.
@@ -95,6 +97,11 @@ func (m *Mux) Open(ctx context.Context, destination string) (*Stream, error) {
 		return nil, io.EOF
 	default:
 	}
+	if m.sleepCommitted {
+		m.mu.Unlock()
+		return nil, errors.New("agent is entering idle sleep")
+	}
+	m.quiesced = false // A new operation cancels a pending idle grant.
 	id := m.nextID
 	m.nextID += 2
 	s := newStream(m, id, destination)
@@ -120,6 +127,53 @@ func (m *Mux) Open(ctx context.Context, destination string) (*Stream, error) {
 	case <-m.done:
 		return nil, io.EOF
 	}
+}
+
+// TryQuiesce marks an empty session for sleep. New work cancels this mark
+// until CommitQuiesce makes the decision final.
+func (m *Mux) TryQuiesce() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.quiesced || len(m.streams) != 0 {
+		return false
+	}
+	select {
+	case <-m.done:
+		return false
+	default:
+	}
+	m.quiesced = true
+	return true
+}
+
+func (m *Mux) Unquiesce() {
+	m.mu.Lock()
+	if !m.sleepCommitted {
+		m.quiesced = false
+	}
+	m.mu.Unlock()
+}
+
+func (m *Mux) IsQuiesced() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.quiesced
+}
+
+func (m *Mux) IsSleepCommitted() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.sleepCommitted
+}
+
+func (m *Mux) CommitQuiesce() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.quiesced || m.sleepCommitted || len(m.streams) != 0 {
+		return false
+	}
+	m.sleepCommitted = true
+	return true
 }
 
 func (m *Mux) Close() error {
@@ -202,6 +256,11 @@ func (m *Mux) handle(f frame) error {
 			return errFrame
 		}
 		m.mu.Lock()
+		if m.sleepCommitted {
+			m.mu.Unlock()
+			return m.controlFrame(m.ctx, frame{kind: frameOpenFail, id: f.id, data: []byte("agent entering idle sleep")})
+		}
+		m.quiesced = false
 		if m.streams[f.id] != nil {
 			m.mu.Unlock()
 			return errFrame

@@ -53,7 +53,7 @@ Agent: undertow agent --transport dns --server SERVER_IP:53 --domain t.example.i
 
 ### Authentication and enrollment
 
-Token enrollment is the default: `init` creates a random `token.key` for distribution to agents and VPN clients. Password enrollment uses `--auth password` with a password file. Open enrollment uses `--auth none` and permits anyone who can reach the listener to join, subject to each agent's capabilities.
+Token enrollment is the default: `init` creates a random `token.key` for distribution to agents and VPN clients. Password enrollment uses `--auth password` with a password file. Open enrollment uses `--auth none` for agents; clients still require server-managed operator accounts. See [operator authentication](docs/operator-authentication.md).
 
 ```text
 Server: undertow init --identity identity.key --token-file token.key
