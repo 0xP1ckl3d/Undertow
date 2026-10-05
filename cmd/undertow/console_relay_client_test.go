@@ -12,7 +12,8 @@ import (
 func TestClientConsoleRelayAndCarrierCommands(t *testing.T) {
 	const agentID = "0123456789abcdef0123456789abcdef"
 	var requests []string
-	call := func(_ context.Context, method, path string, _ any) ([]byte, error) {
+	var startedBind string
+	call := func(_ context.Context, method, path string, body any) ([]byte, error) {
 		requests = append(requests, method+" "+path)
 		switch method + " " + path {
 		case "GET /v1/status":
@@ -20,6 +21,7 @@ func TestClientConsoleRelayAndCarrierCommands(t *testing.T) {
 		case "GET /v1/relays":
 			return []byte(`[{"agent_id":"` + agentID + `","bind":"127.0.0.1:8443"},{"agent_id":"other","bind":"127.0.0.1:8444"}]`), nil
 		case "POST /v1/agents/" + agentID + "/relays":
+			startedBind = body.(map[string]string)["bind"]
 			return []byte(`{"agent_id":"` + agentID + `","bind":"127.0.0.1:8443"}`), nil
 		case "GET /v1/transports":
 			return []byte(`[{"transport":"websocket","network":"tcp","listen":"127.0.0.1:443","sessions":1}]`), nil
@@ -46,6 +48,9 @@ func TestClientConsoleRelayAndCarrierCommands(t *testing.T) {
 		if !strings.Contains(out.String(), tc.want) {
 			t.Fatalf("%v output = %q; want %q", tc.args, out.String(), tc.want)
 		}
+	}
+	if startedBind != "0.0.0.0:8443" {
+		t.Fatalf("default TCP relay bind = %q", startedBind)
 	}
 	var out bytes.Buffer
 	if err := runConsoleCommand(context.Background(), &out, call, true, 42, nil, []string{"stop", "transport", "websocket", "force"}); err == nil || !strings.Contains(err.Error(), "current carrier") {

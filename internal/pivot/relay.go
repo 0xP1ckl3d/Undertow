@@ -2,12 +2,14 @@ package pivot
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
 	"net"
 	"net/netip"
 	"strconv"
+	"strings"
 	"time"
 
 	"undertow/internal/mux"
@@ -17,6 +19,39 @@ import (
 const RelayListenerDestination = "relay-listener.undertow.invalid:0"
 const RelayInboundDestination = "relay-inbound.undertow.invalid:0"
 const RelayPipeInboundDestination = "relay-pipe-inbound.undertow.invalid:0"
+
+func IsPipeRelayBind(bind string) bool { return namedpipe.IsLocal(bind) }
+
+// RelayInboundForBind identifies the listener that accepted a child. The bind
+// is metadata on the authenticated parent stream, not a client supplied claim.
+func RelayInboundForBind(bind string) string {
+	prefix := "relay-tcp-"
+	if namedpipe.IsLocal(bind) {
+		prefix = "relay-pipe-"
+	}
+	return prefix + hex.EncodeToString([]byte(bind)) + ".undertow.invalid:0"
+}
+
+func ParseRelayInbound(destination string) (carrier, bind string, ok bool) {
+	if destination == RelayInboundDestination {
+		return "relay", "", true // Earlier agents did not report the bind.
+	}
+	if destination == RelayPipeInboundDestination {
+		return "relay-smb", "", true
+	}
+	for _, item := range []struct{ prefix, carrier string }{{"relay-tcp-", "relay"}, {"relay-pipe-", "relay-smb"}} {
+		if !strings.HasPrefix(destination, item.prefix) || !strings.HasSuffix(destination, ".undertow.invalid:0") {
+			continue
+		}
+		value := strings.TrimSuffix(strings.TrimPrefix(destination, item.prefix), ".undertow.invalid:0")
+		decoded, err := hex.DecodeString(value)
+		if err != nil || ValidateRelayBind(string(decoded)) != nil || namedpipe.IsLocal(string(decoded)) != (item.carrier == "relay-smb") {
+			return "", "", false
+		}
+		return item.carrier, string(decoded), true
+	}
+	return "", "", false
+}
 
 type RelayListenerRequest struct {
 	Bind string `json:"bind"`
@@ -121,10 +156,7 @@ func ServeAgentRelayListener(ctx context.Context, session *mux.Mux, control *mux
 				return
 			}
 			openCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-			destination := RelayInboundDestination
-			if namedpipe.IsLocal(request.Bind) {
-				destination = RelayPipeInboundDestination
-			}
+			destination := RelayInboundForBind(actualBind)
 			upstream, err := session.Open(openCtx, destination)
 			cancel()
 			if err != nil {

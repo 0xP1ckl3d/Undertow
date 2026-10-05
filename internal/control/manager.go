@@ -36,6 +36,7 @@ type AgentInfo struct {
 	ID                 string                  `json:"id"`
 	Transport          string                  `json:"transport,omitempty"`
 	Via                string                  `json:"via,omitempty"`
+	RelayBind          string                  `json:"relay_bind,omitempty"`
 	Depth              int                     `json:"depth,omitempty"`
 	SessionID          uint64                  `json:"session_id"`
 	VirtualIP          string                  `json:"virtual_ip"`
@@ -184,7 +185,7 @@ type Manager struct {
 	agentDistribution  http.Handler
 	server             ServerInfo
 	transports         TransportController
-	relayAccept        func(context.Context, string, string, *mux.Stream)
+	relayAccept        func(context.Context, string, string, string, *mux.Stream)
 	relayPayloadAccept func(context.Context, string, *mux.Stream)
 	relays             map[string]map[string]*relayState
 	agents             map[string]*agentState
@@ -308,7 +309,7 @@ func (m *Manager) SetTransportController(controller TransportController) {
 	m.mu.Unlock()
 }
 
-func (m *Manager) SetRelayAcceptor(accept func(context.Context, string, string, *mux.Stream)) {
+func (m *Manager) SetRelayAcceptor(accept func(context.Context, string, string, string, *mux.Stream)) {
 	m.mu.Lock()
 	m.relayAccept = accept
 	m.mu.Unlock()
@@ -569,7 +570,7 @@ func (m *Manager) Register(peer transport.Peer, streamMux *mux.Mux) {
 	if parent := peer.Snapshot().Via; parent != "" {
 		depth = m.agents[parent].inventory.Depth + 1
 	}
-	m.agents[id] = &agentState{peer: peer, mux: streamMux, inventory: AgentInfo{Via: peer.Snapshot().Via, Depth: depth}}
+	m.agents[id] = &agentState{peer: peer, mux: streamMux, inventory: AgentInfo{Via: peer.Snapshot().Via, RelayBind: peer.Snapshot().RelayBind, Depth: depth}}
 	delete(m.offlineAgents, id)
 	m.recordLifecycleLocked(LifecycleEvent{AgentID: id, Kind: "connected", Transport: peer.Snapshot().Carrier, SessionID: peer.Snapshot().ID})
 	m.mu.Unlock()
@@ -933,6 +934,7 @@ func (m *Manager) AgentList() []AgentInfo {
 		info.Privilege = state.privilege
 		info.Transport = p.Carrier
 		info.Via = p.Via
+		info.RelayBind = p.RelayBind
 		info.SessionID = p.ID
 		info.VirtualIP = p.VirtualIP
 		info.Remote = p.Remote

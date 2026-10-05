@@ -50,6 +50,7 @@ function GraphDetails({node,edge,localClient}:{node?:TopologyNode;edge?:Topology
       if(node.kind==='client')rows.push(['Internet VPN',node.vpn?'Enabled':'Disabled']);
       if(node.connected&&node.active)rows.push(['Session uptime',sessionUptime(node.connected)]);
       if(node.carrier)rows.push(['Carrier',node.carrier]);
+      if(node.kind==='agent'&&node.relay_bind)rows.push(['Relay listener',node.relay_bind]);
       if(node.remote)rows.push(['Remote',node.remote]);
       if(node.kind==='agent')rows.push(['Observed public IP',node.public_ip||'Not observed from this connection']);
       if(node.session_id)rows.push([node.kind==='agent'&&!node.active?'Last session':'Session',String(node.session_id)]);
@@ -86,7 +87,7 @@ export function TopologyGraph({topology,onAgent,localClient}:{topology:Topology|
     if(!topology)return;
     const count:Record<number,number>={};
     setNodes(topology.nodes.map(n=>{
-      const column=n.kind==='client'?0:n.kind==='server'?1:n.kind==='agent'?2+(n.depth||0):n.kind==='relay'?3:4;
+      const column=n.kind==='client'?0:n.kind==='server'?1:n.kind==='agent'?2+2*(n.depth||0):n.kind==='relay'?3+2*(n.depth||0):6;
       const row=count[column]||0;count[column]=row+1;
       return {id:n.id,position:layout[n.id]||{x:column*190,y:row*130+80},data:{label:<div className={`graph-device ${n.kind} ${n.kind==='agent'?(n.privilege||'unknown'):''} ${n.active?'':'offline'}`} title={n.label}><div className="graph-device-square"><DeviceIcon node={n}/><span className={'device-state '+(n.active?'online':'')}/></div><span className="graph-device-name">{n.label}</span><span className="graph-device-subtitle">{n.kind==='agent'&&!n.active?'Disconnected':n.kind==='agent'?n.os||'Agent':n.kind==='client'?'Operator':n.kind==='server'?'Server':n.kind==='relay'?'Relay':'Network'}</span></div>},style:{padding:0,border:0,background:'transparent',width:110},sourcePosition:Position.Right,targetPosition:Position.Left,draggable:true};
     }));

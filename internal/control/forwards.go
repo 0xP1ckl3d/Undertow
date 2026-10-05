@@ -169,14 +169,23 @@ func (m *Manager) serveAgentForwards(agentID string, agentMux *mux.Mux) {
 		if err != nil {
 			return
 		}
-		if stream.Destination() == pivot.RelayInboundDestination || stream.Destination() == pivot.RelayPipeInboundDestination {
-			carrier := "relay"
-			if stream.Destination() == pivot.RelayPipeInboundDestination {
-				carrier = "relay-smb"
-			}
+		if carrier, bind, relayInbound := pivot.ParseRelayInbound(stream.Destination()); relayInbound {
 			m.mu.RLock()
 			accept := m.relayAccept
-			active := len(m.relays[agentID]) > 0
+			legacyCandidates := 0
+			if bind == "" { // Older agents reported only the carrier; infer only when unambiguous.
+				for candidate := range m.relays[agentID] {
+					if pivot.IsPipeRelayBind(candidate) != (carrier == "relay-smb") {
+						continue
+					}
+					legacyCandidates++
+					bind = candidate
+				}
+				if legacyCandidates != 1 {
+					bind = ""
+				}
+			}
+			active := (bind != "" && m.relays[agentID][bind] != nil) || legacyCandidates > 1
 			m.mu.RUnlock()
 			if accept == nil || !active {
 				stream.Fail(errors.New("relay listener is not active"))
@@ -187,7 +196,7 @@ func (m *Manager) serveAgentForwards(agentID string, agentMux *mux.Mux) {
 					_ = stream.Close()
 					return
 				}
-				accept(context.Background(), agentID, carrier, stream)
+				accept(context.Background(), agentID, carrier, bind, stream)
 			}()
 			continue
 		}

@@ -39,16 +39,25 @@ payload download PAYLOAD_ID
 
 The `server` field here is the child's pipe address, not the Undertow server's network address. The build still embeds the original server fingerprint and a new artifact enrollment credential. A Linux target is rejected for `relay-smb`.
 
-`payload download PAYLOAD_ID` saves the build on the console host through the authenticated control connection. The pipe does not provide an HTTPS artifact URL, so `payload host-agent` cannot target it. Deliver the saved Windows binary through your chosen channel; starting the pipe or building a payload does not launch the child. Use `relay stop \\.\pipe\branch_ops` to close the listener after it is no longer needed.
+`payload download PAYLOAD_ID` saves the build on the console host through the authenticated control connection. You can also deliver the Windows artifact through the existing pipe listener. This is an explicit step after building:
+
+```text
+payload host-agent PAYLOAD_ID PARENT_AGENT_ID \\.\pipe\branch_ops PARENT_HOST
+payload agent-hosts PAYLOAD_ID
+payload verify-script-agent HOST_ID powershell
+payload deploy-script-agent HOST_ID powershell
+```
+
+Use a parent hostname or IP that the child can reach over SMB for `PARENT_HOST`; direct IP addresses are supported. Use `.` only when the helper will run on the parent host itself. The host command authorizes one opaque download token on that same named-pipe listener. It does not start another listener. A Windows PowerShell helper connects to `\\PARENT_HOST\pipe\branch_ops`, pins the temporary TLS certificate, requests the artifact, verifies its SHA-256, and then starts the downloaded binary **only when the operator runs that helper**. The optional `verify-script-agent` helper sends a pinned HEAD request through the same pipe and checks the artifact hash without downloading or starting a payload. It is a diagnostic, not a prerequisite for hosting or deployment. The parent fetches the bytes from the Undertow server over its existing authenticated session. `payload unhost-agent HOST_ID` disables the download token without stopping child sessions. The pipe is not an HTTPS URL, so a browser or `curl` cannot fetch it directly. POSIX shell helpers are not available for named pipes. Use `relay stop \\.\pipe\branch_ops` to close the listener after it is no longer needed.
 
 ## Use the browser GUI
 
 1. In **Relays**, select a connected Windows parent and choose **SMB named pipe**. Enter `\\.\pipe\branch_ops` and click **Start relay**.
 2. In the new relay row, click **Create child payload**. **Payloads** selects the `Agent relay · SMB named pipe` carrier. Enter a child-reachable UNC path such as `\\PARENT_HOST\pipe\branch_ops`; the parent's local `\\.\pipe\...` path is not copied as a remote address.
-3. Save the profile, build a Windows x64 artifact, and download it from **Payloads → Artifacts** for your chosen delivery method.
+3. Save the profile and build a Windows x64 artifact. In **Payloads → Artifacts → Host through an agent**, select the parent and its named pipe, then enter the parent host that the child can reach over SMB. Click **Enable pipe delivery**. Preview or download the pinned PowerShell helper. You can still download the artifact directly through the operator client for another delivery method.
 4. Once the child connects, inspect **Topology**. The child appears with its own agent ID, `relay-smb` carrier, and the parent as its `Via` path. Open its workspace for normal commands and retained records.
 
-The existing **Host through an agent** HTTPS download URL applies to a TCP relay listener. A named pipe has no HTTP URL for a browser or standard `curl`/PowerShell web download, so use the server artifact download or another approved delivery channel for an SMB child payload.
+For a TCP relay, **Host through an agent** provides a pinned HTTPS URL on the relay port. For an SMB relay, it provides a pipe endpoint and a PowerShell helper. Both use the existing listener and fetch the artifact from the server on demand. Enabling delivery never runs the helper or starts a child agent.
 
 ## What the carrier does
 
@@ -61,7 +70,8 @@ The named pipe carries the same framed, end-to-end Undertow relay session as the
 | Symptom | Check |
 | --- | --- |
 | `relay start` fails | The parent must be Windows and connected, the `relay` capability must be allowed, and the name must not already be in use. |
-| The child cannot open the pipe | Check the UNC parent host, SMB reachability, Windows credentials, firewall policy, and whether `relay list` still shows the listener. Undertow does not configure those Windows services. |
+| The child cannot open the pipe | Check the UNC parent host, SMB reachability, Windows credentials, firewall policy, and whether `relay list` still shows the listener. On the child, `Test-NetConnection PARENT_HOST -Port 445` checks SMB transport, and `net use \\PARENT_HOST\IPC$` checks Windows authentication separately from Undertow. A Windows logon error from both `net use` and the pipe helper occurs before the relay protocol runs. A hostname or direct IP may be used, subject to the site's Windows authentication policy. Undertow does not change those Windows services or disable authentication. |
+| `The user name or password is incorrect` on a domain-joined child | Check Windows System logs on both hosts for LsaSrv event 6167. [Microsoft documents](https://support.microsoft.com/en-us/servicing/os/windows/docs/2025/10/kerberos-and-ntlm-authentication-failures-due-to-duplicate-sids) Kerberos and NTLM failures between Windows installations with duplicate machine SIDs. Compare each host's local Administrator SID prefix with `((Get-LocalUser -Name Administrator).SID.Value -replace '-500$','')`; different computers should have different prefixes. Correct the Windows image deployment problem through supported OS provisioning, rather than changing Undertow pipe authentication. |
 | The pipe opens but the child is rejected | Check the child's pinned server fingerprint, enrollment credential, and server audit/lifecycle records. Windows SMB login and Undertow enrollment are separate checks. |
 | A payload profile will not build | `relay-smb` is for Windows targets. Enter the child-reachable UNC pipe path, then select Windows x64. |
 

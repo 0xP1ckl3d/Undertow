@@ -29,7 +29,12 @@ func runPayloadAgentHost(ctx context.Context, out io.Writer, call consoleCaller,
 		if err := json.Unmarshal(data, &host); err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "Payload downloads enabled on relay %s (agent %s).\nHost ID: %s\nDownload URL: %s\nThe parent retrieves the artifact over its existing Undertow session. The relay remains available for child sessions.\nUse payload deploy-script-agent %s powershell|shell for a pinned download helper.\n", host.Bind, host.AgentID, host.ID, host.Retrieval, host.ID)
+		fmt.Fprintf(out, "Payload downloads enabled on relay %s (agent %s).\nHost ID: %s\nDelivery endpoint: %s\nThe parent retrieves the artifact over its existing Undertow session. The relay remains available for child sessions.\n", host.Bind, host.AgentID, host.ID, host.Retrieval)
+		if host.PipePath != "" {
+			fmt.Fprintf(out, "Use payload verify-script-agent %s powershell for a pinned SMB pipe probe.\n", host.ID)
+		} else {
+			fmt.Fprintf(out, "Use payload verify-script-agent %s powershell|shell for a pinned HTTPS probe.\n", host.ID)
+		}
 		return nil
 	case "agent-hosts":
 		if len(args) != 2 && len(args) != 3 {
@@ -68,9 +73,9 @@ func runPayloadAgentHost(ctx context.Context, out io.Writer, call consoleCaller,
 		}
 		fmt.Fprintf(out, "Disabled payload download %s; its relay listener remains active.\n", args[2])
 		return nil
-	case "deploy-script-agent":
+	case "deploy-script-agent", "verify-script-agent":
 		if len(args) != 4 || args[3] != "powershell" && args[3] != "shell" {
-			return errors.New("use payload deploy-script-agent HOST_ID powershell|shell")
+			return errors.New("use payload deploy-script-agent|verify-script-agent HOST_ID powershell|shell")
 		}
 		data, err := call(ctx, http.MethodGet, "/v1/agent-hosts/"+url.PathEscape(args[2]), nil)
 		if err != nil {
@@ -84,7 +89,11 @@ func runPayloadAgentHost(ctx context.Context, out io.Writer, call consoleCaller,
 		if err != nil {
 			return err
 		}
-		return printDeployScript(out, hostedArtifactInfo{Artifact: artifact.Artifact, Retrieval: host.Retrieval, RetrievalPath: host.RetrievalPath, TLSSelfSigned: host.TLSSelfSigned, TLSCertSHA256: host.TLSCertSHA256, TLSPublicKeyPin: host.TLSPublicKeyPin}, args[3])
+		hosted := hostedArtifactInfo{Artifact: artifact.Artifact, Retrieval: host.Retrieval, RetrievalPath: host.RetrievalPath, PipePath: host.PipePath, TLSSelfSigned: host.TLSSelfSigned, TLSCertSHA256: host.TLSCertSHA256, TLSPublicKeyPin: host.TLSPublicKeyPin}
+		if args[1] == "verify-script-agent" {
+			return printAgentHostProbeScript(out, hosted, args[3])
+		}
+		return printDeployScript(out, hosted, args[3])
 	}
 	return fmt.Errorf("unknown agent payload host command %q", args[1])
 }

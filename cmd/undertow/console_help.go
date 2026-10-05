@@ -127,8 +127,8 @@ when applications on the server host itself should use these routes.
   relay start [BIND]        Open a listener on that agent for child agents.
   relay list                Show its relay listeners.
   relay stop [BIND]         Close one listener (or the only listener).
-Omitting BIND uses 127.0.0.1:8443. Use an agent-reachable address such as
-10.20.1.15:8443 for a child on another host. The child connects with
+Omitting BIND listens on 0.0.0.0:8443 on the parent. Use its reachable IP or
+hostname (not 0.0.0.0) in the child profile. The child connects with
 agent --transport relay --server ADDRESS --fingerprint FINGERPRINT.
 On a Windows parent, use relay start \\.\pipe\NAME. A Windows child uses
 --transport relay-smb --server \\PARENT_HOST\pipe\NAME. A child on the same

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/rand"
@@ -16,6 +17,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -23,6 +25,7 @@ import (
 	"undertow/internal/agentprofile"
 	"undertow/internal/control"
 	"undertow/internal/mux"
+	"undertow/internal/namedpipe"
 	"undertow/internal/pivot"
 	"undertow/internal/routing"
 	"undertow/internal/security"
@@ -42,7 +45,10 @@ func TestAgentHostedPayloadStreamsServerArtifactOnlyWhileListenerActive(t *testi
 	if err := os.WriteFile(filepath.Join(templates, "undertow-agent-linux-amd64"), []byte("ELF-template"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := agentprofile.WriteTemplateManifest(templates, "test", []string{"undertow-agent-linux-amd64"}); err != nil {
+	if err := os.WriteFile(filepath.Join(templates, "undertow-agent-windows-amd64.exe"), []byte("PE-template"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := agentprofile.WriteTemplateManifest(templates, "test", []string{"undertow-agent-linux-amd64", "undertow-agent-windows-amd64.exe"}); err != nil {
 		t.Fatal(err)
 	}
 	store, err := agentprofile.OpenStore(filepath.Join(dir, "store"), templates, "test")
@@ -77,7 +83,7 @@ func TestAgentHostedPayloadStreamsServerArtifactOnlyWhileListenerActive(t *testi
 	waitForAgent(t, manager, agentID)
 	d := &agentDistribution{store: store, manager: manager, authMode: "none", credential: token}
 	manager.SetRelayPayloadAcceptor(d.serveRelayPayload)
-	manager.SetRelayAcceptor(func(_ context.Context, parentID, carrier string, upstream *mux.Stream) {
+	manager.SetRelayAcceptor(func(_ context.Context, parentID, carrier, bind string, upstream *mux.Stream) {
 		peer, err := relay.Accept(ctx, upstream, parentID, identity, token)
 		if err != nil {
 			_ = upstream.Close()
@@ -150,8 +156,12 @@ func TestAgentHostedPayloadStreamsServerArtifactOnlyWhileListenerActive(t *testi
 		t.Fatalf("console list: %v %s", err, consoleOutput.String())
 	}
 	consoleOutput.Reset()
+	if err := runPayloadAgentHost(ctx, &consoleOutput, consoleCall, []string{"payload", "verify-script-agent", host.ID, "shell"}); err != nil || !strings.Contains(consoleOutput.String(), "--head") {
+		t.Fatalf("console optional diagnostic script: %v %s", err, consoleOutput.String())
+	}
+	consoleOutput.Reset()
 	if err := runPayloadAgentHost(ctx, &consoleOutput, consoleCall, []string{"payload", "deploy-script-agent", host.ID, "shell"}); err != nil || !strings.Contains(consoleOutput.String(), "--pinnedpubkey") {
-		t.Fatalf("console script: %v %s", err, consoleOutput.String())
+		t.Fatalf("console deploy script: %v %s", err, consoleOutput.String())
 	}
 	client := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true, VerifyPeerCertificate: func(raw [][]byte, _ [][]*x509.Certificate) error {
 		if len(raw) != 1 {
@@ -208,5 +218,129 @@ func TestAgentHostedPayloadStreamsServerArtifactOnlyWhileListenerActive(t *testi
 	response.Body.Close()
 	if response.StatusCode != http.StatusNotFound || len(manager.RelayList(agentID)) != 1 {
 		t.Fatalf("payload stop must invalidate token and preserve relay: status=%d relays=%d", response.StatusCode, len(manager.RelayList(agentID)))
+	}
+	if runtime.GOOS != "windows" {
+		return
+	}
+	pipeID, err := agentprofile.ID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pipeBind := `\\.\pipe\undertow-test-` + pipeID
+	pipeListener, err := manager.StartRelay(ctx, agentID, pipeBind)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pipeProfile := call(http.MethodPost, "/v1/agent-profiles", map[string]any{"name": "pipe-child", "server": pipeBind, "transport": "relay-smb"})
+	if pipeProfile.Code != http.StatusCreated {
+		t.Fatalf("pipe profile: %d %s", pipeProfile.Code, pipeProfile.Body.String())
+	}
+	pipeBuild := call(http.MethodPost, "/v1/agent-artifacts", map[string]any{"profile": "pipe-child", "platform": "windows", "architecture": "amd64"})
+	if pipeBuild.Code != http.StatusCreated {
+		t.Fatalf("pipe build: %d %s", pipeBuild.Code, pipeBuild.Body.String())
+	}
+	var pipeArtifact artifactInfo
+	if err := json.Unmarshal(pipeBuild.Body.Bytes(), &pipeArtifact); err != nil {
+		t.Fatal(err)
+	}
+	pipeHosted := call(http.MethodPost, "/v1/agent-artifacts/"+pipeArtifact.ID+"/agent-hosts", map[string]any{"agent_id": agentID, "bind": pipeListener.Bind, "public_host": "."})
+	if pipeHosted.Code != http.StatusCreated {
+		t.Fatalf("pipe host: %d %s", pipeHosted.Code, pipeHosted.Body.String())
+	}
+	var pipeHost agentPayloadHostInfo
+	if err := json.Unmarshal(pipeHosted.Body.Bytes(), &pipeHost); err != nil || pipeHost.PipePath != `\\.\pipe\undertow-test-`+pipeID || !strings.HasPrefix(pipeHost.Retrieval, "smb-pipe://./") {
+		t.Fatalf("pipe host info: %+v %v", pipeHost, err)
+	}
+	consoleOutput.Reset()
+	if err := runPayloadAgentHost(ctx, &consoleOutput, consoleCall, []string{"payload", "deploy-script-agent", pipeHost.ID, "powershell"}); err != nil || !strings.Contains(consoleOutput.String(), "$pipeHost = '.'") {
+		t.Fatalf("pipe deploy helper: %v %s", err, consoleOutput.String())
+	}
+	consoleOutput.Reset()
+	if err := runPayloadAgentHost(ctx, &consoleOutput, consoleCall, []string{"payload", "verify-script-agent", pipeHost.ID, "powershell"}); err != nil || !strings.Contains(consoleOutput.String(), "$pipeHost = '.'") {
+		t.Fatalf("pipe verification helper: %v %s", err, consoleOutput.String())
+	}
+	consoleOutput.Reset()
+	if err := runPayloadAgentHost(ctx, &consoleOutput, consoleCall, []string{"payload", "deploy-script-agent", pipeHost.ID, "shell"}); err == nil {
+		t.Fatal("pipe host accepted a POSIX shell helper")
+	}
+	pipeChildKey := testKey(t)
+	pipeChild, err := relay.DialPipe(ctx, pipeHost.PipePath, security.Fingerprint(identity), token, pipeChildKey)
+	if err != nil {
+		t.Fatalf("child pipe session while downloads are enabled: %v", err)
+	}
+	pipeChildMux := mux.New(ctx, pipeChild, false)
+	defer pipeChildMux.Close()
+	if err := sendIsolatedTestInventory(ctx, pipeChildMux); err != nil {
+		t.Fatal(err)
+	}
+	go pivot.ServeAgentWithCapabilities(ctx, pipeChildMux, pivot.DefaultCapabilities())
+	pipeChildInfo := waitForAgent(t, manager, security.Fingerprint(pipeChildKey)[:32])
+	if pipeChildInfo.Via != agentID || pipeChildInfo.Transport != "relay-smb" {
+		t.Fatalf("pipe child topology during download hosting: %+v", pipeChildInfo)
+	}
+	probePipe, err := namedpipe.Dial(ctx, pipeHost.PipePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	probeTLS := tls.Client(probePipe, &tls.Config{ServerName: "undertow", InsecureSkipVerify: true, VerifyPeerCertificate: func(raw [][]byte, _ [][]*x509.Certificate) error {
+		if len(raw) != 1 {
+			return errors.New("missing pipe certificate")
+		}
+		actual := sha256.Sum256(raw[0])
+		if hex.EncodeToString(actual[:]) != pipeHost.TLSCertSHA256 {
+			return errors.New("pipe certificate pin mismatch")
+		}
+		return nil
+	}}) //nolint:gosec -- the test verifies the exact returned certificate pin
+	probeRequest, err := http.NewRequestWithContext(ctx, http.MethodHead, "https://undertow"+pipeHost.RetrievalPath, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := probeRequest.Write(probeTLS); err != nil {
+		t.Fatal(err)
+	}
+	probeReply, err := http.ReadResponse(bufio.NewReader(probeTLS), probeRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	probeReply.Body.Close()
+	probeTLS.Close()
+	if probeReply.StatusCode != http.StatusOK || probeReply.Header.Get("X-Artifact-SHA256") != pipeArtifact.SHA256 {
+		t.Fatalf("pipe verification failed: status=%d hash=%s", probeReply.StatusCode, probeReply.Header.Get("X-Artifact-SHA256"))
+	}
+	pipeConn, err := namedpipe.Dial(ctx, pipeHost.PipePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tlsPipe := tls.Client(pipeConn, &tls.Config{ServerName: "undertow", InsecureSkipVerify: true, VerifyPeerCertificate: func(raw [][]byte, _ [][]*x509.Certificate) error {
+		if len(raw) != 1 {
+			return errors.New("missing pipe certificate")
+		}
+		actual := sha256.Sum256(raw[0])
+		if hex.EncodeToString(actual[:]) != pipeHost.TLSCertSHA256 {
+			return errors.New("pipe certificate pin mismatch")
+		}
+		return nil
+	}}) //nolint:gosec -- the test verifies the exact returned certificate pin
+	defer tlsPipe.Close()
+	pipeRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://undertow"+pipeHost.RetrievalPath, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pipeRequest.Write(tlsPipe); err != nil {
+		t.Fatal(err)
+	}
+	pipeResponse, err := http.ReadResponse(bufio.NewReader(tlsPipe), pipeRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pipeBytes, err := io.ReadAll(io.LimitReader(pipeResponse.Body, 10<<20))
+	pipeResponse.Body.Close()
+	wantPipe, readErr := os.ReadFile(store.ArtifactPath(pipeArtifact.Artifact))
+	if err != nil || readErr != nil || pipeResponse.StatusCode != http.StatusOK || !bytes.Equal(pipeBytes, wantPipe) {
+		t.Fatalf("pipe download: status=%d read=%v artifact=%v", pipeResponse.StatusCode, err, readErr)
+	}
+	if stopped := call(http.MethodDelete, "/v1/agent-hosts/"+pipeHost.ID, nil); stopped.Code != http.StatusNoContent || len(manager.RelayList(agentID)) != 2 {
+		t.Fatalf("pipe host stop: %d relays=%d", stopped.Code, len(manager.RelayList(agentID)))
 	}
 }

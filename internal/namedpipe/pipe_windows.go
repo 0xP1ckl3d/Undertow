@@ -16,7 +16,10 @@ func Listen(path string) (net.Listener, error) {
 	// Remote SMB clients must authenticate to Windows before they can open the
 	// pipe. Undertow then performs its own end-to-end server authentication and
 	// enrollment handshake over the byte stream.
-	return winio.ListenPipe(path, &winio.PipeConfig{SecurityDescriptor: "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;AU)"})
+	return winio.ListenPipe(path, &winio.PipeConfig{
+		SecurityDescriptor: "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;AU)",
+		AllowRemoteClients:  true,
+	})
 }
 
 func Dial(ctx context.Context, path string) (net.Conn, error) {

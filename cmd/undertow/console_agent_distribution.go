@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 	"undertow/internal/deployment"
+	"undertow/internal/namedpipe"
 )
 
 func runConsoleAgentDistribution(ctx context.Context, out io.Writer, call consoleCaller, args []string) error {
@@ -167,6 +168,23 @@ func parseProfileOptions(args []string) (profileRequest, error) {
 
 func printDeployScript(out io.Writer, hosted hostedArtifactInfo, shell string) error {
 	a := hosted.Artifact
+	if hosted.PipePath != "" {
+		if shell != "powershell" {
+			return errors.New("SMB named-pipe delivery supports a Windows PowerShell helper only")
+		}
+		if err := namedpipe.ValidateRemote(hosted.PipePath); err != nil {
+			return err
+		}
+		if len(hosted.RetrievalPath) != 49 || hosted.RetrievalPath[0] != '/' {
+			return errors.New("invalid SMB pipe payload token")
+		}
+		if decoded, err := hex.DecodeString(hosted.RetrievalPath[1:]); err != nil || len(decoded) != 24 {
+			return errors.New("invalid SMB pipe payload token")
+		}
+		if hosted.TLSCertSHA256 == "" {
+			return errors.New("SMB pipe payload requires a TLS certificate pin")
+		}
+	}
 	if hosted.TLSCertSHA256 != "" {
 		if decoded, err := hex.DecodeString(hosted.TLSCertSHA256); err != nil || len(decoded) != sha256.Size {
 			return errors.New("invalid payload host TLS certificate pin")
@@ -179,8 +197,17 @@ func printDeployScript(out io.Writer, hosted hostedArtifactInfo, shell string) e
 	}
 	switch shell {
 	case "powershell":
-		fmt.Fprintf(out, "param([string]$Destination = '%s')\n$ErrorActionPreference = 'Stop'\n$url = '%s'\n$expected = '%s'\n$Destination = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Destination)\n$temp = $Destination + '.download'\ntry {\n", psQuote(a.Filename), psQuote(hosted.Retrieval), a.SHA256)
-		if hosted.TLSSelfSigned {
+		fmt.Fprintf(out, "param([string]$Destination = '%s')\n$ErrorActionPreference = 'Stop'\n$expected = '%s'\n", psQuote(a.Filename), a.SHA256)
+		if hosted.PipePath != "" {
+			parts := strings.Split(hosted.PipePath[2:], `\`)
+			fmt.Fprintf(out, "$pipeHost = '%s'\n$pipeName = '%s'\n$token = '%s'\n$certPin = '%s'\n", psQuote(parts[0]), psQuote(parts[2]), hosted.RetrievalPath[1:], hosted.TLSCertSHA256)
+		} else {
+			fmt.Fprintf(out, "$url = '%s'\n", psQuote(hosted.Retrieval))
+		}
+		fmt.Fprint(out, "$Destination = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Destination)\n$temp = $Destination + '.download'\ntry {\n")
+		if hosted.PipePath != "" {
+			printPipeDeployDownload(out)
+		} else if hosted.TLSSelfSigned {
 			fmt.Fprintf(out, "  $certPin = '%s'\n", hosted.TLSCertSHA256)
 			fmt.Fprint(out, `  Add-Type -AssemblyName System.Net.Http
   $factoryName = 'UndertowArtifactTls_' + [Guid]::NewGuid().ToString('N')
@@ -192,6 +219,7 @@ using System.Security.Cryptography.X509Certificates;
 public static class __FACTORY_NAME__ {
     public static HttpClientHandler CreateHandler(string pin) {
         var handler = new HttpClientHandler();
+        handler.UseProxy = false;
         handler.ServerCertificateCustomValidationCallback =
             (HttpRequestMessage request, X509Certificate2 certificate, X509Chain chain, SslPolicyErrors errors) => {
                 if (string.IsNullOrEmpty(pin)) return true;
@@ -214,13 +242,23 @@ public static class __FACTORY_NAME__ {
   $handler = $factory::CreateHandler($certPin)
   $client = [System.Net.Http.HttpClient]::new($handler)
   try {
-    $response = $client.GetAsync($url).GetAwaiter().GetResult()
+    $client.Timeout = [TimeSpan]::FromSeconds(20)
+    $endpoint = ([Uri]$url).Authority
+    try {
+      $response = $client.GetAsync($url, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
+    } catch {
+      $cause = $_.Exception
+      while ($cause.InnerException) { $cause = $cause.InnerException }
+      throw "Cannot connect to payload listener $endpoint. Check that this host resolves to the parent agent and its TCP port is reachable. Details: $($cause.Message)"
+    }
     try {
       $response.EnsureSuccessStatusCode() | Out-Null
       $source = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
       try {
         $target = [System.IO.File]::Create($temp)
-        try { $source.CopyTo($target) } finally { $target.Dispose() }
+        $transferTimeout = [System.Threading.CancellationTokenSource]::new([TimeSpan]::FromMinutes(10))
+        try { $source.CopyToAsync($target, 65536, $transferTimeout.Token).GetAwaiter().GetResult() }
+        finally { $transferTimeout.Dispose(); $target.Dispose() }
       } finally { $source.Dispose() }
     } finally { $response.Dispose() }
   } finally { $client.Dispose(); $handler.Dispose() }

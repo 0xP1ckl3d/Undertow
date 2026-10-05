@@ -64,7 +64,7 @@ func runConsoleRelayCommand(ctx context.Context, output io.Writer, call consoleC
 		if len(args) > 4 {
 			return errors.New("use relay start [BIND]")
 		}
-		bind := "127.0.0.1:8443"
+		bind := "0.0.0.0:8443"
 		if len(args) == 4 {
 			bind = args[3]
 		}

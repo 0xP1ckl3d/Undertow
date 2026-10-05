@@ -15,7 +15,7 @@ func TestTopologyShowsOnlyAcceptedRoutesAndRelayParent(t *testing.T) {
 	kinds := map[string]bool{}
 	for _, edge := range topology.Edges {
 		kinds[edge.Kind] = true
-		if edge.Kind == "relay_path" && (edge.Source != "agent:parent" || edge.Target != "agent:child") {
+		if edge.Kind == "relay_path" && (edge.Source != "relay:parent:10.0.0.5:8443" || edge.Target != "agent:child") {
 			t.Fatalf("wrong parent edge %+v", edge)
 		}
 	}
@@ -36,6 +36,29 @@ func TestTopologyShowsOnlyAcceptedRoutesAndRelayParent(t *testing.T) {
 		if edge.Kind == "accepted_route" && !edge.Active {
 			t.Fatal("accepted route incorrectly tied to internal mode")
 		}
+	}
+}
+
+func TestTopologyUsesExactRelayListenerWithMultipleBinds(t *testing.T) {
+	bind := `\\.\pipe\branch`
+	agents := []AgentInfo{
+		{ID: "parent", Hostname: "parent", Online: true},
+		{ID: "tcp-child", Via: "parent", Transport: "relay", RelayBind: "10.0.0.5:8443", Online: true},
+		{ID: "pipe-child", Via: "parent", Transport: "relay-smb", RelayBind: bind, Online: true},
+	}
+	relays := []RelayInfo{{AgentID: "parent", Bind: "10.0.0.5:8443"}, {AgentID: "parent", Bind: "10.0.0.5:9443"}, {AgentID: "parent", Bind: bind}}
+	topology := BuildTopology(agents, nil, nil, relays, nil)
+	want := map[string]string{"agent:tcp-child": "relay:parent:10.0.0.5:8443", "agent:pipe-child": "relay:parent:" + bind}
+	for _, edge := range topology.Edges {
+		if expected, ok := want[edge.Target]; ok && edge.Kind == "relay_path" {
+			if edge.Source != expected {
+				t.Fatalf("%s came from %s, want %s", edge.Target, edge.Source, expected)
+			}
+			delete(want, edge.Target)
+		}
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing relay paths: %v", want)
 	}
 }
 

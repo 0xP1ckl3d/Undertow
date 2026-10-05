@@ -29,6 +29,7 @@ type agentPayloadHostInfo struct {
 	PublicHost      string    `json:"public_host"`
 	Retrieval       string    `json:"retrieval"`
 	RetrievalPath   string    `json:"retrieval_path"`
+	PipePath        string    `json:"pipe_path,omitempty"`
 	TLSSelfSigned   bool      `json:"tls_self_signed"`
 	TLSCertSHA256   string    `json:"tls_cert_sha256"`
 	TLSPublicKeyPin string    `json:"tls_public_key_pin"`
@@ -64,11 +65,8 @@ func (d *agentDistribution) agentHost(id string) (agentPayloadHostInfo, bool) {
 }
 
 func (d *agentDistribution) startAgentPayloadHost(ctx context.Context, artifactID, agentID, bind, publicHost string) (agentPayloadHostInfo, error) {
-	if agentID == "" || bind == "" || publicHost == "" || !validRetrievalHost(publicHost) {
+	if agentID == "" || bind == "" || publicHost == "" || (!validRetrievalHost(publicHost) && !(namedpipe.IsLocal(bind) && publicHost == ".")) {
 		return agentPayloadHostInfo{}, errors.New("connected parent agent, active relay bind, and child-reachable host are required")
-	}
-	if namedpipe.IsLocal(bind) {
-		return agentPayloadHostInfo{}, errors.New("HTTPS payload download URLs require a TCP relay listener; a named pipe carries child sessions only")
 	}
 	a, err := d.store.Artifact(artifactID)
 	if err != nil {
@@ -76,6 +74,9 @@ func (d *agentDistribution) startAgentPayloadHost(ctx context.Context, artifactI
 	}
 	if a.Revoked {
 		return agentPayloadHostInfo{}, errors.New("revoked artifact cannot be hosted")
+	}
+	if namedpipe.IsLocal(bind) && a.Platform != "windows" {
+		return agentPayloadHostInfo{}, errors.New("SMB named-pipe delivery requires a Windows payload")
 	}
 	if err := agentprofile.VerifyFile(d.store.ArtifactPath(a), a.SHA256); err != nil {
 		return agentPayloadHostInfo{}, fmt.Errorf("verify artifact before hosting: %w", err)
@@ -97,17 +98,29 @@ func (d *agentDistribution) startAgentPayloadHost(ctx context.Context, artifactI
 	if err != nil {
 		return agentPayloadHostInfo{}, err
 	}
-	_, port, err := net.SplitHostPort(bind)
-	if err != nil {
-		_, _, _ = d.manager.SetRelayPayload(context.Background(), agentID, bind, token, false)
-		return agentPayloadHostInfo{}, err
+	info := agentPayloadHostInfo{ID: id, ArtifactID: a.ID, AgentID: agentID, Bind: bind, PublicHost: publicHost, RetrievalPath: "/" + token, TLSSelfSigned: true, TLSCertSHA256: result.TLSCertSHA256, TLSPublicKeyPin: result.TLSPublicKeyPin, Started: time.Now().UTC()}
+	if namedpipe.IsLocal(bind) {
+		pipeName := bind[len(`\\.\pipe\`):]
+		info.PipePath = `\\` + publicHost + `\pipe\` + pipeName
+		if err := namedpipe.ValidateRemote(info.PipePath); err != nil {
+			_, _, _ = d.manager.SetRelayPayload(context.Background(), agentID, bind, token, false)
+			return agentPayloadHostInfo{}, err
+		}
+		info.Retrieval = "smb-pipe://" + publicHost + "/" + pipeName + "/" + token
+	} else {
+		_, port, err := net.SplitHostPort(bind)
+		if err != nil {
+			_, _, _ = d.manager.SetRelayPayload(context.Background(), agentID, bind, token, false)
+			return agentPayloadHostInfo{}, err
+		}
+		info.Retrieval = "https://" + net.JoinHostPort(publicHost, port) + "/" + token
 	}
-	info := agentPayloadHostInfo{ID: id, ArtifactID: a.ID, AgentID: agentID, Bind: bind, PublicHost: publicHost, Retrieval: "https://" + net.JoinHostPort(publicHost, port) + "/" + token, RetrievalPath: "/" + token, TLSSelfSigned: true, TLSCertSHA256: result.TLSCertSHA256, TLSPublicKeyPin: result.TLSPublicKeyPin, Started: time.Now().UTC()}
 	d.hostsMu.Lock()
 	if d.agentHosts == nil {
 		d.agentHosts = make(map[string]*agentPayloadHost)
 	}
-	d.agentHosts[id] = &agentPayloadHost{info: info, token: token}
+	host := &agentPayloadHost{info: info, token: token}
+	d.agentHosts[id] = host
 	d.hostsMu.Unlock()
 	d.manager.PublishEvent("payload.agent_host.changed", id)
 	go func() { <-done; d.stopAgentPayloadHost(id) }()

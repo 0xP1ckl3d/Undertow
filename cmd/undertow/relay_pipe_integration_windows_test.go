@@ -31,13 +31,14 @@ func TestWindowsNamedPipeRelayPreservesChildIdentity(t *testing.T) {
 	manager := control.NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
 	servers := newServerTransports(ctx, manager, identity, token, "t.undertow.invalid", "/undertow", func(peer transport.Peer) { handleServerPeer(ctx, manager, "", false, peer) })
 	defer servers.Close()
-	manager.SetRelayAcceptor(func(_ context.Context, parentID, carrier string, stream *mux.Stream) {
+	manager.SetRelayAcceptor(func(_ context.Context, parentID, carrier, bind string, stream *mux.Stream) {
 		peer, err := relay.Accept(ctx, stream, parentID, identity, token)
 		if err != nil {
 			_ = stream.Close()
 			return
 		}
 		peer.Carrier = carrier
+		peer.RelayBind = bind
 		handleServerPeer(ctx, manager, "", false, peer)
 	})
 	listener, err := servers.Start("websocket", control.TransportStartRequest{Listen: "127.0.0.1:0"})
@@ -73,7 +74,7 @@ func TestWindowsNamedPipeRelayPreservesChildIdentity(t *testing.T) {
 	}
 	go pivot.ServeAgentWithCapabilities(ctx, childMux, pivot.DefaultCapabilities())
 	info := waitForAgent(t, manager, security.Fingerprint(childKey)[:32])
-	if info.Via != parentID || info.Transport != "relay-smb" || info.Depth != 1 {
+	if info.Via != parentID || info.Transport != "relay-smb" || info.Depth != 1 || info.RelayBind != bind {
 		t.Fatalf("named-pipe child: %+v", info)
 	}
 	result, err := pivot.ExecuteRequest(ctx, manager.Get(info.ID), pivot.ExecRequest{Builtin: "whoami"})

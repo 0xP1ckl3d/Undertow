@@ -586,6 +586,7 @@ type hostedArtifactInfo struct {
 	ServerPath      string `json:"server_path"`
 	Retrieval       string `json:"retrieval"`
 	RetrievalPath   string `json:"retrieval_path"`
+	PipePath        string `json:"pipe_path,omitempty"`
 	TLSSelfSigned   bool   `json:"tls_self_signed,omitempty"`
 	TLSCertSHA256   string `json:"tls_cert_sha256,omitempty"`
 	TLSPublicKeyPin string `json:"tls_public_key_pin,omitempty"`

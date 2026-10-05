@@ -31,6 +31,7 @@ type PeerInfo struct {
 	AgentID, Remote, VirtualIP string
 	Carrier                    string
 	Via                        string
+	RelayBind                  string
 	EnrollmentArtifactID       string
 	Connected, LastSeen        time.Time
 	Authenticated              bool

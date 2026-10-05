@@ -1,5 +1,7 @@
 module undertow
 
+replace github.com/Microsoft/go-winio => ./third_party/go-winio
+
 go 1.25.0
 
 require (

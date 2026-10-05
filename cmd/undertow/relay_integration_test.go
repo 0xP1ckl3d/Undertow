@@ -55,13 +55,14 @@ func TestNestedRelayAgents(t *testing.T) {
 	manager := control.NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
 	servers := newServerTransports(ctx, manager, identity, token, "t.undertow.invalid", "/undertow", func(peer transport.Peer) { handleServerPeer(ctx, manager, "", false, peer) })
 	defer servers.Close()
-	manager.SetRelayAcceptor(func(_ context.Context, parentID, carrier string, upstream *mux.Stream) {
+	manager.SetRelayAcceptor(func(_ context.Context, parentID, carrier, bind string, upstream *mux.Stream) {
 		peer, err := relay.Accept(ctx, upstream, parentID, identity, token)
 		if err != nil {
 			_ = upstream.Close()
 			return
 		}
 		peer.Carrier = carrier
+		peer.RelayBind = bind
 		handleServerPeer(ctx, manager, "", false, peer)
 	})
 	info, err := servers.Start("websocket", control.TransportStartRequest{Listen: "127.0.0.1:0"})
@@ -101,7 +102,7 @@ func TestNestedRelayAgents(t *testing.T) {
 	go pivot.ServeAgentWithCapabilities(ctx, childMux, pivot.DefaultCapabilities())
 	childID := security.Fingerprint(childKey)[:32]
 	childInfo := waitForAgent(t, manager, childID)
-	if childInfo.Via != parentID || childInfo.Depth != 1 || childInfo.Transport != "relay" {
+	if childInfo.Via != parentID || childInfo.Depth != 1 || childInfo.Transport != "relay" || childInfo.RelayBind != first.Bind {
 		t.Fatalf("incorrect child topology: %+v", childInfo)
 	}
 	result, err := pivot.ExecuteRequest(ctx, manager.Get(childID), pivot.ExecRequest{Builtin: "whoami"})
@@ -125,7 +126,7 @@ func TestNestedRelayAgents(t *testing.T) {
 	go pivot.ServeAgentWithCapabilities(ctx, grandchildMux, pivot.DefaultCapabilities())
 	grandchildID := security.Fingerprint(grandchildKey)[:32]
 	grandchildInfo := waitForAgent(t, manager, grandchildID)
-	if grandchildInfo.Via != childID || grandchildInfo.Depth != 2 {
+	if grandchildInfo.Via != childID || grandchildInfo.Depth != 2 || grandchildInfo.RelayBind != second.Bind {
 		t.Fatalf("incorrect grandchild topology: %+v", grandchildInfo)
 	}
 	parentMux.Close()

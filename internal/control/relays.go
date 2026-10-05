@@ -37,7 +37,7 @@ func relayAllowed(agent *agentState) bool {
 
 func (m *Manager) StartRelay(ctx context.Context, agentID, bind string) (RelayInfo, error) {
 	if bind == "" {
-		bind = "127.0.0.1:8443"
+		bind = "0.0.0.0:8443"
 	}
 	if err := pivot.ValidateRelayBind(bind); err != nil {
 		return RelayInfo{}, err

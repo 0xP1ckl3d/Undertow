@@ -109,6 +109,14 @@ func (g *guiServer) deployScript(w http.ResponseWriter, r *http.Request) {
 }
 
 func (g *guiServer) agentHostDeployScript(w http.ResponseWriter, r *http.Request) {
+	g.agentHostScript(w, r, false)
+}
+
+func (g *guiServer) agentHostProbeScript(w http.ResponseWriter, r *http.Request) {
+	g.agentHostScript(w, r, true)
+}
+
+func (g *guiServer) agentHostScript(w http.ResponseWriter, r *http.Request, probe bool) {
 	format := r.URL.Query().Get("format")
 	if format != "powershell" && format != "shell" {
 		http.Error(w, "format must be powershell or shell", http.StatusBadRequest)
@@ -126,7 +134,7 @@ func (g *guiServer) agentHostDeployScript(w http.ResponseWriter, r *http.Request
 		return
 	}
 	var host agentPayloadHostInfo
-	if err := json.Unmarshal(data, &host); err != nil || host.ID == "" || !strings.HasPrefix(host.Retrieval, "https://") {
+	if err := json.Unmarshal(data, &host); err != nil || host.ID == "" || host.PipePath == "" && !strings.HasPrefix(host.Retrieval, "https://") {
 		http.Error(w, "invalid agent-hosted payload record", http.StatusBadGateway)
 		return
 	}
@@ -135,11 +143,24 @@ func (g *guiServer) agentHostDeployScript(w http.ResponseWriter, r *http.Request
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
-	hosted := hostedArtifactInfo{Artifact: a.Artifact, Retrieval: host.Retrieval, RetrievalPath: host.RetrievalPath, TLSSelfSigned: host.TLSSelfSigned, TLSCertSHA256: host.TLSCertSHA256, TLSPublicKeyPin: host.TLSPublicKeyPin}
+	hosted := hostedArtifactInfo{Artifact: a.Artifact, Retrieval: host.Retrieval, RetrievalPath: host.RetrievalPath, PipePath: host.PipePath, TLSSelfSigned: host.TLSSelfSigned, TLSCertSHA256: host.TLSCertSHA256, TLSPublicKeyPin: host.TLSPublicKeyPin}
 	var script bytes.Buffer
-	if err := printDeployScript(&script, hosted, format); err != nil || script.Len() > 64<<10 {
-		http.Error(w, "could not generate agent-hosted deploy script", http.StatusBadGateway)
+	if probe {
+		err = printAgentHostProbeScript(&script, hosted, format)
+	} else {
+		err = printDeployScript(&script, hosted, format)
+	}
+	if err != nil || script.Len() > 64<<10 {
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+		} else {
+			http.Error(w, "relay script exceeds local limit", http.StatusBadGateway)
+		}
 		return
 	}
-	guiJSON(w, http.StatusOK, map[string]string{"script": script.String(), "filename": "deploy-" + a.ID + map[string]string{"powershell": ".ps1", "shell": ".sh"}[format]})
+	name := "deploy-"
+	if probe {
+		name = "verify-"
+	}
+	guiJSON(w, http.StatusOK, map[string]string{"script": script.String(), "filename": name + a.ID + map[string]string{"powershell": ".ps1", "shell": ".sh"}[format]})
 }

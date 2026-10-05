@@ -271,6 +271,7 @@ func (g *guiServer) handler() http.Handler {
 	}))
 	mux.HandleFunc("GET /api/artifacts/{id}/deploy-script", g.deployScript)
 	mux.HandleFunc("GET /api/agent-hosts/{id}/deploy-script", g.agentHostDeployScript)
+	mux.HandleFunc("GET /api/agent-hosts/{id}/probe-script", g.agentHostProbeScript)
 	mux.HandleFunc("GET /api/artifacts/{id}/download", g.downloadArtifact)
 	mux.HandleFunc("GET /api/modules", g.listModules)
 	mux.HandleFunc("POST /api/modules", g.importModule)

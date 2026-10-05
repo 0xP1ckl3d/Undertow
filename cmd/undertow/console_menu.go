@@ -78,6 +78,7 @@ func printConsoleOverview(output io.Writer, vpnClient, selected, serverAttached 
 	m.row("payload agent-hosts [PAYLOAD_ID]", "List active agent download listeners")
 	m.row("payload unhost-agent HOST_ID", "Stop an agent download listener")
 	m.row("payload deploy-script-agent HOST_ID OS", "Print a pinned deploy helper")
+	m.row("payload verify-script-agent HOST_ID OS", "Print an optional listener diagnostic")
 	m.row("payload url PAYLOAD_ID", "Reprint an existing download URL")
 	m.row("payload retrieval-path", "View or change the public download prefix")
 	m.row("payload retrieval-host", "Set the public HTTPS host for downloads")

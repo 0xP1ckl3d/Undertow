@@ -5,6 +5,7 @@ import (
 	"sort"
 	"time"
 
+	"undertow/internal/pivot"
 	"undertow/internal/routing"
 )
 
@@ -25,6 +26,7 @@ type TopologyNode struct {
 	ClientID       string         `json:"client_id,omitempty"`
 	SessionID      uint64         `json:"session_id,omitempty"`
 	Carrier        string         `json:"carrier,omitempty"`
+	RelayBind      string         `json:"relay_bind,omitempty"`
 	Remote         string         `json:"remote,omitempty"`
 	PublicIP       string         `json:"public_ip,omitempty"`
 	LastSeen       time.Time      `json:"last_seen,omitempty"`
@@ -98,8 +100,16 @@ func BuildTopology(agents []AgentInfo, clients []ClientInfo, routes []routing.Ro
 			server.Carriers = append(server.Carriers, state)
 		}
 	}
-	t := Topology{Version: 4, At: time.Now().UTC(), Nodes: []TopologyNode{server}, Edges: []TopologyEdge{}}
+	t := Topology{Version: 5, At: time.Now().UTC(), Nodes: []TopologyNode{server}, Edges: []TopologyEdge{}}
 	_ = routes // Server configured routes remain in the Routes view; they do not imply client acceptance.
+	type relayNode struct {
+		agentID, bind string
+		active        bool
+	}
+	relayNodes := make(map[string]relayNode)
+	for _, relay := range relays {
+		relayNodes["relay:"+relay.AgentID+":"+relay.Bind] = relayNode{relay.AgentID, relay.Bind, true}
+	}
 	networks := make(map[string]bool)
 	addNetwork := func(prefix string) string {
 		id := "network:" + prefix
@@ -115,10 +125,30 @@ func BuildTopology(agents []AgentInfo, clients []ClientInfo, routes []routing.Ro
 		if label == "" {
 			label = a.ID
 		}
-		t.Nodes = append(t.Nodes, TopologyNode{ID: id, Kind: "agent", Label: label, AgentID: a.ID, SessionID: a.SessionID, Carrier: a.Transport, Remote: a.Remote, PublicIP: a.PublicIP, LastSeen: a.LastSeen, RTTNs: int64(a.RTT), Depth: a.Depth, OS: a.OS, Arch: a.Arch, Connected: a.Connected, DisconnectedAt: a.DisconnectedAt, Privilege: a.Privilege, Active: a.Online})
+		t.Nodes = append(t.Nodes, TopologyNode{ID: id, Kind: "agent", Label: label, AgentID: a.ID, SessionID: a.SessionID, Carrier: a.Transport, RelayBind: a.RelayBind, Remote: a.Remote, PublicIP: a.PublicIP, LastSeen: a.LastSeen, RTTNs: int64(a.RTT), Depth: a.Depth, OS: a.OS, Arch: a.Arch, Connected: a.Connected, DisconnectedAt: a.DisconnectedAt, Privilege: a.Privilege, Active: a.Online})
 		parent, kind := "server", "carrier"
 		if a.Via != "" {
 			parent, kind = "agent:"+a.Via, "relay_path"
+			bind := a.RelayBind
+			if bind == "" {
+				matches := 0
+				for _, relay := range relays {
+					if relay.AgentID != a.Via || pivot.IsPipeRelayBind(relay.Bind) != (a.Transport == "relay-smb") {
+						continue
+					}
+					matches++
+					bind = relay.Bind
+				}
+				if matches != 1 {
+					bind = ""
+				} // Never guess among same-carrier listeners.
+			}
+			if bind != "" {
+				parent = "relay:" + a.Via + ":" + bind
+				if _, exists := relayNodes[parent]; !exists {
+					relayNodes[parent] = relayNode{a.Via, bind, false} // Retain the last known path after disconnect.
+				}
+			}
 		}
 		t.Edges = append(t.Edges, TopologyEdge{ID: kind + ":" + parent + ":" + id, Kind: kind, Source: parent, Target: id, Label: a.Transport, Active: a.Online, SessionID: a.SessionID, RTTNs: int64(a.RTT), LastSeen: a.LastSeen})
 	}
@@ -138,10 +168,16 @@ func BuildTopology(agents []AgentInfo, clients []ClientInfo, routes []routing.Ro
 			t.Edges = append(t.Edges, TopologyEdge{ID: "accepted:" + id + ":" + r.Prefix, Kind: "accepted_route", Source: "agent:" + r.AgentID, Target: target, Label: "accepted by " + label, Active: true, ClientID: c.ID, SessionID: c.SessionID})
 		}
 	}
-	for _, r := range relays {
-		id := "relay:" + r.AgentID + ":" + r.Bind
-		t.Nodes = append(t.Nodes, TopologyNode{ID: id, Kind: "relay", Label: r.Bind, AgentID: r.AgentID, Active: true})
-		t.Edges = append(t.Edges, TopologyEdge{ID: "relay-listener:" + id, Kind: "relay_listener", Source: "agent:" + r.AgentID, Target: id, Active: true})
+	for id, relay := range relayNodes {
+		depth := 0
+		for _, a := range agents {
+			if a.ID == relay.agentID {
+				depth = a.Depth
+				break
+			}
+		}
+		t.Nodes = append(t.Nodes, TopologyNode{ID: id, Kind: "relay", Label: relay.bind, AgentID: relay.agentID, Depth: depth, Active: relay.active})
+		t.Edges = append(t.Edges, TopologyEdge{ID: "relay-listener:" + id, Kind: "relay_listener", Source: "agent:" + relay.agentID, Target: id, Active: relay.active})
 	}
 	for _, f := range forwards {
 		client := fmt.Sprintf("client-session:%d", f.ClientID)
