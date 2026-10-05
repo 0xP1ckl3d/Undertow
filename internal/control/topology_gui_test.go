@@ -68,7 +68,14 @@ func TestLegacyAgentPrivilegeRestoredFromExplicitResult(t *testing.T) {
 	if len(live) != 1 || live[0].Privilege != "high" {
 		t.Fatalf("legacy reconnect privilege: %+v", live)
 	}
-	manager.Unregister("legacy-agent", serverMux)
+	manager.ShutdownAgentSessions()
+	saved, err := store.LoadAgentSnapshots()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(saved) != 1 || saved[0].Online || saved[0].Privilege != "high" {
+		t.Fatalf("shutdown snapshot: %+v", saved)
+	}
 }
 
 func TestConfiguredRelayRestoresOnParentCheckin(t *testing.T) {

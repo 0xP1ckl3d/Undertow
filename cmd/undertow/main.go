@@ -485,6 +485,8 @@ func serve(args []string) error {
 		return err
 	}
 	<-ctx.Done()
+	transportManager.Close()
+	manager.ShutdownAgentSessions()
 	return nil
 }
 

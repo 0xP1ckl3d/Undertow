@@ -179,6 +179,8 @@ type agentState struct {
 }
 type Manager struct {
 	mu                 sync.RWMutex
+	agentSessions      sync.WaitGroup
+	shuttingDown       bool
 	operations         *OperationsStore
 	offlineAgents      map[string]AgentInfo
 	nicknames          map[string]string
@@ -569,6 +571,11 @@ func (m *Manager) ClientList() []ClientInfo {
 func (m *Manager) Register(peer transport.Peer, streamMux *mux.Mux) {
 	id := peer.Snapshot().AgentID
 	m.mu.Lock()
+	if m.shuttingDown {
+		m.mu.Unlock()
+		_ = streamMux.Close()
+		return
+	}
 	if parent := peer.Snapshot().Via; parent != "" {
 		if parent == id {
 			m.mu.Unlock()
@@ -641,6 +648,7 @@ func (m *Manager) Register(peer transport.Peer, streamMux *mux.Mux) {
 		privilege = snapshot.Privilege
 	}
 	m.agents[id] = &agentState{peer: peer, mux: streamMux, privilege: privilege, inventory: AgentInfo{Via: peer.Snapshot().Via, RelayBind: peer.Snapshot().RelayBind, Depth: depth}}
+	m.agentSessions.Add(1)
 	delete(m.offlineAgents, id)
 	m.recordLifecycleLocked(LifecycleEvent{AgentID: id, Kind: "connected", Transport: peer.Snapshot().Carrier, SessionID: peer.Snapshot().ID})
 	m.mu.Unlock()
@@ -650,7 +658,27 @@ func (m *Manager) Register(peer transport.Peer, streamMux *mux.Mux) {
 	}
 	go m.receiveInventory(id, streamMux)
 	go m.serveAgentForwards(id, streamMux)
-	go func() { <-streamMux.Done(); m.Unregister(id, streamMux) }()
+	go func() {
+		defer m.agentSessions.Done()
+		<-streamMux.Done()
+		m.Unregister(id, streamMux)
+	}()
+}
+
+// ShutdownAgentSessions closes active agent streams and waits for their final
+// disconnected snapshots to be written before the operations store is closed.
+func (m *Manager) ShutdownAgentSessions() {
+	m.mu.Lock()
+	m.shuttingDown = true
+	sessions := make([]*mux.Mux, 0, len(m.agents))
+	for _, state := range m.agents {
+		sessions = append(sessions, state.mux)
+	}
+	m.mu.Unlock()
+	for _, session := range sessions {
+		_ = session.Close()
+	}
+	m.agentSessions.Wait()
 }
 
 func (m *Manager) receiveInventory(id string, streamMux *mux.Mux) {
