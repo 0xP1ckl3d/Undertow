@@ -39,20 +39,28 @@ func TestGeneratedPowerShellDeploymentAgainstSelfSignedHTTPS(t *testing.T) {
 			continue
 		}
 		t.Run(shell, func(t *testing.T) {
-			for _, validHash := range []bool{true, false} {
-				name := "default destination in working directory"
-				if !validHash {
-					name = "wrong hash"
-				}
-				t.Run(name, func(t *testing.T) {
+			for _, tc := range []struct {
+				name      string
+				validHash bool
+				pin       bool
+			}{
+				{name: "default destination in working directory", validHash: true},
+				{name: "pinned certificate", validHash: true, pin: true},
+				{name: "wrong hash"},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
 					sha := hex.EncodeToString(hash[:])
-					if !validHash {
+					if !tc.validHash {
 						sha = strings.Repeat("0", 64)
 					}
 					hosted := hostedArtifactInfo{
 						Artifact:      agentprofile.Artifact{Filename: "helper.cmd", SHA256: sha},
 						Retrieval:     server.URL + "/opaque-download",
 						TLSSelfSigned: true,
+					}
+					if tc.pin {
+						certHash := sha256.Sum256(server.Certificate().Raw)
+						hosted.TLSCertSHA256 = hex.EncodeToString(certHash[:])
 					}
 					var script bytes.Buffer
 					if err := printDeployScript(&script, hosted, "powershell"); err != nil {
@@ -63,13 +71,25 @@ func TestGeneratedPowerShellDeploymentAgainstSelfSignedHTTPS(t *testing.T) {
 					dir := t.TempDir()
 					path := filepath.Join(t.TempDir(), "deploy.ps1")
 					dest := filepath.Join(dir, "helper.cmd")
-					if err := os.WriteFile(path, script.Bytes(), 0600); err != nil {
+					// Reproduce an operator session that already loaded an older
+					// helper type with a different CreateHandler signature.
+					const legacyFactory = "Add-Type -TypeDefinition 'public static class ScopedArtifactTls { public static object CreateHandler() { return null; } }'\n"
+					generated := script.Bytes()
+					paramEnd := bytes.IndexByte(generated, '\n') + 1
+					if paramEnd == 0 {
+						t.Fatal("generated script has no param line")
+					}
+					withLegacyType := make([]byte, 0, len(generated)+len(legacyFactory))
+					withLegacyType = append(withLegacyType, generated[:paramEnd]...)
+					withLegacyType = append(withLegacyType, legacyFactory...)
+					withLegacyType = append(withLegacyType, generated[paramEnd:]...)
+					if err := os.WriteFile(path, withLegacyType, 0600); err != nil {
 						t.Fatal(err)
 					}
 					ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 					defer cancel()
 					args := []string{"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", path}
-					if !validHash {
+					if !tc.validHash {
 						args = append(args, "-Destination", dest)
 					}
 					cmd := exec.CommandContext(ctx, shell, args...)
@@ -78,7 +98,7 @@ func TestGeneratedPowerShellDeploymentAgainstSelfSignedHTTPS(t *testing.T) {
 					if ctx.Err() != nil {
 						t.Fatalf("helper timed out: %s", out)
 					}
-					if validHash {
+					if tc.validHash {
 						if err != nil || !bytes.Contains(out, []byte("DEPLOY_HELPER_OK")) {
 							t.Fatalf("self-signed download failed: %v\n%s", err, out)
 						}

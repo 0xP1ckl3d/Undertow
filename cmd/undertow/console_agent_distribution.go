@@ -183,13 +183,13 @@ func printDeployScript(out io.Writer, hosted hostedArtifactInfo, shell string) e
 		if hosted.TLSSelfSigned {
 			fmt.Fprintf(out, "  $certPin = '%s'\n", hosted.TLSCertSHA256)
 			fmt.Fprint(out, `  Add-Type -AssemblyName System.Net.Http
-  if (-not ('ScopedArtifactTls' -as [type])) {
-    $source = @'
+  $factoryName = 'UndertowArtifactTls_' + [Guid]::NewGuid().ToString('N')
+  $source = @'
 using System;
 using System.Net.Http;
 using System.Net.Security;
 using System.Security.Cryptography.X509Certificates;
-public static class ScopedArtifactTls {
+public static class __FACTORY_NAME__ {
     public static HttpClientHandler CreateHandler(string pin) {
         var handler = new HttpClientHandler();
         handler.ServerCertificateCustomValidationCallback =
@@ -205,13 +205,13 @@ public static class ScopedArtifactTls {
     }
 }
 '@
-    if ($PSVersionTable.PSVersion.Major -lt 6) {
-      Add-Type -ReferencedAssemblies System.Net.Http -TypeDefinition $source
-    } else {
-      Add-Type -TypeDefinition $source
-    }
+  $source = $source.Replace('__FACTORY_NAME__', $factoryName)
+  if ($PSVersionTable.PSVersion.Major -lt 6) {
+    $factory = Add-Type -ReferencedAssemblies System.Net.Http -TypeDefinition $source -PassThru | Where-Object { $_.Name -eq $factoryName }
+  } else {
+    $factory = Add-Type -TypeDefinition $source -PassThru | Where-Object { $_.Name -eq $factoryName }
   }
-  $handler = [ScopedArtifactTls]::CreateHandler($certPin)
+  $handler = $factory::CreateHandler($certPin)
   $client = [System.Net.Http.HttpClient]::new($handler)
   try {
     $response = $client.GetAsync($url).GetAwaiter().GetResult()
