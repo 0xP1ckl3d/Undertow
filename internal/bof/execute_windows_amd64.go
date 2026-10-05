@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"path/filepath"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -83,13 +82,17 @@ func Execute(ctx context.Context, object, args []byte, output func(bool, []byte)
 	// all synchronous callbacks must remain on one Windows thread.
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
-	directory, err := os.MkdirTemp("", "module-")
+	file, err := os.CreateTemp("", "undertow-bof-bridge-*.dll")
 	if err != nil {
 		return -1, err
 	}
-	defer os.RemoveAll(directory)
-	bridgePath := filepath.Join(directory, "module.dll")
-	if err := os.WriteFile(bridgePath, bridgeDLL, 0600); err != nil {
+	bridgePath := file.Name()
+	defer os.Remove(bridgePath)
+	if _, err := file.Write(bridgeDLL); err != nil {
+		file.Close()
+		return -1, err
+	}
+	if err := file.Close(); err != nil {
 		return -1, err
 	}
 	bridge, err := windows.LoadLibraryEx(bridgePath, 0, windows.LOAD_LIBRARY_SEARCH_SYSTEM32)

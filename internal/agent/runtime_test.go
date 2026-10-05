@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"testing"
 	"time"
+	"undertow/internal/deployment"
 
 	"undertow/internal/security"
 )
@@ -20,6 +21,29 @@ func TestPackagedIdentityIsUniquePerProcess(t *testing.T) {
 	}
 	if len(first) != ed25519.PrivateKeySize || len(second) != ed25519.PrivateKeySize || security.Fingerprint(first) == security.Fingerprint(second) {
 		t.Fatal("two packaged processes received the same agent identity")
+	}
+}
+
+func TestConfiguredReconnectScheduleAndJitter(t *testing.T) {
+	p := deployment.Default()
+	p.Reconnect.ManualDelay = deployment.Duration(7 * time.Second)
+	p.Reconnect.ProgressiveDelays = []deployment.Duration{deployment.Duration(3 * time.Second), deployment.Duration(9 * time.Second)}
+	p.Reconnect.HealthyAfter = deployment.Duration(time.Minute)
+	p.Reconnect.JitterPercent = 20
+	if got := reconnectDelayWithProfile(false, 4, p); got != 7*time.Second {
+		t.Fatalf("manual callback: %s", got)
+	}
+	if got := reconnectDelayWithProfile(true, 4, p); got != 9*time.Second {
+		t.Fatalf("packaged callback: %s", got)
+	}
+	if got := failureIndexAfterSessionWithProfile(2, 40*time.Second, true, p); got != 2 {
+		t.Fatalf("early reset: %d", got)
+	}
+	for i := 0; i < 100; i++ {
+		got := deployment.Jitter(10*time.Second, p.Reconnect.JitterPercent)
+		if got < 8*time.Second || got > 12*time.Second {
+			t.Fatalf("jitter outside configured range: %s", got)
+		}
 	}
 }
 

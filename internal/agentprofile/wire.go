@@ -7,22 +7,24 @@ import (
 	"io"
 
 	"undertow/internal/agent"
+	"undertow/internal/deployment"
 )
 
 // The overlay uses short field names. Display names and descriptive profile
 // metadata stay in the server store rather than in the deployed executable.
 type wireConfig struct {
-	Server                string   `json:"s"`
-	Transport             string   `json:"t"`
-	Domain                string   `json:"d,omitempty"`
-	Fingerprint           string   `json:"f"`
-	Credential            []byte   `json:"e"`
-	PayloadProfile        string   `json:"q,omitempty"`
-	WebSocketPath         string   `json:"w,omitempty"`
-	TLSServerName         string   `json:"n,omitempty"`
-	TLSInsecureSkipVerify bool     `json:"x,omitempty"`
-	AdvertisedRoutes      []string `json:"r,omitempty"`
-	DeniedCapabilities    string   `json:"b,omitempty"`
+	Server                string             `json:"s"`
+	Transport             string             `json:"t"`
+	Domain                string             `json:"d,omitempty"`
+	Fingerprint           string             `json:"f"`
+	Credential            []byte             `json:"e"`
+	PayloadProfile        string             `json:"q,omitempty"`
+	WebSocketPath         string             `json:"w,omitempty"`
+	TLSServerName         string             `json:"n,omitempty"`
+	TLSInsecureSkipVerify bool               `json:"x,omitempty"`
+	AdvertisedRoutes      []string           `json:"r,omitempty"`
+	DeniedCapabilities    string             `json:"b,omitempty"`
+	Deployment            deployment.Profile `json:"p,omitempty"`
 }
 
 type wireEmbedded struct {
@@ -40,6 +42,7 @@ func encodeEmbedded(e Embedded) ([]byte, error) {
 			PayloadProfile: c.PayloadProfile, WebSocketPath: c.WebSocketPath,
 			TLSServerName: c.TLSServerName, TLSInsecureSkipVerify: c.TLSInsecureSkipVerify,
 			AdvertisedRoutes: c.AdvertisedRoutes, DeniedCapabilities: c.DeniedCapabilities,
+			Deployment: c.Deployment,
 		}})
 }
 
@@ -61,6 +64,6 @@ func decodeEmbedded(payload []byte) (Embedded, error) {
 			Credential: c.Credential, PayloadProfile: c.PayloadProfile,
 			WebSocketPath: c.WebSocketPath, TLSServerName: c.TLSServerName,
 			TLSInsecureSkipVerify: c.TLSInsecureSkipVerify,
-			AdvertisedRoutes:      c.AdvertisedRoutes, DeniedCapabilities: c.DeniedCapabilities,
+			AdvertisedRoutes:      c.AdvertisedRoutes, DeniedCapabilities: c.DeniedCapabilities, Deployment: c.Deployment,
 		}}, nil
 }

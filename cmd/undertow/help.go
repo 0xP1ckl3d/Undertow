@@ -92,6 +92,7 @@ Connection and identity:
   --quic-listen IP:PORT     QUIC UDP address (default 0.0.0.0:443).
   --domain NAME             Synthetic DNS name (DNS only; default t.undertow.invalid).
   --websocket-path PATH     WebSocket URL path (default /undertow).
+  --deployment-profile PATH JSON carrier and callback settings; see docs/deployment-profiles.md.
   --tls-cert PATH           TLS certificate PEM (WebSocket and QUIC).
   --tls-key PATH            TLS private key PEM (WebSocket and QUIC).
   --tls-self-signed         Explicitly request temporary TLS (automatic without files).
@@ -158,6 +159,7 @@ Usage: undertow agent --server HOST:PORT|PIPE_PATH [--fingerprint HEX | --trust-
   --server ADDRESS         Host:port for network carriers, \\HOST\pipe\NAME for relay-smb.
   --transport MODE         dns (default), websocket, quic, relay, or relay-smb.
   --websocket-path PATH    Match server path for WebSocket (default /undertow).
+  --deployment-profile PATH JSON carrier and callback settings; see docs/deployment-profiles.md.
   --tls-server-name NAME   Verify a DNS name in the TLS certificate.
   --tls-insecure-skip-verify  Allow a private/self-signed TLS certificate;
                            pin the Undertow fingerprint separately.
@@ -225,6 +227,7 @@ Usage: undertow client (--vpn | --internal | --vpn --internal) --server HOST:POR
                            Windows named-pipe path.
   --transport MODE         dns (default), websocket, quic, relay, or relay-smb.
   --websocket-path PATH    Match server path for WebSocket (default /undertow).
+  --deployment-profile PATH JSON carrier and callback settings; see docs/deployment-profiles.md.
   --tls-server-name NAME   Verify a DNS name in the TLS certificate.
   --tls-insecure-skip-verify  Allow a private/self-signed TLS certificate;
                            pin the Undertow fingerprint separately.

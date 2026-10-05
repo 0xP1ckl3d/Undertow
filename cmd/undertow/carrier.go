@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 
+	"undertow/internal/deployment"
 	"undertow/internal/transport"
 	"undertow/internal/transport/dns"
 	"undertow/internal/transport/quic"
@@ -17,6 +18,8 @@ import (
 type carrierFlags struct {
 	kind, path, cert, key, serverName *string
 	skipTLSVerify, selfSigned         *bool
+	profilePath                       *string
+	profile                           deployment.Profile
 }
 
 func addCarrierFlags(f *flag.FlagSet, defaultKind ...string) carrierFlags {
@@ -26,6 +29,7 @@ func addCarrierFlags(f *flag.FlagSet, defaultKind ...string) carrierFlags {
 	}
 	return carrierFlags{
 		kind:          f.String("transport", kind, "carrier: dns, websocket, or quic (server accepts comma-separated subsets)"),
+		profilePath:   f.String("deployment-profile", "", "JSON deployment profile for carrier and runtime defaults"),
 		path:          f.String("websocket-path", "/undertow", "WebSocket HTTP path"),
 		cert:          f.String("tls-cert", "", "server TLS certificate PEM for WebSocket or QUIC"),
 		key:           f.String("tls-key", "", "server TLS private key PEM for WebSocket or QUIC"),
@@ -33,6 +37,24 @@ func addCarrierFlags(f *flag.FlagSet, defaultKind ...string) carrierFlags {
 		serverName:    f.String("tls-server-name", "", "TLS certificate server name for WebSocket or QUIC"),
 		skipTLSVerify: f.Bool("tls-insecure-skip-verify", false, "skip TLS certificate verification (Undertow fingerprint is still required)"),
 	}
+}
+
+func (f *carrierFlags) load(flags *flag.FlagSet) error {
+	profile, err := deployment.Load(*f.profilePath)
+	if err != nil {
+		return err
+	}
+	f.profile = profile
+	pathSet := false
+	flags.Visit(func(item *flag.Flag) {
+		if item.Name == "websocket-path" {
+			pathSet = true
+		}
+	})
+	if !pathSet {
+		*f.path = profile.WebSocket.Path
+	}
+	return nil
 }
 
 func (f carrierFlags) validate() error {
@@ -52,11 +74,11 @@ func (f carrierFlags) validate() error {
 }
 
 func (f carrierFlags) webOptions(server string) websocket.DialOptions {
-	return websocket.DialOptions{Address: server, Path: *f.path, TLSServerName: *f.serverName, TLSInsecureSkipVerify: *f.skipTLSVerify}
+	return websocket.DialOptions{Address: server, Path: *f.path, TLSServerName: *f.serverName, TLSInsecureSkipVerify: *f.skipTLSVerify, Profile: f.profile}
 }
 
 func (f carrierFlags) quicOptions(server string) quic.DialOptions {
-	return quic.DialOptions{Address: server, TLSServerName: *f.serverName, TLSInsecureSkipVerify: *f.skipTLSVerify}
+	return quic.DialOptions{Address: server, TLSServerName: *f.serverName, TLSInsecureSkipVerify: *f.skipTLSVerify, Profile: f.profile}
 }
 
 func (f carrierFlags) listen(addr, domain string, identity ed25519.PrivateKey, token []byte) (transport.Listener, error) {
@@ -71,10 +93,10 @@ func (f carrierFlags) listen(addr, domain string, identity ed25519.PrivateKey, t
 		}
 	}
 	if *f.kind == "websocket" {
-		return websocket.Listen(addr, *f.path, *f.cert, *f.key, *f.selfSigned, identity, token)
+		return websocket.Listen(addr, *f.path, *f.cert, *f.key, *f.selfSigned, identity, token, f.profile)
 	}
 	if *f.kind == "quic" {
-		return quic.Listen(addr, *f.cert, *f.key, *f.selfSigned, identity, token)
+		return quic.Listen(addr, *f.cert, *f.key, *f.selfSigned, identity, token, f.profile)
 	}
 	return dns.Listen(addr, domain, identity, token)
 }

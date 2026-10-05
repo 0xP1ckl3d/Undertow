@@ -14,10 +14,12 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"undertow/internal/deployment"
 	"undertow/internal/security"
 	"undertow/internal/transport"
 	"undertow/internal/transport/stream"
@@ -51,8 +53,15 @@ func (s *Server) SetEnrollmentVerifier(v security.EnrollmentVerifier) { s.verifi
 
 var _ transport.Listener = (*Server)(nil)
 
-func Listen(addr, path, certFile, keyFile string, selfSigned bool, identity ed25519.PrivateKey, token []byte) (*Server, error) {
-	if path == "" || path[0] != '/' || strings.ContainsAny(path, "?#") {
+func Listen(addr, path, certFile, keyFile string, selfSigned bool, identity ed25519.PrivateKey, token []byte, profiles ...deployment.Profile) (*Server, error) {
+	profile := deployment.Default()
+	if len(profiles) != 0 {
+		profile = profiles[0].Resolved()
+	}
+	if err := profile.Validate(); err != nil {
+		return nil, err
+	}
+	if path == "" || path[0] != '/' || strings.ContainsAny(path, "?#\r\n \t") {
 		return nil, errors.New("WebSocket path must start with / and contain no query or fragment")
 	}
 	certificate, err := tlscert.Load(certFile, keyFile, selfSigned)
@@ -204,6 +213,7 @@ type DialOptions struct {
 	Path                  string
 	TLSServerName         string
 	TLSInsecureSkipVerify bool
+	Profile               deployment.Profile
 }
 
 func Dial(ctx context.Context, options DialOptions, fingerprint string, token []byte, key ed25519.PrivateKey) (*stream.Connection, error) {
@@ -231,7 +241,11 @@ func DiscoverFingerprint(ctx context.Context, options DialOptions) (string, erro
 }
 
 func dialMessage(ctx context.Context, options DialOptions) (*messageConn, error) {
-	if options.Path == "" || options.Path[0] != '/' || strings.ContainsAny(options.Path, "?#") {
+	profile := options.Profile.Resolved()
+	if err := profile.Validate(); err != nil {
+		return nil, err
+	}
+	if options.Path == "" || options.Path[0] != '/' || strings.ContainsAny(options.Path, "?#\r\n \t") {
 		return nil, errors.New("WebSocket path must start with / and contain no query or fragment")
 	}
 	host, _, err := net.SplitHostPort(options.Address)
@@ -270,8 +284,23 @@ func dialMessage(ctx context.Context, options DialOptions) (*messageConn, error)
 	}
 	key := base64.StdEncoding.EncodeToString(nonce[:])
 	writer := bufio.NewWriter(tlsConn)
-	request := fmt.Sprintf("GET %s HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n\r\n", options.Path, options.Address, key)
+	request := fmt.Sprintf("GET %s HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n", options.Path, options.Address, key)
 	if _, err := writer.WriteString(request); err != nil {
+		_ = tlsConn.Close()
+		return nil, err
+	}
+	headerNames := make([]string, 0, len(profile.WebSocket.Headers))
+	for name := range profile.WebSocket.Headers {
+		headerNames = append(headerNames, name)
+	}
+	sort.Strings(headerNames)
+	for _, name := range headerNames {
+		if _, err := fmt.Fprintf(writer, "%s: %s\r\n", name, profile.WebSocket.Headers[name]); err != nil {
+			_ = tlsConn.Close()
+			return nil, err
+		}
+	}
+	if _, err := writer.WriteString("\r\n"); err != nil {
 		_ = tlsConn.Close()
 		return nil, err
 	}

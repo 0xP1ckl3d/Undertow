@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"undertow/internal/agent"
+	"undertow/internal/deployment"
 	"undertow/internal/security"
 )
 
@@ -82,6 +83,25 @@ func TestStampedProfileValidation(t *testing.T) {
 	}
 	if _, err := Read(path); err == nil || !strings.Contains(err.Error(), "length") {
 		t.Fatalf("expected length error, got %v", err)
+	}
+}
+
+func TestEmbeddedDeploymentRoundTrip(t *testing.T) {
+	e := testEmbedded(t)
+	e.Config.Deployment = deployment.Default()
+	e.Config.Deployment.QUIC.ALPN = "field/2"
+	e.Config.Deployment.WebSocket.Headers = map[string]string{"User-Agent": "FieldClient"}
+	e.Config.Deployment.Reconnect.JitterPercent = 15
+	data, err := encodeEmbedded(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := decodeEmbedded(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Config.Deployment.QUIC.ALPN != "field/2" || decoded.Config.Deployment.WebSocket.Headers["User-Agent"] != "FieldClient" || decoded.Config.Deployment.Reconnect.JitterPercent != 15 {
+		t.Fatalf("deployment settings lost from agent binary: %+v", decoded.Config.Deployment)
 	}
 }
 

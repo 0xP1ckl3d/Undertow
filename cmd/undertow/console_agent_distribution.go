@@ -14,6 +14,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"undertow/internal/deployment"
 )
 
 func runConsoleAgentDistribution(ctx context.Context, out io.Writer, call consoleCaller, args []string) error {
@@ -135,6 +136,12 @@ func parseProfileOptions(args []string) (profileRequest, error) {
 			req.PayloadProfile = &v
 		case "websocket-path":
 			req.WebSocketPath = &v
+		case "deployment-profile":
+			profile, err := deployment.Load(value)
+			if err != nil {
+				return req, err
+			}
+			req.Deployment = &profile
 		case "tls-server-name":
 			req.TLSServerName = &v
 		case "tls-insecure-skip-verify":

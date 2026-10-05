@@ -17,7 +17,7 @@ import (
 func wasmPlatformInventory(ctx context.Context, op string) (any, error) {
 	switch op {
 	case "processes":
-		return inventoryCommand(ctx, "tasklist.exe", "/fo", "csv")
+		return windowsProcessInventory(ctx)
 	case "privileges":
 		return platformHostInfo(ctx, "privileges")
 	case "routes":

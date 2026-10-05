@@ -18,6 +18,7 @@ import (
 	agentruntime "undertow/internal/agent"
 	"undertow/internal/agentprofile"
 	"undertow/internal/control"
+	"undertow/internal/deployment"
 	"undertow/internal/security"
 )
 
@@ -26,6 +27,7 @@ type agentDistribution struct {
 	manager       *control.Manager
 	authMode      string
 	credential    []byte
+	deployment    deployment.Profile
 	pathMu        sync.RWMutex
 	retrievalPath string
 	hostsMu       sync.RWMutex
@@ -113,20 +115,21 @@ func publicProfile(p agentprofile.Profile) publicAgentProfile {
 }
 
 type profileRequest struct {
-	Name                  string    `json:"name"`
-	Server                *string   `json:"server,omitempty"`
-	Transport             *string   `json:"transport,omitempty"`
-	Domain                *string   `json:"domain,omitempty"`
-	Fingerprint           *string   `json:"fingerprint,omitempty"`
-	AuthMode              *string   `json:"auth_mode,omitempty"`
-	Token                 *string   `json:"token,omitempty"`
-	Password              *string   `json:"password,omitempty"`
-	PayloadProfile        *string   `json:"payload_profile,omitempty"`
-	WebSocketPath         *string   `json:"websocket_path,omitempty"`
-	TLSServerName         *string   `json:"tls_server_name,omitempty"`
-	TLSInsecureSkipVerify *bool     `json:"tls_insecure_skip_verify,omitempty"`
-	AdvertisedRoutes      *[]string `json:"advertised_routes,omitempty"`
-	DeniedCapabilities    *string   `json:"denied_capabilities,omitempty"`
+	Name                  string              `json:"name"`
+	Server                *string             `json:"server,omitempty"`
+	Transport             *string             `json:"transport,omitempty"`
+	Domain                *string             `json:"domain,omitempty"`
+	Fingerprint           *string             `json:"fingerprint,omitempty"`
+	AuthMode              *string             `json:"auth_mode,omitempty"`
+	Token                 *string             `json:"token,omitempty"`
+	Password              *string             `json:"password,omitempty"`
+	PayloadProfile        *string             `json:"payload_profile,omitempty"`
+	WebSocketPath         *string             `json:"websocket_path,omitempty"`
+	TLSServerName         *string             `json:"tls_server_name,omitempty"`
+	TLSInsecureSkipVerify *bool               `json:"tls_insecure_skip_verify,omitempty"`
+	AdvertisedRoutes      *[]string           `json:"advertised_routes,omitempty"`
+	DeniedCapabilities    *string             `json:"denied_capabilities,omitempty"`
+	Deployment            *deployment.Profile `json:"deployment,omitempty"`
 }
 
 type artifactInfo struct {
@@ -162,7 +165,7 @@ func (d *agentDistribution) defaults() agentruntime.Config {
 	server := d.manager.ServerInfo()
 	c := agentruntime.Config{Version: agentruntime.ConfigVersion, Transport: server.Transport, Domain: server.Domain,
 		Fingerprint: server.Fingerprint, AuthMode: d.authMode, Credential: append([]byte(nil), d.credential...),
-		PayloadProfile: "auto", WebSocketPath: server.WebSocketPath}
+		PayloadProfile: "auto", WebSocketPath: server.WebSocketPath, Deployment: d.deployment.Resolved()}
 	listener := control.ListenerInfo{Transport: server.Transport, Listen: server.Listen, TLSMode: server.TLSMode}
 	if len(server.Listeners) > 0 {
 		listener = server.Listeners[0]
@@ -249,6 +252,12 @@ func (d *agentDistribution) apply(c agentruntime.Config, req profileRequest) (ag
 	}
 	if req.DeniedCapabilities != nil {
 		c.DeniedCapabilities = *req.DeniedCapabilities
+	}
+	if req.Deployment != nil {
+		c.Deployment = *req.Deployment
+		if req.WebSocketPath == nil {
+			c.WebSocketPath = c.Deployment.WebSocket.Path
+		}
 	}
 	if req.Token != nil || req.Password != nil || req.AuthMode != nil {
 		if req.Token == nil && req.Password == nil && c.AuthMode == d.authMode {

@@ -12,17 +12,18 @@ import (
 	"time"
 
 	quicgo "github.com/quic-go/quic-go"
+	"undertow/internal/deployment"
 	"undertow/internal/security"
 	"undertow/internal/transport"
 	"undertow/internal/transport/stream"
 	"undertow/internal/transport/tlscert"
 )
 
-const alpn = "undertow/1"
 const maxMessage = 2048
 
-func transportConfig() *quicgo.Config {
-	return &quicgo.Config{MaxIdleTimeout: 2 * time.Minute, KeepAlivePeriod: 15 * time.Second}
+func transportConfig(profile deployment.Profile) *quicgo.Config {
+	profile = profile.Resolved()
+	return &quicgo.Config{MaxIdleTimeout: profile.QUIC.IdleTimeout.Value(), KeepAlivePeriod: profile.QUIC.KeepAlive.Value()}
 }
 
 type messageConn struct {
@@ -90,12 +91,19 @@ func (s *Server) SetEnrollmentVerifier(v security.EnrollmentVerifier) { s.verifi
 
 var _ transport.Listener = (*Server)(nil)
 
-func Listen(addr, certFile, keyFile string, selfSigned bool, identity ed25519.PrivateKey, token []byte) (*Server, error) {
+func Listen(addr, certFile, keyFile string, selfSigned bool, identity ed25519.PrivateKey, token []byte, profiles ...deployment.Profile) (*Server, error) {
+	profile := deployment.Default()
+	if len(profiles) != 0 {
+		profile = profiles[0].Resolved()
+	}
+	if err := profile.Validate(); err != nil {
+		return nil, err
+	}
 	certificate, err := tlscert.Load(certFile, keyFile, selfSigned)
 	if err != nil {
 		return nil, err
 	}
-	listener, err := quicgo.ListenAddr(addr, &tls.Config{Certificates: []tls.Certificate{certificate}, NextProtos: []string{alpn}, MinVersion: tls.VersionTLS13}, transportConfig())
+	listener, err := quicgo.ListenAddr(addr, &tls.Config{Certificates: []tls.Certificate{certificate}, NextProtos: []string{profile.QUIC.ALPN}, MinVersion: tls.VersionTLS13}, transportConfig(profile))
 	if err != nil {
 		return nil, err
 	}
@@ -190,6 +198,7 @@ type DialOptions struct {
 	Address               string
 	TLSServerName         string
 	TLSInsecureSkipVerify bool
+	Profile               deployment.Profile
 }
 
 func Dial(ctx context.Context, options DialOptions, fingerprint string, token []byte, key ed25519.PrivateKey) (*stream.Connection, error) {
@@ -215,6 +224,10 @@ func DiscoverFingerprint(ctx context.Context, options DialOptions) (string, erro
 	return stream.DiscoverFingerprint(framed)
 }
 func dialMessage(ctx context.Context, options DialOptions) (*messageConn, error) {
+	profile := options.Profile.Resolved()
+	if err := profile.Validate(); err != nil {
+		return nil, err
+	}
 	host, _, err := net.SplitHostPort(options.Address)
 	if err != nil {
 		return nil, err
@@ -223,7 +236,7 @@ func dialMessage(ctx context.Context, options DialOptions) (*messageConn, error)
 	if serverName == "" {
 		serverName = host
 	}
-	connection, err := quicgo.DialAddr(ctx, options.Address, &tls.Config{ServerName: serverName, InsecureSkipVerify: options.TLSInsecureSkipVerify, NextProtos: []string{alpn}, MinVersion: tls.VersionTLS13}, transportConfig())
+	connection, err := quicgo.DialAddr(ctx, options.Address, &tls.Config{ServerName: serverName, InsecureSkipVerify: options.TLSInsecureSkipVerify, NextProtos: []string{profile.QUIC.ALPN}, MinVersion: tls.VersionTLS13}, transportConfig(profile))
 	if err != nil {
 		return nil, err
 	}

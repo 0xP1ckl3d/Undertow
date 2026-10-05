@@ -10,11 +10,13 @@ import (
 	"encoding/pem"
 	"math/big"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"undertow/internal/deployment"
 	"undertow/internal/mux"
 	"undertow/internal/security"
 )
@@ -144,5 +146,44 @@ func TestSelfSignedDirectIP(t *testing.T) {
 	defer conn.Close()
 	if _, err := server.Accept(ctx); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestConfiguredPathAndRequestHeaders(t *testing.T) {
+	_, identity, _ := ed25519.GenerateKey(rand.Reader)
+	_, clientKey, _ := ed25519.GenerateKey(rand.Reader)
+	token := make([]byte, 32)
+	_, _ = rand.Read(token)
+	profile := deployment.Default()
+	profile.WebSocket.Path = "/site/session"
+	profile.WebSocket.Headers = map[string]string{"User-Agent": "SiteClient/1", "X-Deployment": "blue"}
+	server, err := Listen("127.0.0.1:0", profile.WebSocket.Path, "", "", true, identity, token, profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requests := make(chan http.Header, 1)
+	server.http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests <- r.Header.Clone()
+		server.handle(w, r)
+	})
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	go func() { _ = server.Serve(ctx) }()
+	conn, err := Dial(ctx, DialOptions{Address: server.Addr().String(), Path: profile.WebSocket.Path, TLSInsecureSkipVerify: true, Profile: profile}, security.Fingerprint(identity), token, clientKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := server.Accept(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case headers := <-requests:
+		if headers.Get("User-Agent") != "SiteClient/1" || headers.Get("X-Deployment") != "blue" {
+			t.Fatalf("custom request headers missing: %v", headers)
+		}
+	case <-ctx.Done():
+		t.Fatal("upgrade request was not captured")
 	}
 }

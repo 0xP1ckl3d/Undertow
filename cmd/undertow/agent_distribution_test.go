@@ -20,6 +20,7 @@ import (
 	"net/netip"
 	"undertow/internal/agentprofile"
 	"undertow/internal/control"
+	"undertow/internal/deployment"
 	"undertow/internal/routing"
 	"undertow/internal/transport/websocket"
 )
@@ -45,7 +46,9 @@ func TestAgentDistributionAPIAndRetrieval(t *testing.T) {
 	}
 	manager := control.NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
 	manager.SetServerInfo(control.ServerInfo{Transport: "websocket", Listen: "127.0.0.1:443", Fingerprint: strings.Repeat("a", 64), WebSocketPath: "/undertow", Listeners: []control.ListenerInfo{{Transport: "websocket", Listen: "127.0.0.1:443"}}})
-	d := &agentDistribution{store: store, manager: manager, authMode: "none", credential: make([]byte, 32)}
+	profile := deployment.Default()
+	profile.QUIC.ALPN = "site/2"
+	d := &agentDistribution{store: store, manager: manager, authMode: "none", credential: make([]byte, 32), deployment: profile}
 	call := func(method, path string, body any) *httptest.ResponseRecorder {
 		t.Helper()
 		var data []byte
@@ -94,6 +97,10 @@ func TestAgentDistributionAPIAndRetrieval(t *testing.T) {
 	artifactBytes, err := os.ReadFile(buildInfo.ServerPath)
 	if err != nil {
 		t.Fatal(err)
+	}
+	embedded, err := agentprofile.Read(buildInfo.ServerPath)
+	if err != nil || embedded.Config.Deployment.QUIC.ALPN != "site/2" {
+		t.Fatalf("server deployment profile not embedded: %v %+v", err, embedded.Config.Deployment)
 	}
 	chunkResponse := call(http.MethodGet, "/v1/agent-artifacts/"+a.ID+"/download/chunk?offset=0", nil)
 	if chunkResponse.Code != http.StatusOK {

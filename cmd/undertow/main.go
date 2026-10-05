@@ -23,6 +23,7 @@ import (
 	"undertow/internal/agentprofile"
 	"undertow/internal/bof"
 	"undertow/internal/control"
+	"undertow/internal/deployment"
 	"undertow/internal/mux"
 	"undertow/internal/netstack"
 	"undertow/internal/pivot"
@@ -217,6 +218,9 @@ func serve(args []string) error {
 	if f.NArg() != 0 {
 		return fmt.Errorf("unexpected server argument %q; use 'undertow server --listen ...'", f.Arg(0))
 	}
+	if err := carrier.load(f); err != nil {
+		return err
+	}
 	var selectedTransports []string
 	selectedSet := make(map[string]bool)
 	for _, name := range strings.Split(*carrier.kind, ",") {
@@ -376,7 +380,7 @@ func serve(args []string) error {
 	if !validRetrievalPath(retrievalPath) {
 		return errors.New("saved payload retrieval path is invalid; set --payload-retrieval-path to replace it")
 	}
-	distribution := &agentDistribution{store: distributionStore, manager: manager, authMode: *authMode, credential: token, retrievalPath: retrievalPath}
+	distribution := &agentDistribution{store: distributionStore, manager: manager, authMode: *authMode, credential: token, retrievalPath: retrievalPath, deployment: carrier.profile}
 	manager.SetAgentDistributionHandler(distribution)
 	manager.SetArtifactLookup(func(id string) (string, string, bool) {
 		a, err := distributionStore.Artifact(id)
@@ -395,7 +399,7 @@ func serve(args []string) error {
 	manager.SetServerInfo(serverInfo)
 	transportManager := newServerTransports(ctx, manager, identity, token, *domain, *carrier.path, func(peer transport.Peer) {
 		handleServerPeer(ctx, manager, controlToken, *probeEcho, peer)
-	})
+	}, carrier.profile)
 	verifyEnrollment := func(auth, transcript []byte) ([16]byte, string, error) {
 		return distributionStore.VerifyEnrollment(token, auth, transcript)
 	}
@@ -524,6 +528,9 @@ func agent(args []string) error {
 	if f.NArg() != 0 {
 		return fmt.Errorf("unexpected agent argument %q; use 'undertow agent --server ...'", f.Arg(0))
 	}
+	if err := carrier.load(f); err != nil {
+		return err
+	}
 	handled, cleanup, err := lifecycle.handle(args)
 	if err != nil || handled {
 		return err
@@ -557,7 +564,7 @@ func agent(args []string) error {
 		Domain: *domain, Fingerprint: pinnedFingerprint, AuthMode: *authMode, Credential: token,
 		PayloadProfile: *profileFlag, WebSocketPath: *carrier.path, TLSServerName: *carrier.serverName,
 		TLSInsecureSkipVerify: *carrier.skipTLSVerify, AdvertisedRoutes: advertise,
-		DeniedCapabilities: *deny, IdentityPath: *keyPath}
+		DeniedCapabilities: *deny, IdentityPath: *keyPath, Deployment: carrier.profile}
 	ready := func() error {
 		if savePin {
 			if err := saveServerFingerprint(*fingerprintFile, pinnedFingerprint); err != nil {
@@ -593,7 +600,7 @@ func agent(args []string) error {
 			select {
 			case <-ctx.Done():
 				return nil
-			case <-time.After(2 * time.Second):
+			case <-time.After(deployment.Jitter(carrier.profile.Reconnect.ManualDelay.Value(), carrier.profile.Reconnect.JitterPercent)):
 			}
 		}
 	}

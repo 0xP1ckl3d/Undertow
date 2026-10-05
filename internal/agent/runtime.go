@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"undertow/internal/control"
+	"undertow/internal/deployment"
 	"undertow/internal/mux"
 	"undertow/internal/namedpipe"
 	"undertow/internal/pivot"
@@ -47,6 +48,7 @@ type Config struct {
 	IdentityPath          string                   `json:"-"`
 	Metadata              control.ArtifactIdentity `json:"-"`
 	Packaged              bool                     `json:"-"`
+	Deployment            deployment.Profile       `json:"deployment,omitempty"`
 }
 
 func (c Config) Validate() error {
@@ -107,8 +109,11 @@ func (c Config) Validate() error {
 	if _, err := pivot.ParseDenied(c.DeniedCapabilities); err != nil {
 		return err
 	}
-	if c.WebSocketPath != "" && (!strings.HasPrefix(c.WebSocketPath, "/") || strings.ContainsAny(c.WebSocketPath, "?#")) {
+	if c.WebSocketPath != "" && (!strings.HasPrefix(c.WebSocketPath, "/") || strings.ContainsAny(c.WebSocketPath, "?#\r\n \t")) {
 		return errors.New("websocket path must begin with /")
+	}
+	if err := c.Deployment.Resolved().Validate(); err != nil {
+		return err
 	}
 	return nil
 }
@@ -121,11 +126,11 @@ func (c Config) Dial(ctx context.Context, key ed25519.PrivateKey) (transport.Con
 	case "websocket":
 		path := c.WebSocketPath
 		if path == "" {
-			path = "/undertow"
+			path = c.Deployment.Resolved().WebSocket.Path
 		}
-		return websocket.Dial(ctx, websocket.DialOptions{Address: c.Server, Path: path, TLSServerName: c.TLSServerName, TLSInsecureSkipVerify: c.TLSInsecureSkipVerify}, c.Fingerprint, c.Credential, key)
+		return websocket.Dial(ctx, websocket.DialOptions{Address: c.Server, Path: path, TLSServerName: c.TLSServerName, TLSInsecureSkipVerify: c.TLSInsecureSkipVerify, Profile: c.Deployment}, c.Fingerprint, c.Credential, key)
 	case "quic":
-		return quic.Dial(ctx, quic.DialOptions{Address: c.Server, TLSServerName: c.TLSServerName, TLSInsecureSkipVerify: c.TLSInsecureSkipVerify}, c.Fingerprint, c.Credential, key)
+		return quic.Dial(ctx, quic.DialOptions{Address: c.Server, TLSServerName: c.TLSServerName, TLSInsecureSkipVerify: c.TLSInsecureSkipVerify, Profile: c.Deployment}, c.Fingerprint, c.Credential, key)
 	case "relay":
 		return relay.Dial(ctx, c.Server, c.Fingerprint, c.Credential, key)
 	case "relay-smb":
@@ -205,10 +210,10 @@ func Run(ctx context.Context, c Config, ready func() error) error {
 			if ctx.Err() != nil {
 				return nil
 			}
-			failures = failureIndexAfterSession(failures, time.Since(started), inventoryReady)
+			failures = failureIndexAfterSessionWithProfile(failures, time.Since(started), inventoryReady, c.Deployment)
 			log.Print("agent session ended; reconnecting")
 		}
-		if !waitReconnect(ctx, reconnectDelay(c.Packaged, failures)) {
+		if !waitReconnect(ctx, deployment.Jitter(reconnectDelayWithProfile(c.Packaged, failures, c.Deployment), c.Deployment.Resolved().Reconnect.JitterPercent)) {
 			return nil
 		}
 		failures++
@@ -226,23 +231,30 @@ func loadIdentity(c Config) (ed25519.PrivateKey, error) {
 	return security.LoadOrCreateKey(c.IdentityPath)
 }
 
-var progressiveDelays = [...]time.Duration{2, 5, 10, 30, 60, 120, 300}
-
 func reconnectDelay(packaged bool, failures int) time.Duration {
+	return reconnectDelayWithProfile(packaged, failures, deployment.Default())
+}
+
+func reconnectDelayWithProfile(packaged bool, failures int, profile deployment.Profile) time.Duration {
+	profile = profile.Resolved()
 	if !packaged {
-		return 2 * time.Second
+		return profile.Reconnect.ManualDelay.Value()
 	}
 	if failures < 0 {
 		failures = 0
 	}
-	if failures >= len(progressiveDelays) {
-		failures = len(progressiveDelays) - 1
+	if failures >= len(profile.Reconnect.ProgressiveDelays) {
+		failures = len(profile.Reconnect.ProgressiveDelays) - 1
 	}
-	return progressiveDelays[failures] * time.Second
+	return profile.Reconnect.ProgressiveDelays[failures].Value()
 }
 
 func failureIndexAfterSession(failures int, duration time.Duration, inventoryReady bool) int {
-	if inventoryReady && duration >= 30*time.Second {
+	return failureIndexAfterSessionWithProfile(failures, duration, inventoryReady, deployment.Default())
+}
+
+func failureIndexAfterSessionWithProfile(failures int, duration time.Duration, inventoryReady bool, profile deployment.Profile) int {
+	if inventoryReady && duration >= profile.Resolved().Reconnect.HealthyAfter.Value() {
 		return 0
 	}
 	return failures

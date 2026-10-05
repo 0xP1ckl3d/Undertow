@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -86,13 +85,17 @@ var nativeStateCallback = syscall.NewCallback(func(id uintptr) uintptr {
 })
 
 func executeNative(ctx context.Context, dll, args []byte, write func(byte, []byte) error) (int, error) {
-	dir, err := os.MkdirTemp("", "module-")
+	file, err := os.CreateTemp("", "undertow-module-*.dll")
 	if err != nil {
-		return -1, fmt.Errorf("create native module directory: %w", err)
+		return -1, fmt.Errorf("create native module file: %w", err)
 	}
-	defer os.RemoveAll(dir)
-	path := filepath.Join(dir, "module.dll")
-	if err := os.WriteFile(path, dll, 0600); err != nil {
+	path := file.Name()
+	defer os.Remove(path)
+	if _, err := file.Write(dll); err != nil {
+		file.Close()
+		return -1, fmt.Errorf("write native module: %w", err)
+	}
+	if err := file.Close(); err != nil {
 		return -1, fmt.Errorf("write native module: %w", err)
 	}
 	// Restrict dependent DLL imports to System32. Module authors link ordinary

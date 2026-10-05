@@ -80,6 +80,9 @@ func doctorCommand(args []string, output io.Writer) error {
 	if f.NArg() > 0 {
 		return fmt.Errorf("doctor %s: unexpected argument %q", role, f.Arg(0))
 	}
+	if err := carrier.load(f); err != nil {
+		return err
+	}
 	if role != "server" {
 		if err := carrier.validate(); err != nil {
 			return err

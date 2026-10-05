@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"undertow/internal/control"
+	"undertow/internal/deployment"
 	"undertow/internal/mux"
 	"undertow/internal/netstack"
 	"undertow/internal/pivot"
@@ -89,6 +90,9 @@ func clientCommand(args []string) error {
 	}
 	if f.NArg() != 0 {
 		return fmt.Errorf("unexpected client argument %q; use 'undertow client --vpn or --internal ...'", f.Arg(0))
+	}
+	if err := carrier.load(f); err != nil {
+		return err
 	}
 	if !*lifecycle.stop && !*vpn && !*internal && !*operatorOnly {
 		return errors.New("client requires --vpn, --internal, or --operator-only")
@@ -380,7 +384,7 @@ func clientCommand(args []string) error {
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-time.After(2 * time.Second):
+		case <-time.After(deployment.Jitter(carrier.profile.Reconnect.ManualDelay.Value(), carrier.profile.Reconnect.JitterPercent)):
 		}
 	}
 	return nil

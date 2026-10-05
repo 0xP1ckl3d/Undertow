@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"undertow/internal/control"
+	"undertow/internal/deployment"
 	"undertow/internal/mux"
 	"undertow/internal/pivot"
 	"undertow/internal/security"
@@ -40,6 +41,7 @@ type serverTransports struct {
 	domain, path       string
 	handle             func(transport.Peer)
 	active             map[string]*activeTransport
+	profile            deployment.Profile
 }
 
 func (s *serverTransports) SetArtifactHandler(handler http.Handler) {
@@ -49,8 +51,12 @@ func (s *serverTransports) SetEnrollmentVerifier(v security.EnrollmentVerifier) 
 	s.enrollmentVerifier = v
 }
 
-func newServerTransports(ctx context.Context, manager *control.Manager, identity ed25519.PrivateKey, token []byte, domain, path string, handle func(transport.Peer)) *serverTransports {
-	return &serverTransports{ctx: ctx, manager: manager, identity: identity, token: token, domain: domain, path: path, handle: handle, active: make(map[string]*activeTransport)}
+func newServerTransports(ctx context.Context, manager *control.Manager, identity ed25519.PrivateKey, token []byte, domain, path string, handle func(transport.Peer), profiles ...deployment.Profile) *serverTransports {
+	profile := deployment.Default()
+	if len(profiles) != 0 {
+		profile = profiles[0].Resolved()
+	}
+	return &serverTransports{ctx: ctx, manager: manager, identity: identity, token: token, domain: domain, path: path, handle: handle, active: make(map[string]*activeTransport), profile: profile}
 }
 
 func canonicalTransport(name string) (string, error) {
@@ -117,13 +123,13 @@ func (s *serverTransports) Start(name string, request control.TransportStartRequ
 		}
 		if kind == "websocket" {
 			info.Network = "tcp"
-			listener, err = websocket.Listen(addr, s.path, request.TLSCert, request.TLSKey, selfSigned, s.identity, s.token)
+			listener, err = websocket.Listen(addr, s.path, request.TLSCert, request.TLSKey, selfSigned, s.identity, s.token, s.profile)
 			if err == nil {
 				listener.(*websocket.Server).SetArtifactHandler(s.artifactHTTP)
 				listener.(*websocket.Server).SetEnrollmentVerifier(s.enrollmentVerifier)
 			}
 		} else {
-			listener, err = quic.Listen(addr, request.TLSCert, request.TLSKey, selfSigned, s.identity, s.token)
+			listener, err = quic.Listen(addr, request.TLSCert, request.TLSKey, selfSigned, s.identity, s.token, s.profile)
 			if err == nil {
 				listener.(*quic.Server).SetEnrollmentVerifier(s.enrollmentVerifier)
 			}
