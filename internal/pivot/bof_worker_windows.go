@@ -16,7 +16,7 @@ import (
 	"undertow/internal/bof"
 )
 
-func executeBOFWorker(ctx context.Context, object, arguments []byte, output func(bool, []byte) error) (int, error) {
+func executeBOFWorker(ctx context.Context, object, arguments []byte, output func(byte, []byte) error) (int, error) {
 	executable, err := os.Executable()
 	if err != nil {
 		return -1, err
@@ -51,8 +51,8 @@ func executeBOFWorker(ctx context.Context, object, arguments []byte, output func
 			break
 		}
 		switch kind {
-		case bof.WorkerOutput, bof.WorkerStderr:
-			if err := output(kind == bof.WorkerStderr, data); err != nil {
+		case bof.WorkerOutput, bof.WorkerStderr, bof.WorkerCallback:
+			if err := output(kind, data); err != nil {
 				_ = command.Process.Kill()
 				workerError = err.Error()
 			}

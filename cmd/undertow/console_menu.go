@@ -106,6 +106,7 @@ func printConsoleOverview(output io.Writer, vpnClient, selected, serverAttached 
 		m.row("job show NUMBER|ID", "Show task state and exit code")
 		m.row("job output NUMBER|ID", "Show small task output")
 		m.row("job save NUMBER|ID [FILE]", "Download complete task output")
+		m.row("job file NUMBER|ID FILE_ID", "Download a BOF file from a task")
 		m.row("job delete NUMBER|ID", "Remove a finished task and its server output")
 		m.row("job cancel NUMBER|ID", "Stop a running task")
 		m.row("job stop NUMBER|ID", "Stop a running task")

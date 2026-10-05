@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"undertow/internal/bof"
 )
 
 const jobOutputChunkSize = 256 << 10
@@ -48,8 +49,11 @@ func (m *Manager) ConfigureJobOutput(root string, perJobLimit, totalLimit uint64
 		if walkErr != nil {
 			return walkErr
 		}
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".out") {
+		if entry.IsDir() || !(strings.HasSuffix(entry.Name(), ".out") || strings.HasSuffix(filepath.Dir(path), ".files")) {
 			return nil
+		}
+		if strings.HasSuffix(entry.Name(), ".partial") {
+			return os.Remove(path)
 		}
 		info, err := entry.Info()
 		if err != nil {
@@ -70,6 +74,51 @@ func (m *Manager) ConfigureJobOutput(root string, perJobLimit, totalLimit uint64
 	}
 	m.jobOutput = &jobOutputStore{root: abs, perJobLimit: perJobLimit, totalLimit: totalLimit, used: used}
 	return nil
+}
+
+func (m *Manager) JobFileChunk(owner uint64, id string, fileID uint32, offset uint64) (JobOutputChunk, error) {
+	m.mu.RLock()
+	job := m.jobs[id]
+	if job == nil || !m.jobVisibleTo(job, owner) || m.jobOutput == nil {
+		m.mu.RUnlock()
+		return JobOutputChunk{}, errors.New("job not found")
+	}
+	var artifact *bof.FileArtifact
+	for i := range job.info.Files {
+		if job.info.Files[i].ID == fileID {
+			copy := job.info.Files[i]
+			artifact = &copy
+			break
+		}
+	}
+	if artifact == nil {
+		m.mu.RUnlock()
+		return JobOutputChunk{}, errors.New("job file not found")
+	}
+	path := filepath.Join(m.jobOutput.root, job.info.AgentID, id+".files", fmt.Sprintf("%08x-%s", fileID, artifact.Name))
+	total := artifact.Size
+	m.mu.RUnlock()
+	if offset > total {
+		return JobOutputChunk{}, errors.New("file offset exceeds size")
+	}
+	want := uint64(jobOutputChunkSize)
+	if total-offset < want {
+		want = total - offset
+	}
+	result := JobOutputChunk{Offset: offset, Total: total, EOF: offset+want == total}
+	if want == 0 {
+		return result, nil
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return JobOutputChunk{}, err
+	}
+	defer file.Close()
+	result.Data = make([]byte, want)
+	if n, err := file.ReadAt(result.Data, int64(offset)); err != nil || n != len(result.Data) {
+		return JobOutputChunk{}, io.ErrUnexpectedEOF
+	}
+	return result, nil
 }
 
 func (m *Manager) jobOutputReady() error {

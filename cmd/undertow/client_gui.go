@@ -245,6 +245,7 @@ func (g *guiServer) handler() http.Handler {
 	mux.HandleFunc("GET /api/jobs/{id}", g.remote(http.MethodGet, func(r *http.Request) string { return "/v1/jobs/" + url.PathEscape(r.PathValue("id")) }))
 	mux.HandleFunc("GET /api/jobs/{id}/output", g.remote(http.MethodGet, func(r *http.Request) string { return "/v1/jobs/" + url.PathEscape(r.PathValue("id")) + "/output" }))
 	mux.HandleFunc("GET /api/jobs/{id}/download", g.downloadJobOutput)
+	mux.HandleFunc("GET /api/jobs/{id}/files/{fileid}/download", g.downloadJobFile)
 	mux.HandleFunc("POST /api/jobs/{id}/cancel", g.remote(http.MethodPost, func(r *http.Request) string { return "/v1/jobs/" + url.PathEscape(r.PathValue("id")) + "/cancel" }))
 	mux.HandleFunc("DELETE /api/jobs/{id}", g.remote(http.MethodDelete, func(r *http.Request) string { return "/v1/jobs/" + url.PathEscape(r.PathValue("id")) }))
 	mux.HandleFunc("GET /api/relays", g.remote(http.MethodGet, func(*http.Request) string { return "/v1/relays" }))

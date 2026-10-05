@@ -7,4 +7,9 @@ import (
 	"errors"
 )
 
-func Execute(context.Context,[]byte,[]byte,func(bool,[]byte)error)(int,error){ return -1,errors.New("BOF runtime supports Windows AMD64 only") }
+func Execute(context.Context, []byte, []byte, func(bool, []byte) error) (int, error) {
+	return -1, errors.New("BOF runtime supports Windows AMD64 only")
+}
+func ExecuteCallbacks(context.Context, []byte, []byte, func(uint32, []byte) error) (int, error) {
+	return -1, errors.New("BOF runtime supports Windows AMD64 only")
+}

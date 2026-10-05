@@ -10,10 +10,11 @@ import (
 )
 
 const (
-	WorkerOutput byte = 'O'
-	WorkerStderr byte = 'D'
-	WorkerError  byte = 'E'
-	WorkerExit   byte = 'X'
+	WorkerOutput   byte = 'O'
+	WorkerStderr   byte = 'D'
+	WorkerError    byte = 'E'
+	WorkerExit     byte = 'X'
+	WorkerCallback byte = 'C'
 )
 
 func workerFrame(writer io.Writer, kind byte, data []byte) error {
@@ -50,13 +51,37 @@ func WorkerMain(input io.Reader, output io.Writer) error {
 		return err
 	}
 	var mu sync.Mutex
-	write := func(stderr bool, data []byte) error {
+	write := func(callback uint32, data []byte) error {
 		kind := WorkerOutput
-		if stderr {
+		if callback == CallbackError || callback == 1 {
 			kind = WorkerStderr
 		}
 		mu.Lock()
 		defer mu.Unlock()
+		if callback == CallbackFile || callback == CallbackFileWrite || callback == CallbackFileClose {
+			first := true
+			for {
+				n := len(data)
+				if n > CallbackChunkSize {
+					n = CallbackChunkSize
+				}
+				flags := byte(0)
+				if first {
+					flags |= 1
+				}
+				if n == len(data) {
+					flags |= 2
+				}
+				if err := workerFrame(output, WorkerCallback, EncodeCallbackChunk(callback, flags, data[:n])); err != nil {
+					return err
+				}
+				data = data[n:]
+				first = false
+				if len(data) == 0 {
+					return nil
+				}
+			}
+		}
 		for len(data) > 0 {
 			n := len(data)
 			if n > 8<<10 {
@@ -69,7 +94,7 @@ func WorkerMain(input io.Reader, output io.Writer) error {
 		}
 		return nil
 	}
-	code, err := Execute(context.Background(), object, arguments, write)
+	code, err := ExecuteCallbacks(context.Background(), object, arguments, write)
 	mu.Lock()
 	defer mu.Unlock()
 	if err != nil {

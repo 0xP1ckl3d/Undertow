@@ -26,20 +26,21 @@ import (
 const jobOutputLimit = 256 << 10
 
 type JobInfo struct {
-	ID              string     `json:"id"`
-	AgentID         string     `json:"agent_id"`
-	Kind            string     `json:"kind,omitempty"`
-	Language        string     `json:"language,omitempty"`
-	Argv            []string   `json:"argv"`
-	Started         time.Time  `json:"started"`
-	Ended           *time.Time `json:"ended,omitempty"`
-	State           string     `json:"state"`
-	ExitCode        *int       `json:"exit_code,omitempty"`
-	Output          string     `json:"output,omitempty"`
-	OutputBytes     uint64     `json:"output_bytes"`
-	OutputTruncated bool       `json:"output_truncated,omitempty"`
-	OutputFile      string     `json:"output_file,omitempty"`
-	OutputError     string     `json:"output_error,omitempty"`
+	ID              string             `json:"id"`
+	AgentID         string             `json:"agent_id"`
+	Kind            string             `json:"kind,omitempty"`
+	Language        string             `json:"language,omitempty"`
+	Argv            []string           `json:"argv"`
+	Started         time.Time          `json:"started"`
+	Ended           *time.Time         `json:"ended,omitempty"`
+	State           string             `json:"state"`
+	ExitCode        *int               `json:"exit_code,omitempty"`
+	Output          string             `json:"output,omitempty"`
+	OutputBytes     uint64             `json:"output_bytes"`
+	OutputTruncated bool               `json:"output_truncated,omitempty"`
+	OutputFile      string             `json:"output_file,omitempty"`
+	OutputError     string             `json:"output_error,omitempty"`
+	Files           []bof.FileArtifact `json:"files,omitempty"`
 }
 
 type jobState struct {
@@ -52,6 +53,7 @@ type jobState struct {
 	outputFile *os.File
 	outputPath string
 	diskBytes  uint64
+	fileBytes  uint64
 }
 
 func (m *Manager) StartJob(ctx context.Context, owner uint64, agentID string, argv []string) (JobInfo, error) {
@@ -236,6 +238,12 @@ func (m *Manager) registerJob(owner uint64, agentID string, agent *mux.Mux, sess
 func (m *Manager) collectJob(job *jobState) {
 	defer job.session.Close()
 	defer m.closeJobOutput(job)
+	var files *bof.FileCollector
+	defer func() {
+		if files != nil {
+			files.Close()
+		}
+	}()
 	taskError := false
 	for {
 		kind, data, err := job.session.Read()
@@ -245,6 +253,57 @@ func (m *Manager) collectJob(job *jobState) {
 			return
 		}
 		switch kind {
+		case pivot.InteractiveBOFCallback:
+			m.mu.RLock()
+			running := job.info.State == "running"
+			m.mu.RUnlock()
+			if !running { return }
+			if files == nil {
+				m.mu.RLock()
+				store := m.jobOutput
+				m.mu.RUnlock()
+				if store == nil {
+					m.failJobOutput(job, errors.New("job file storage is unavailable"))
+					return
+				}
+				files = bof.NewFileCollector(filepath.Join(store.root, job.info.AgentID, job.info.ID+".files"))
+				files.MaxBytes = store.perJobLimit
+				files.OnReserve = func(size uint64) error {
+					m.mu.Lock()
+					defer m.mu.Unlock()
+					if job.info.State != "running" { return errors.New("job is no longer running") }
+					if job.fileBytes+job.info.OutputBytes > store.perJobLimit || size > store.perJobLimit-job.fileBytes-job.info.OutputBytes || size > store.totalLimit-store.used {
+						return errors.New("server job file storage limit reached")
+					}
+					store.used += size
+					job.diskBytes += size
+					job.fileBytes += size
+					return nil
+				}
+				files.OnRelease = func(size uint64) {
+					m.mu.Lock()
+					store.used -= size
+					job.diskBytes -= size
+					job.fileBytes -= size
+					m.mu.Unlock()
+				}
+			}
+			completed, fileErr := files.Consume(data)
+			if fileErr != nil {
+				m.failJobOutput(job, fileErr)
+				return
+			}
+			if len(completed) != 0 {
+				m.mu.Lock()
+				job.info.Files = append(job.info.Files, completed...)
+				info, ownerKey, outputPath, store := job.info, job.ownerKey, job.outputPath, m.operations
+				m.mu.Unlock()
+				if store != nil {
+					if err := store.SaveJob(info, ownerKey, outputPath); err != nil {
+						log.Printf("persist job file: %v", err)
+					}
+				}
+			}
 		case pivot.InteractiveOutput, pivot.InteractiveStderr:
 			m.mu.Lock()
 			if job.info.State != "running" {
@@ -297,7 +356,7 @@ func (m *Manager) appendJobOutput(job *jobState, data []byte) error {
 			return fmt.Errorf("server job output storage limit reached (%d bytes total)", store.totalLimit)
 		}
 		length := uint64(len(data))
-		if length > store.perJobLimit-job.info.OutputBytes {
+		if job.info.OutputBytes+job.fileBytes > store.perJobLimit || length > store.perJobLimit-job.info.OutputBytes-job.fileBytes {
 			return fmt.Errorf("server job output limit reached (%d bytes per job)", store.perJobLimit)
 		}
 		if job.outputFile == nil {
@@ -450,14 +509,23 @@ func (m *Manager) DeleteJob(owner uint64, id string) error {
 		if err := os.Remove(job.outputPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		if m.jobOutput != nil {
-			if job.diskBytes <= m.jobOutput.used {
-				m.jobOutput.used -= job.diskBytes
-			} else {
-				m.jobOutput.used = 0
-			}
-		}
 		_ = os.Remove(filepath.Dir(job.outputPath))
+	}
+	for _, file := range job.info.Files {
+		path := filepath.Join(m.jobOutput.root, job.info.AgentID, job.info.ID+".files", fmt.Sprintf("%08x-%s", file.ID, file.Name))
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	if len(job.info.Files) != 0 {
+		_ = os.Remove(filepath.Join(m.jobOutput.root, job.info.AgentID, job.info.ID+".files"))
+	}
+	if m.jobOutput != nil {
+		if job.diskBytes <= m.jobOutput.used {
+			m.jobOutput.used -= job.diskBytes
+		} else {
+			m.jobOutput.used = 0
+		}
 	}
 	if m.operations != nil {
 		if err := m.operations.DeleteJob(id); err != nil {
@@ -477,6 +545,7 @@ func (m *Manager) Job(owner uint64, id string, includeOutput bool) (JobInfo, err
 	}
 	info := job.info
 	info.Argv = append([]string(nil), info.Argv...)
+	info.Files = append([]bof.FileArtifact(nil), info.Files...)
 	if includeOutput {
 		info.Output = string(job.output)
 	}
@@ -493,6 +562,7 @@ func (m *Manager) Jobs(owner uint64, agentID string) []JobInfo {
 		}
 		info := job.info
 		info.Argv = append([]string(nil), info.Argv...)
+		info.Files = append([]bof.FileArtifact(nil), info.Files...)
 		out = append(out, info)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Started.After(out[j].Started) })
@@ -626,6 +696,24 @@ func (m *Manager) jobHTTPHandlers(muxer *http.ServeMux) {
 		chunk, err := m.JobChunk(jobOwner(r.Context()), r.PathValue("id"), offset)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		jsonReply(w, 200, chunk)
+	})
+	muxer.HandleFunc("GET /v1/jobs/{id}/files/{fileid}/chunk", func(w http.ResponseWriter, r *http.Request) {
+		offset, err := strconv.ParseUint(r.URL.Query().Get("offset"), 10, 64)
+		if err != nil {
+			http.Error(w, "invalid file offset", 400)
+			return
+		}
+		fileID, err := strconv.ParseUint(r.PathValue("fileid"), 10, 32)
+		if err != nil {
+			http.Error(w, "invalid file ID", 400)
+			return
+		}
+		chunk, err := m.JobFileChunk(jobOwner(r.Context()), r.PathValue("id"), uint32(fileID), offset)
+		if err != nil {
+			http.Error(w, err.Error(), 404)
 			return
 		}
 		jsonReply(w, 200, chunk)

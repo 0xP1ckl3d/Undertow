@@ -23,9 +23,11 @@ import (
 var bridgeDLL []byte
 
 type bofRun struct {
-	ctx    context.Context
-	output func(bool, []byte) error
-	count  atomic.Int64
+	ctx       context.Context
+	output    func(uint32, []byte) error
+	count     atomic.Int64
+	textCount atomic.Int64
+	err       error
 }
 
 var bofRuns = struct {
@@ -38,17 +40,39 @@ var bofOutputCallback = syscall.NewCallback(func(id, kind, ptr, length uintptr) 
 	bofRuns.RLock()
 	run := bofRuns.items[id]
 	bofRuns.RUnlock()
-	if run == nil || run.ctx.Err() != nil || length > 4<<20 || length > 0 && ptr == 0 {
+	if run == nil {
 		return ^uintptr(0)
 	}
-	if run.count.Add(int64(length)) > 4<<20 {
+	if run.err != nil {
+		return ^uintptr(0)
+	}
+	if run.ctx.Err() != nil {
+		run.err = run.ctx.Err()
+		return ^uintptr(0)
+	}
+	fileCallback := uint32(kind) == CallbackFile || uint32(kind) == CallbackFileWrite || uint32(kind) == CallbackFileClose
+	if length > 64<<20 && fileCallback {
+		run.err = errors.New("BOF callback exceeds 64 MiB limit")
+		return ^uintptr(0)
+	}
+	if !fileCallback && (length > 4<<20 || run.textCount.Add(int64(length)) > 4<<20) {
+		run.err = errors.New("BOF text output exceeded 4 MiB")
+		return ^uintptr(0)
+	}
+	if length > 0 && ptr == 0 {
+		run.err = errors.New("BOF callback has nil data")
+		return ^uintptr(0)
+	}
+	if run.count.Add(int64(length)) > 512<<20 {
+		run.err = errors.New("BOF callback output exceeded 512 MiB")
 		return ^uintptr(0)
 	}
 	if length == 0 {
 		return 0
 	}
-	data := append([]byte(nil), unsafe.Slice((*byte)(unsafe.Pointer(ptr)), int(length))...)
-	if err := run.output(kind == 0x0d || kind == 1, data); err != nil {
+	data := unsafe.Slice((*byte)(unsafe.Pointer(ptr)), int(length))
+	if err := run.output(uint32(kind), data); err != nil {
+		run.err = err
 		return ^uintptr(0)
 	}
 	return 0
@@ -62,6 +86,17 @@ type loadedSection struct {
 }
 
 func Execute(ctx context.Context, object, args []byte, output func(bool, []byte) error) (int, error) {
+	if output == nil {
+		return -1, errors.New("BOF output callback is missing")
+	}
+	return ExecuteCallbacks(ctx, object, args, func(kind uint32, data []byte) error {
+		return output(kind == 0x0d || kind == 1, data)
+	})
+}
+
+// ExecuteCallbacks preserves Beacon callback types. The callback must consume
+// data synchronously; its slice points into the BOF's own memory.
+func ExecuteCallbacks(ctx context.Context, object, args []byte, output func(uint32, []byte) error) (int, error) {
 	parsed, err := Parse(object)
 	if err != nil {
 		return -1, err
@@ -220,8 +255,11 @@ func Execute(ctx context.Context, object, args []byte, output func(bool, []byte)
 	if err := ctx.Err(); err != nil {
 		return -1, err
 	}
-	if run.count.Load() > 4<<20 {
-		return -1, errors.New("BOF output exceeded 4 MiB")
+	if run.err != nil {
+		return -1, run.err
+	}
+	if run.count.Load() > 512<<20 {
+		return -1, errors.New("BOF callback output exceeded 512 MiB")
 	}
 	return 0, nil
 }

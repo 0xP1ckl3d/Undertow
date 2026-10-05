@@ -9,8 +9,11 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strings"
+	"time"
 
+	"undertow/internal/bof"
 	"undertow/internal/control"
 	"undertow/internal/pivot"
 )
@@ -83,7 +86,7 @@ func (g *guiServer) agentCommandStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer session.Close()
-	streamGUISession(&stream, session)
+	g.streamGUISession(&stream, session)
 }
 
 type guiCommandEventWriter struct {
@@ -121,12 +124,40 @@ func (w *guiCommandEventWriter) Write(data []byte) (int, error) {
 	return len(data), nil
 }
 
-func streamGUISession(writer *guiCommandEventWriter, session *pivot.InteractiveSession) {
+func (g *guiServer) streamGUISession(writer *guiCommandEventWriter, session *pivot.InteractiveSession) {
+	var files *bof.FileCollector
+	defer func() {
+		if files != nil {
+			files.Close()
+		}
+	}()
 	for {
 		kind, data, err := session.Read()
 		if err != nil {
 			writer.event("error", err.Error())
 			return
+		}
+		if kind == pivot.InteractiveBOFCallback {
+			if files == nil {
+				files = bof.NewFileCollector(filepath.Join(g.transferDir, fmt.Sprintf("bof-%d", time.Now().UnixNano())))
+			}
+			completed, err := files.Consume(data)
+			if err != nil {
+				writer.event("error", err.Error())
+				return
+			}
+			for _, file := range completed {
+				id, err := randomGUISecret()
+				if err != nil {
+					writer.event("error", err.Error())
+					return
+				}
+				g.transferMu.Lock()
+				g.downloads[id] = guiDownload{path: file.Path, name: file.Name, expires: time.Now().Add(10 * time.Minute)}
+				g.transferMu.Unlock()
+				writer.event("output", fmt.Sprintf("Received file %s (%d bytes): /api/transfers/%s/download", file.Name, file.Size, id))
+			}
+			continue
 		}
 		label := "output"
 		switch kind {

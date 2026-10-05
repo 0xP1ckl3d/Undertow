@@ -20,7 +20,7 @@ __declspec(dllexport) void BofLeave(void) {
     active_context = 0;
 }
 static void emit(int type, const char *data, size_t length) {
-    if (active_output && data && length <= 4 * 1024 * 1024) active_output(active_context, type, data, length);
+    if (active_output && data) active_output(active_context, type, data, length);
 }
 __declspec(dllexport) void BeaconOutput(int type, const char *data, int length) {
     if (length > 0) emit(type, data, (size_t)length);

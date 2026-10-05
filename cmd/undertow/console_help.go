@@ -216,10 +216,11 @@ The agent must allow the native capability. See docs/bof-compatibility.md.
   job show NUMBER|ID        Show state, times and exit code.
   job output NUMBER|ID      Show small output or offer a download.
   job save NUMBER|ID [FILE] Download complete output to the client.
+  job file NUMBER|ID FILE_ID [FILE] Download a file emitted by a BOF.
   job delete NUMBER|ID      Delete a finished job and its server output.
   job cancel NUMBER|ID      Stop a running task.
   job stop NUMBER|ID        Alias for job cancel.
-jobs show|output|save|delete|cancel|stop NUMBER|ID also work. Job IDs remain valid if list
+jobs show|output|save|file|delete|cancel|stop NUMBER|ID also work. Job IDs remain valid if list
 numbers change. At the main menu, jobs AGENT_ID filters the list.
 run-script, run-wasm, run-native and run-bof also accept --background.
 Default client output: outputs/jobs/AGENT_ID/.

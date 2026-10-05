@@ -339,7 +339,7 @@ func (g *guiServer) runModule(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	w.Header().Set("Cache-Control", "no-store")
 	stream := guiCommandEventWriter{encode: json.NewEncoder(w), flush: flusher, store: g.store, agentID: r.PathValue("id"), source: "modules"}
-	streamGUISession(&stream, session)
+	g.streamGUISession(&stream, session)
 }
 
 func (g *guiServer) startModule(ctx context.Context, agentID, name string, args []string, input []byte, background bool) (control.JobInfo, *pivot.InteractiveSession, error) {

@@ -26,16 +26,7 @@ type guiDownload struct {
 }
 
 func cleanupGUITransferDir(dir string) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return
-	}
-	for _, entry := range entries {
-		if entry.Type().IsRegular() {
-			_ = os.Remove(filepath.Join(dir, entry.Name()))
-		}
-	}
-	_ = os.Remove(dir)
+	_ = os.RemoveAll(dir)
 }
 
 func (g *guiServer) uploadFile(w http.ResponseWriter, r *http.Request) {

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 
 	"undertow/internal/control"
 )
@@ -78,5 +79,74 @@ func (g *guiServer) downloadJobOutput(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		offset += uint64(len(bytes))
+	}
+}
+
+func (g *guiServer) downloadJobFile(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	fileID, err := strconv.ParseUint(r.PathValue("fileid"), 10, 32)
+	if err != nil {
+		http.Error(w, "invalid file ID", 400)
+		return
+	}
+	base := "/v1/jobs/" + url.PathEscape(id)
+	data, err := g.client.call(r.Context(), http.MethodGet, base, nil)
+	if err != nil {
+		http.Error(w, err.Error(), 502)
+		return
+	}
+	var job control.JobInfo
+	if err := json.Unmarshal(data, &job); err != nil {
+		http.Error(w, "invalid job record", 502)
+		return
+	}
+	var name string
+	var size uint64
+	for _, file := range job.Files {
+		if file.ID == uint32(fileID) {
+			name, size = file.Name, file.Size
+			break
+		}
+	}
+	if name == "" {
+		http.NotFound(w, r)
+		return
+	}
+	fetch := func(offset uint64) (control.JobOutputChunk, error) {
+		path := fmt.Sprintf("%s/files/%d/chunk?offset=%d", base, fileID, offset)
+		encoded, err := g.client.call(r.Context(), http.MethodGet, path, nil)
+		if err != nil {
+			return control.JobOutputChunk{}, err
+		}
+		var chunk control.JobOutputChunk
+		if err := json.Unmarshal(encoded, &chunk); err != nil {
+			return control.JobOutputChunk{}, err
+		}
+		if chunk.Offset != offset || chunk.Total != size || (offset < size && len(chunk.Data) == 0) {
+			return control.JobOutputChunk{}, fmt.Errorf("invalid BOF file chunk at %d", offset)
+		}
+		return chunk, nil
+	}
+	first, err := fetch(0)
+	if err != nil {
+		http.Error(w, "server job file unavailable", 502)
+		return
+	}
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", "attachment; filename="+strconvQuoteFilename(name))
+	w.Header().Set("Content-Length", fmt.Sprint(size))
+	w.Header().Set("Cache-Control", "no-store")
+	for offset := uint64(0); offset < size; {
+		chunk := first
+		if offset != 0 {
+			chunk, err = fetch(offset)
+			if err != nil {
+				return
+			}
+		}
+		if _, err := w.Write(chunk.Data); err != nil {
+			return
+		}
+		offset += uint64(len(chunk.Data))
 	}
 }

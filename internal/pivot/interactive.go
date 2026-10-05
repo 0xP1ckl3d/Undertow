@@ -19,14 +19,15 @@ const InteractiveDestination = "interactive.undertow.invalid:0"
 const InteractiveRelayDestination = "interactive-relay.undertow.invalid:0"
 
 const (
-	InteractiveReady      byte = 'R'
-	InteractiveInput      byte = 'I'
-	InteractiveOutput     byte = 'O'
-	InteractiveStderr     byte = 'D'
-	InteractiveResize     byte = 'Z'
-	InteractiveExit       byte = 'X'
-	InteractiveError      byte = 'E'
-	interactiveFrameLimit      = 32 << 10
+	InteractiveReady       byte = 'R'
+	InteractiveInput       byte = 'I'
+	InteractiveOutput      byte = 'O'
+	InteractiveStderr      byte = 'D'
+	InteractiveResize      byte = 'Z'
+	InteractiveExit        byte = 'X'
+	InteractiveError       byte = 'E'
+	InteractiveBOFCallback byte = 'C'
+	interactiveFrameLimit       = 32 << 10
 )
 
 type InteractiveRequest struct {

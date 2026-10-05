@@ -3,6 +3,7 @@
 package control
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -40,9 +41,12 @@ func bofFixture(t *testing.T, name string) []byte {
 }
 
 func TestBOFOperatorServerAgentAndJobs(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	manager := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	if err := manager.ConfigureJobOutput(t.TempDir(), 2<<20, 4<<20); err != nil {
+		t.Fatal(err)
+	}
 	serverAgent, agent := forwardAuditAgent(t, ctx, manager, "bof-agent", 981, pivot.DefaultCapabilities())
 	defer serverAgent.Close()
 	defer agent.Close()
@@ -81,6 +85,48 @@ func TestBOFOperatorServerAgentAndJobs(t *testing.T) {
 	if !strings.Contains(output.String(), "int=123 short=-7 ansi=hello wide0=96ea binary=2 remain=0") {
 		t.Fatalf("BOF output=%q", output.String())
 	}
+	fileSession, err := OpenClientBOF(ctx, clientVPN, "bof-agent", bofFixture(t, "file"), mustEmptyBOFArgs(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := bof.NewFileCollector(t.TempDir())
+	defer files.Close()
+	var fileOutput strings.Builder
+	var received []bof.FileArtifact
+	for {
+		kind, data, err := fileSession.Read()
+		if err != nil {
+			t.Fatal(err)
+		}
+		switch kind {
+		case pivot.InteractiveOutput:
+			fileOutput.Write(data)
+		case pivot.InteractiveBOFCallback:
+			complete, err := files.Consume(data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			received = append(received, complete...)
+		case pivot.InteractiveError:
+			t.Fatalf("file BOF: %s", data)
+		case pivot.InteractiveExit:
+			goto fileDone
+		}
+	}
+fileDone:
+	fileSession.Close()
+	if len(received) != 1 || received[0].Size != 100000 || !strings.Contains(fileOutput.String(), "file transfer complete") {
+		t.Fatalf("file callbacks=%+v output=%q", received, fileOutput.String())
+	}
+	contents, err := os.ReadFile(received[0].Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, b := range contents {
+		if b != byte(i) {
+			t.Fatalf("file byte %d=%d", i, b)
+		}
+	}
 	remoteServer, remoteClient := forwardAuditClient(t, ctx, manager, 982)
 	defer remoteServer.Close()
 	defer remoteClient.Close()
@@ -96,6 +142,26 @@ func TestBOFOperatorServerAgentAndJobs(t *testing.T) {
 	finished := waitJob(t, manager, 982, job.ID, func(j JobInfo) bool { return j.State == "completed" || j.State == "failed" })
 	if finished.State != "completed" || finished.Kind != "bof" || !strings.Contains(finished.Output, "imports pid=") {
 		t.Fatalf("BOF job=%+v", finished)
+	}
+	fileJob, err := manager.StartBOFJob(ctx, 982, "bof-agent", bofFixture(t, "file"), mustEmptyBOFArgs(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fileFinished := waitJob(t, manager, 982, fileJob.ID, func(j JobInfo) bool { return j.State == "completed" || j.State == "failed" })
+	if fileFinished.State != "completed" || len(fileFinished.Files) != 1 || fileFinished.Files[0].Size != 100000 {
+		t.Fatalf("file job=%+v", fileFinished)
+	}
+	chunk, err := manager.JobFileChunk(982, fileJob.ID, 7, 0)
+	if err != nil || len(chunk.Data) != 100000 || !bytes.Equal(chunk.Data[:4], []byte{0, 1, 2, 3}) {
+		t.Fatalf("file chunk=%d err=%v", len(chunk.Data), err)
+	}
+	remoteChunk, err := CallRemote(ctx, remoteClient, "GET", fmt.Sprintf("/v1/jobs/%s/files/7/chunk?offset=0", fileJob.ID), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fetched JobOutputChunk
+	if err := json.Unmarshal(remoteChunk, &fetched); err != nil || !bytes.Equal(fetched.Data, chunk.Data) {
+		t.Fatalf("remote file chunk=%d err=%v", len(fetched.Data), err)
 	}
 	loop, err := manager.StartBOFJob(ctx, 982, "bof-agent", bofFixture(t, "loop"), empty)
 	if err != nil {
@@ -118,4 +184,13 @@ func TestBOFOperatorServerAgentAndJobs(t *testing.T) {
 	if lost.Ended == nil {
 		t.Fatalf("BOF disconnect=%+v", lost)
 	}
+}
+
+func mustEmptyBOFArgs(t *testing.T) []byte {
+	t.Helper()
+	args, err := bof.EncodeArguments("", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return args
 }

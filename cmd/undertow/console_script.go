@@ -10,7 +10,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
+	"time"
 
+	"undertow/internal/bof"
 	"undertow/internal/control"
 	"undertow/internal/pivot"
 )
@@ -77,7 +80,15 @@ func runConsoleScript(ctx context.Context, output io.Writer, editor *consoleEdit
 }
 
 func runMemoryForeground(ctx context.Context, output io.Writer, editor *consoleEditor, session *pivot.InteractiveSession) error {
-	defer session.Close()
+	var files *bof.FileCollector
+	done := make(chan struct{})
+	defer func() {
+		_ = session.Close()
+		<-done
+		if files != nil {
+			files.Close()
+		}
+	}()
 	var detach <-chan struct{}
 	if editor != nil {
 		_, detach = editor.beginInteractive()
@@ -86,6 +97,7 @@ func runMemoryForeground(ctx context.Context, output io.Writer, editor *consoleE
 	}
 	finished := make(chan error, 1)
 	go func() {
+		defer close(done)
 		for {
 			kind, data, err := session.Read()
 			if err != nil {
@@ -95,6 +107,23 @@ func runMemoryForeground(ctx context.Context, output io.Writer, editor *consoleE
 			switch kind {
 			case pivot.InteractiveOutput, pivot.InteractiveStderr:
 				_, _ = output.Write(data)
+			case pivot.InteractiveBOFCallback:
+				if files == nil {
+					root, err := filepath.Abs(filepath.Join("outputs", "bof", fmt.Sprintf("run-%d", time.Now().UnixNano())))
+					if err != nil {
+						finished <- err
+						return
+					}
+					files = bof.NewFileCollector(root)
+				}
+				completed, err := files.Consume(data)
+				if err != nil {
+					finished <- err
+					return
+				}
+				for _, file := range completed {
+					fmt.Fprintf(output, "\n[received file %s: %d bytes, %s]\n", file.Name, file.Size, file.Path)
+				}
 			case pivot.InteractiveExit:
 				if len(data) != 4 {
 					finished <- errors.New("invalid task exit status")

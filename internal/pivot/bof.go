@@ -105,10 +105,12 @@ func serveBOF(ctx context.Context, stream *mux.Stream) {
 		}
 	}()
 	var mu sync.Mutex
-	output := func(stderr bool, data []byte) error {
+	output := func(callback byte, data []byte) error {
 		kind := InteractiveOutput
-		if stderr {
+		if callback == bof.WorkerStderr {
 			kind = InteractiveStderr
+		} else if callback == bof.WorkerCallback {
+			kind = InteractiveBOFCallback
 		}
 		mu.Lock()
 		defer mu.Unlock()

@@ -29,6 +29,12 @@ Windows imports use the usual `LIBRARY$Export` spelling, including `__imp_LIBRAR
 
 The Beacon compatibility bridge currently exports `BeaconPrintf`, `BeaconOutput`, `BeaconDataParse`, `BeaconDataPtr`, `BeaconDataInt`, `BeaconDataShort`, `BeaconDataExtract`, `BeaconDataLength`, `BeaconFormatAlloc`, `BeaconFormatReset`, `BeaconFormatFree`, `BeaconFormatAppend`, `BeaconFormatPrintf`, `BeaconFormatToString`, and `BeaconFormatInt`. Beacon output uses the same foreground stream and retained job output as other agent work. Unsupported `Beacon*` imports are reported by name. The bridge and `go` entry point use the Windows x64 calling convention; `go` has a void return type, so a normal return has status 0.
 
+### In-memory file callbacks
+
+The bridge also handles the standard `BeaconOutput` file callbacks: `CALLBACK_FILE` (2), `CALLBACK_FILE_WRITE` (8), and `CALLBACK_FILE_CLOSE` (9). A file start carries a big-endian 32-bit file ID, a big-endian 32-bit expected size, then its filename. A write carries the same file ID followed by binary bytes; a close carries the file ID. The worker splits large writes into bounded frames while preserving callback boundaries and the file ID. File bytes never enter console text output or a temporary output file on the agent.
+
+For a foreground console run, completed files are saved under `outputs/bof/run-*/` on the **operator** computer. The console prints the final path. For a background run, completed files are retained with the job on the **server**; use `job show ID` to list file IDs and `job file ID FILE_ID [LOCAL_FILE]` to download one. Files are limited to 512 MiB each, individual Beacon callbacks to 64 MiB, and share the configured per-job and total job-output storage limits. Incomplete files are discarded when a BOF fails, is cancelled, or disconnects. Ordinary Beacon stdout/stderr callbacks retain their existing output handling and 4 MiB text limit.
+
 ## Inspect and run
 
 ```text
@@ -40,6 +46,8 @@ undertow[TALON]> run-bof modules/bof/window-list.x64.o --format z /pid
 undertow[TALON]> run-bof --background modules/bof/ai-surface.x64.o
 undertow[TALON]> jobs
 undertow[TALON]> job output 1
+undertow[TALON]> job show 1
+undertow[TALON]> job file 1 7
 undertow[TALON]> job stop 1
 ```
 

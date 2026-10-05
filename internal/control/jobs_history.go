@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -73,7 +74,26 @@ func (m *Manager) RestoreJobHistory() error {
 			info.State = "interrupted"
 			info.Ended = &now
 		}
-		job := &jobState{info: info, ownerKey: entry.OwnerKey, outputPath: path, diskBytes: diskBytes, output: preview}
+		var fileBytes uint64
+		retainedFiles := info.Files[:0]
+		for _, artifact := range info.Files {
+			if artifact.Name == "" || filepath.Base(artifact.Name) != artifact.Name || strings.ContainsAny(artifact.Name, "\\/:") {
+				return fmt.Errorf("invalid stored job file name %q", artifact.Name)
+			}
+			filePath := filepath.Join(output.root, info.AgentID, info.ID+".files", fmt.Sprintf("%08x-%s", artifact.ID, artifact.Name))
+			stat, err := os.Stat(filePath)
+			if os.IsNotExist(err) { info.OutputError = "one or more retained job files are missing"; continue }
+			if err != nil {
+				return fmt.Errorf("restore job file %s: %w", filePath, err)
+			}
+			if stat.Size() < 0 || uint64(stat.Size()) != artifact.Size {
+				return fmt.Errorf("stored job file %s has unexpected size", filePath)
+			}
+			fileBytes += artifact.Size
+			retainedFiles = append(retainedFiles, artifact)
+		}
+		info.Files = retainedFiles
+		job := &jobState{info: info, ownerKey: entry.OwnerKey, outputPath: path, diskBytes: diskBytes + fileBytes, fileBytes: fileBytes, output: preview}
 		m.mu.Lock()
 		m.jobs[info.ID] = job
 		m.mu.Unlock()

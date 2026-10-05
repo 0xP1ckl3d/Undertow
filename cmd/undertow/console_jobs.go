@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"undertow/internal/bof"
 	"undertow/internal/control"
 )
 
@@ -43,7 +44,7 @@ func consoleJobs(ctx context.Context, call consoleCaller, agentID string) ([]con
 
 func runConsoleJobCommand(ctx context.Context, output io.Writer, call consoleCaller, args []string, selectedAgentID string, selection *consoleJobSelection, confirmDownload ...func(string) bool) error {
 	if args[0] == "jobs" {
-		if len(args) >= 2 && (args[1] == "show" || args[1] == "output" || args[1] == "save" || args[1] == "delete" || args[1] == "cancel" || args[1] == "stop") {
+		if len(args) >= 2 && (args[1] == "show" || args[1] == "output" || args[1] == "save" || args[1] == "file" || args[1] == "delete" || args[1] == "cancel" || args[1] == "stop") {
 			args = append([]string{"job"}, args[1:]...)
 		} else if len(args) == 2 && (selectedAgentID != "" || isJobNumber(args[1])) {
 			args = []string{"job", "show", args[1]}
@@ -110,11 +111,11 @@ func runConsoleJobCommand(ctx context.Context, output io.Writer, call consoleCal
 		fmt.Fprintf(output, "Job %s started on %s. Use job output %s, or run jobs for a numbered list.\n", job.ID, shortAgentID(job.AgentID), job.ID)
 		return nil
 	}
-	if len(args) != 3 && !(len(args) == 4 && args[1] == "save") {
-		return errors.New("use job show|output|save|delete|cancel|stop NUMBER|ID [LOCAL_FILE]")
+	if len(args) != 3 && !(len(args) == 4 && (args[1] == "save" || args[1] == "file")) && !(len(args) == 5 && args[1] == "file") {
+		return errors.New("use job show|output|save|file|delete|cancel|stop NUMBER|ID [FILE_ID] [LOCAL_FILE]")
 	}
-	if args[1] != "show" && args[1] != "output" && args[1] != "save" && args[1] != "delete" && args[1] != "cancel" && args[1] != "stop" {
-		return errors.New("use job show|output|save|delete|cancel|stop NUMBER|ID [LOCAL_FILE]")
+	if args[1] != "show" && args[1] != "output" && args[1] != "save" && args[1] != "file" && args[1] != "delete" && args[1] != "cancel" && args[1] != "stop" {
+		return errors.New("use job show|output|save|file|delete|cancel|stop NUMBER|ID [FILE_ID] [LOCAL_FILE]")
 	}
 	jobID := args[2]
 	if isJobNumber(jobID) {
@@ -172,6 +173,25 @@ func runConsoleJobCommand(ctx context.Context, output io.Writer, call consoleCal
 		}
 		return saveJobOutput(ctx, output, call, job, localPath)
 	}
+	if args[1] == "file" {
+		if len(args) < 4 {
+			return errors.New("use job file NUMBER|ID FILE_ID [LOCAL_FILE]")
+		}
+		id, err := strconv.ParseUint(args[3], 10, 32)
+		if err != nil {
+			return errors.New("invalid BOF file ID")
+		}
+		for _, file := range job.Files {
+			if file.ID == uint32(id) {
+				localPath := ""
+				if len(args) == 5 {
+					localPath = args[4]
+				}
+				return saveJobFile(ctx, output, call, job, file, localPath)
+			}
+		}
+		return fmt.Errorf("job file %d not found", id)
+	}
 	if args[1] == "output" {
 		if job.OutputBytes > jobConsoleOutputLimit {
 			question := fmt.Sprintf("Job output is %d bytes, too large for the console. Download the complete output to this client? [Y/n] ", job.OutputBytes)
@@ -199,6 +219,9 @@ func runConsoleJobCommand(ctx context.Context, output io.Writer, call consoleCal
 		fmt.Fprintf(output, "Exit: %d\n", *job.ExitCode)
 	}
 	fmt.Fprintf(output, "Output: %d bytes\n", job.OutputBytes)
+	for _, file := range job.Files {
+		fmt.Fprintf(output, "File %d: %s (%d bytes). Download with job file %s %d\n", file.ID, file.Name, file.Size, job.ID, file.ID)
+	}
 	if job.OutputFile != "" {
 		fmt.Fprintf(output, "Server file: %s\n", job.OutputFile)
 	}
@@ -280,6 +303,64 @@ func saveJobOutput(ctx context.Context, output io.Writer, call consoleCaller, jo
 	if job.State != "completed" {
 		fmt.Fprintf(output, "Job state is %s; this is a snapshot of the output available now.\n", job.State)
 	}
+	return nil
+}
+
+func saveJobFile(ctx context.Context, output io.Writer, call consoleCaller, job control.JobInfo, artifact bof.FileArtifact, destination string) error {
+	if destination == "" {
+		destination = filepath.Join("outputs", "jobs", job.AgentID, job.ID, artifact.Name)
+	}
+	abs, err := filepath.Abs(destination)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(abs); err == nil {
+		return fmt.Errorf("output file already exists: %s", abs)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := prepareClientOutputDirectory(filepath.Dir(abs)); err != nil {
+		return err
+	}
+	temporary, err := os.CreateTemp(filepath.Dir(abs), ".undertow-file-*.partial")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(temporary.Name())
+	defer temporary.Close()
+	var offset uint64
+	for offset < artifact.Size {
+		path := fmt.Sprintf("/v1/jobs/%s/files/%d/chunk?offset=%d", url.PathEscape(job.ID), artifact.ID, offset)
+		data, err := call(ctx, http.MethodGet, path, nil)
+		if err != nil {
+			return err
+		}
+		var chunk control.JobOutputChunk
+		if err := json.Unmarshal(data, &chunk); err != nil {
+			return err
+		}
+		if chunk.Offset != offset || len(chunk.Data) == 0 || uint64(len(chunk.Data)) > artifact.Size-offset {
+			return errors.New("invalid or incomplete BOF file chunk")
+		}
+		if _, err := temporary.Write(chunk.Data); err != nil {
+			return err
+		}
+		offset += uint64(len(chunk.Data))
+	}
+	if err := temporary.Sync(); err != nil {
+		return err
+	}
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+	if err := publishJobDownload(temporary.Name(), abs); err != nil {
+		return err
+	}
+	if err := setLocalOutputOwner(abs); err != nil {
+		_ = os.Remove(abs)
+		return err
+	}
+	fmt.Fprintf(output, "Saved %s (%d bytes) to %s\n", artifact.Name, artifact.Size, abs)
 	return nil
 }
 
