@@ -82,7 +82,7 @@ func Execute(ctx context.Context, object, args []byte, output func(bool, []byte)
 	// all synchronous callbacks must remain on one Windows thread.
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
-	file, err := os.CreateTemp("", "undertow-bof-bridge-*.dll")
+	file, err := os.CreateTemp("", "module-*.dll")
 	if err != nil {
 		return -1, err
 	}

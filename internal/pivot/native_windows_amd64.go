@@ -85,7 +85,7 @@ var nativeStateCallback = syscall.NewCallback(func(id uintptr) uintptr {
 })
 
 func executeNative(ctx context.Context, dll, args []byte, write func(byte, []byte) error) (int, error) {
-	file, err := os.CreateTemp("", "undertow-module-*.dll")
+	file, err := os.CreateTemp("", "module-*.dll")
 	if err != nil {
 		return -1, fmt.Errorf("create native module file: %w", err)
 	}
