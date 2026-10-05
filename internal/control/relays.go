@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"sort"
 	"sync"
 	"time"
@@ -36,6 +37,10 @@ func relayAllowed(agent *agentState) bool {
 }
 
 func (m *Manager) StartRelay(ctx context.Context, agentID, bind string) (RelayInfo, error) {
+	return m.startRelay(ctx, agentID, bind, true)
+}
+
+func (m *Manager) startRelay(ctx context.Context, agentID, bind string, remember bool) (RelayInfo, error) {
 	if bind == "" {
 		bind = "0.0.0.0:8443"
 	}
@@ -51,6 +56,10 @@ func (m *Manager) StartRelay(ctx context.Context, agentID, bind string) (RelayIn
 	if m.relays[agentID][bind] != nil {
 		m.mu.RUnlock()
 		return RelayInfo{}, fmt.Errorf("relay already listening on %s", bind)
+	}
+	if remember && m.restoringRelays[agentID][bind] {
+		m.mu.RUnlock()
+		return RelayInfo{}, fmt.Errorf("relay %s is being restored", bind)
 	}
 	agentMux := agent.mux
 	m.mu.RUnlock()
@@ -95,12 +104,31 @@ func (m *Manager) StartRelay(ctx context.Context, agentID, bind string) (RelayIn
 		_ = stream.Close()
 		return RelayInfo{}, errors.New("agent disconnected while starting relay")
 	}
+	if !remember && !m.desiredRelays[agentID][bind] {
+		m.mu.Unlock()
+		_ = stream.Close()
+		return RelayInfo{}, errors.New("relay restoration was cancelled")
+	}
+	if remember {
+		if m.operations != nil {
+			if err := m.operations.SetRelayListener(agentID, result.Bind, true); err != nil {
+				m.mu.Unlock()
+				_ = stream.Close()
+				return RelayInfo{}, err
+			}
+		}
+		if m.desiredRelays[agentID] == nil {
+			m.desiredRelays[agentID] = make(map[string]bool)
+		}
+		m.desiredRelays[agentID][result.Bind] = true
+	}
 	if m.relays[agentID] == nil {
 		m.relays[agentID] = make(map[string]*relayState)
 	}
 	state := &relayState{stream: stream}
 	m.relays[agentID][result.Bind] = state
 	m.mu.Unlock()
+	m.PublishEvent("relay.started", agentID)
 	go func() {
 		<-stream.Done()
 		m.mu.Lock()
@@ -108,6 +136,7 @@ func (m *Manager) StartRelay(ctx context.Context, agentID, bind string) (RelayIn
 			delete(m.relays[agentID], result.Bind)
 		}
 		m.mu.Unlock()
+		m.PublishEvent("relay.stopped", agentID)
 	}()
 	return RelayInfo{AgentID: agentID, Bind: result.Bind}, nil
 }
@@ -140,23 +169,101 @@ func (m *Manager) StopRelay(agentID, bind string) error {
 	m.mu.Lock()
 	listeners := m.relays[agentID]
 	if bind == "" {
-		if len(listeners) != 1 {
-			m.mu.Unlock()
-			return errors.New("specify relay bind when zero or multiple listeners exist")
-		}
+		choices := make(map[string]bool)
 		for value := range listeners {
+			choices[value] = true
+		}
+		for value := range m.desiredRelays[agentID] {
+			choices[value] = true
+		}
+		if len(choices) != 1 {
+			m.mu.Unlock()
+			return errors.New("specify relay bind when zero or multiple listeners are configured")
+		}
+		for value := range choices {
 			bind = value
 		}
 	}
 	state := listeners[bind]
+	configured := m.desiredRelays[agentID][bind]
+	if state == nil && !configured {
+		m.mu.Unlock()
+		return fmt.Errorf("relay %s is not configured on %s", agentID, bind)
+	}
+	if configured && m.operations != nil {
+		if err := m.operations.SetRelayListener(agentID, bind, false); err != nil {
+			m.mu.Unlock()
+			return err
+		}
+	}
+	delete(m.desiredRelays[agentID], bind)
 	if state != nil {
 		delete(listeners, bind)
 	}
 	m.mu.Unlock()
 	if state == nil {
-		return fmt.Errorf("relay %s is not listening on %s", agentID, bind)
+		m.PublishEvent("relay.stopped", agentID)
+		return nil
 	}
 	return state.stream.Close()
+}
+
+// Relay binds are an operator's durable configuration. Recreate their streams
+// only after the same parent agent has reconnected and sent its capabilities.
+func (m *Manager) restoreRelays(agentID string, agentMux *mux.Mux) {
+	m.mu.Lock()
+	if m.agents[agentID] == nil || m.agents[agentID].mux != agentMux || !relayAllowed(m.agents[agentID]) {
+		m.mu.Unlock()
+		return
+	}
+	var pending []string
+	for bind := range m.desiredRelays[agentID] {
+		if m.relays[agentID][bind] != nil || m.restoringRelays[agentID][bind] {
+			continue
+		}
+		if m.restoringRelays[agentID] == nil {
+			m.restoringRelays[agentID] = make(map[string]bool)
+		}
+		m.restoringRelays[agentID][bind] = true
+		pending = append(pending, bind)
+	}
+	m.mu.Unlock()
+	for _, bind := range pending {
+		go func(bind string) {
+			ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+			defer cancel()
+			var err error
+			for attempt := 0; attempt < 4; attempt++ {
+				m.mu.RLock()
+				current := m.agents[agentID] != nil && m.agents[agentID].mux == agentMux && m.desiredRelays[agentID][bind]
+				m.mu.RUnlock()
+				if !current {
+					break
+				}
+				_, err = m.startRelay(ctx, agentID, bind, false)
+				if err == nil {
+					break
+				}
+				if attempt < 3 {
+					select {
+					case <-ctx.Done():
+					case <-agentMux.Done():
+					case <-time.After(time.Duration(attempt+1) * time.Second):
+					}
+				}
+			}
+			m.mu.Lock()
+			delete(m.restoringRelays[agentID], bind)
+			stillWanted := m.agents[agentID] != nil && m.agents[agentID].mux == agentMux && m.desiredRelays[agentID][bind]
+			m.mu.Unlock()
+			if err != nil && stillWanted {
+				log.Printf("restore relay %s on agent %s: %v", bind, agentID, err)
+				m.PublishEvent("relay.restore_failed", agentID)
+			} else {
+				log.Printf("restored relay %s on agent %s", bind, agentID)
+			}
+		}(bind)
+	}
 }
 
 // SetRelayPayload adds or removes an opaque artifact token on an already

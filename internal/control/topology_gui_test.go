@@ -2,12 +2,14 @@ package control
 
 import (
 	"context"
+	"net"
 	"net/netip"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"undertow/internal/mux"
+	"undertow/internal/pivot"
 	"undertow/internal/routing"
 	"undertow/internal/security"
 	"undertow/internal/session"
@@ -26,6 +28,118 @@ func TestTopologyShowsEveryCarrierAndConfiguredServerHost(t *testing.T) {
 	if server.Carriers[0].Transport != "dns" || server.Carriers[0].Active || server.Carriers[1].Transport != "quic" || !server.Carriers[1].Active || server.Carriers[1].Sessions != 2 || server.Carriers[2].Transport != "websocket" || server.Carriers[2].Active {
 		t.Fatalf("carriers=%+v", server.Carriers)
 	}
+}
+
+func TestLegacyAgentPrivilegeRestoredFromExplicitResult(t *testing.T) {
+	store, err := OpenOperationsStore(filepath.Join(t.TempDir(), "ops.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.SaveAgentSnapshot(AgentInfo{ID: "legacy-agent", Hostname: "WS01"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveHostResult(HostResult{AgentID: "legacy-agent", Operation: "privileges", Result: pivot.ExecResult{Stdout: "Mandatory Label\\High Mandatory Level S-1-16-12288"}}); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	if err := manager.SetOperationsStore(store); err != nil {
+		t.Fatal(err)
+	}
+	catalog := manager.AgentCatalog()
+	if len(catalog) != 1 || catalog[0].Privilege != "high" {
+		t.Fatalf("restored privilege: %+v", catalog)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	a, b := make(chan []byte, 64), make(chan []byte, 64)
+	serverMux := mux.New(ctx, &remoteTestTransport{in: a, out: b, done: make(chan struct{})}, true)
+	agentMux := mux.New(ctx, &remoteTestTransport{in: b, out: a, done: make(chan struct{})}, false)
+	defer serverMux.Close()
+	defer agentMux.Close()
+	var keys security.Keys
+	sess, err := session.New(988, keys, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.Register(&dns.Peer{Session: sess, AgentID: "legacy-agent", Connected: time.Now()}, serverMux)
+	manager.UpdateInventory("legacy-agent", serverMux, []byte(`{"hostname":"WS01","os":"windows"}`))
+	live := manager.AgentList()
+	if len(live) != 1 || live[0].Privilege != "high" {
+		t.Fatalf("legacy reconnect privilege: %+v", live)
+	}
+	manager.Unregister("legacy-agent", serverMux)
+}
+
+func TestConfiguredRelayRestoresOnParentCheckin(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	path := filepath.Join(t.TempDir(), "ops.db")
+	store, err := OpenOperationsStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	probe, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bind := probe.Addr().String()
+	probe.Close()
+	if err := store.SetRelayListener("parent", bind, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err = OpenOperationsStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	manager := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	if err := manager.SetOperationsStore(store); err != nil {
+		t.Fatal(err)
+	}
+	a, b := make(chan []byte, 256), make(chan []byte, 256)
+	serverMux := mux.New(ctx, &remoteTestTransport{in: a, out: b, done: make(chan struct{})}, true)
+	agentMux := mux.New(ctx, &remoteTestTransport{in: b, out: a, done: make(chan struct{})}, false)
+	defer serverMux.Close()
+	defer agentMux.Close()
+	var keys security.Keys
+	sess, err := session.New(987, keys, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.Register(&dns.Peer{Session: sess, AgentID: "parent", Connected: time.Now()}, serverMux)
+	go pivot.ServeAgentWithCapabilities(ctx, agentMux, pivot.DefaultCapabilities())
+	manager.UpdateInventory("parent", serverMux, []byte(`{"hostname":"WS01","capabilities":{"allowed":["relay"]}}`))
+	deadline := time.Now().Add(5 * time.Second)
+	for len(manager.RelayList("parent")) == 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	relays := manager.RelayList("parent")
+	if len(relays) != 1 {
+		t.Fatalf("relay did not restore: %+v", relays)
+	}
+	if err := manager.StopRelay("parent", relays[0].Bind); err != nil {
+		t.Fatal(err)
+	}
+	configured, err := store.LoadRelayListeners()
+	if err != nil || len(configured) != 0 {
+		t.Fatalf("stopped relay still desired: %+v %v", configured, err)
+	}
+	started, err := manager.StartRelay(ctx, "parent", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	configured, err = store.LoadRelayListeners()
+	if err != nil || len(configured) != 1 || configured[0].Bind != started.Bind {
+		t.Fatalf("started relay not persisted: %+v %v", configured, err)
+	}
+	if err := manager.StopRelay("parent", started.Bind); err != nil {
+		t.Fatal(err)
+	}
+	manager.Unregister("parent", serverMux)
 }
 
 func TestTopologyCarriesEachClientsRoutingModes(t *testing.T) {

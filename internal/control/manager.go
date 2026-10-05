@@ -192,6 +192,8 @@ type Manager struct {
 	relayAccept        func(context.Context, string, string, string, *mux.Stream)
 	relayPayloadAccept func(context.Context, string, *mux.Stream)
 	relays             map[string]map[string]*relayState
+	desiredRelays      map[string]map[string]bool
+	restoringRelays    map[string]map[string]bool
 	agents             map[string]*agentState
 	clients            map[uint64]*clientState
 	forwards           map[string]*forwardState
@@ -218,14 +220,32 @@ func (m *Manager) SetOperationsStore(store *OperationsStore) error {
 	if err != nil {
 		return err
 	}
+	privileges, err := store.LoadPrivilegeClassifications()
+	if err != nil {
+		return err
+	}
+	relays, err := store.LoadRelayListeners()
+	if err != nil {
+		return err
+	}
 	m.mu.Lock()
 	m.operations = store
 	m.nicknames = nicknames
 	m.offlineAgents = make(map[string]AgentInfo, len(previous))
 	for _, agent := range previous {
+		if agent.Privilege == "" {
+			agent.Privilege = privileges[agent.ID]
+		}
 		agent.Online = false
 		agent.Offline = true
 		m.offlineAgents[agent.ID] = agent
+	}
+	m.desiredRelays = make(map[string]map[string]bool)
+	for _, relay := range relays {
+		if m.desiredRelays[relay.AgentID] == nil {
+			m.desiredRelays[relay.AgentID] = make(map[string]bool)
+		}
+		m.desiredRelays[relay.AgentID][relay.Bind] = true
 	}
 	m.mu.Unlock()
 	return nil
@@ -331,7 +351,7 @@ func (m *Manager) SetRelayPayloadAcceptor(accept func(context.Context, string, *
 }
 
 func NewManager(routes *routing.Table, device RouteDevice, virtualNetwork netip.Prefix, proxyIP netip.Addr) *Manager {
-	return &Manager{eventBus: NewEventBroker(), agents: make(map[string]*agentState), offlineAgents: make(map[string]AgentInfo), nicknames: make(map[string]string), clients: make(map[uint64]*clientState), forwards: make(map[string]*forwardState), jobs: make(map[string]*jobState), relays: make(map[string]map[string]*relayState), routes: routes, device: device, virtualNetwork: virtualNetwork.Masked(), proxyIP: proxyIP, virtualByAgent: make(map[string]netip.Addr), virtualUsed: make(map[netip.Addr]bool)}
+	return &Manager{eventBus: NewEventBroker(), agents: make(map[string]*agentState), offlineAgents: make(map[string]AgentInfo), nicknames: make(map[string]string), clients: make(map[uint64]*clientState), forwards: make(map[string]*forwardState), jobs: make(map[string]*jobState), relays: make(map[string]map[string]*relayState), desiredRelays: make(map[string]map[string]bool), restoringRelays: make(map[string]map[string]bool), routes: routes, device: device, virtualNetwork: virtualNetwork.Masked(), proxyIP: proxyIP, virtualByAgent: make(map[string]netip.Addr), virtualUsed: make(map[netip.Addr]bool)}
 }
 
 func (m *Manager) SetAgentNickname(id, nickname string) error {
@@ -751,6 +771,7 @@ func (m *Manager) UpdateInventory(id string, streamMux *mux.Mux, b []byte) {
 	m.mu.Unlock()
 	m.persistAgentSnapshot(id)
 	m.PublishEvent("agent.updated", id)
+	m.restoreRelays(id, streamMux)
 }
 
 func (m *Manager) updateNetworkRoutes(id string, streamMux *mux.Mux, update networkRouteUpdate) {

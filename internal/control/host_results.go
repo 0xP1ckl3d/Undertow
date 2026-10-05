@@ -66,7 +66,9 @@ func (m *Manager) retainHostResult(agentID, operation string, result pivot.ExecR
 	if state != nil {
 		sessionID = state.peer.Snapshot().ID
 		if operation == "privileges" && result.Error == "" && result.ExitCode == 0 {
-			state.privilege = classifyPrivileges(result.Stdout)
+			if classification := classifyPrivileges(result.Stdout); classification != "" {
+				state.privilege = classification
+			}
 		}
 	}
 	m.mu.Unlock()
@@ -99,6 +101,34 @@ func (s *OperationsStore) SaveHostResult(entry HostResult) error {
 	}
 	_, err = s.db.Exec(`INSERT INTO host_results(agent_id,operation,session_id,at,result_json) VALUES(?,?,?,?,?) ON CONFLICT(agent_id,operation) DO UPDATE SET session_id=excluded.session_id,at=excluded.at,result_json=excluded.result_json`, entry.AgentID, entry.Operation, fmt.Sprint(entry.SessionID), entry.At.Format(time.RFC3339Nano), data)
 	return err
+}
+
+// Prior explicit privilege results are authoritative observations for legacy
+// agents that do not send a coarse classification in their inventory.
+func (s *OperationsStore) LoadPrivilegeClassifications() (map[string]string, error) {
+	rows, err := s.db.Query(`SELECT agent_id,result_json FROM host_results WHERE operation='privileges'`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]string)
+	for rows.Next() {
+		var agentID string
+		var data []byte
+		if err := rows.Scan(&agentID, &data); err != nil {
+			return nil, err
+		}
+		var entry HostResult
+		if err := json.Unmarshal(data, &entry); err != nil {
+			return nil, err
+		}
+		if entry.Result.Error == "" && entry.Result.ExitCode == 0 {
+			if classification := classifyPrivileges(entry.Result.Stdout); classification != "" {
+				out[agentID] = classification
+			}
+		}
+	}
+	return out, rows.Err()
 }
 
 func (s *OperationsStore) HostResults(agentID string) ([]HostResult, error) {

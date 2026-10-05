@@ -63,7 +63,7 @@ For a TCP relay, **Host through an agent** provides a pinned HTTPS URL on the re
 
 The named pipe carries the same framed, end-to-end Undertow relay session as the TCP path. SMB provides access to the pipe, while the child verifies the original server fingerprint and completes normal enrollment. The parent cannot substitute its own identity for the child. The server records the child's carrier as `relay-smb`, its parent, depth, jobs, routes, and lifecycle independently. Nested relays remain subject to the existing depth and loop checks.
 
-`relay stop \\.\pipe\branch_ops` closes the listener. The pipe also closes when the parent disconnects or the server stops. Children may reconnect when the parent and listener return, according to their normal reconnect policy; start the listener again explicitly after the parent reconnects.
+`relay stop \\.\pipe\branch_ops` closes the listener and removes its saved configuration. The pipe closes when the parent disconnects or the server stops. The server reopens a previously started pipe after that parent reconnects and reports its relay capability; children may then reconnect according to their normal reconnect policy. A bind or SMB access failure still needs operator attention. Listeners started under older server versions need to be started once after upgrading so their binds can be saved.
 
 ## Diagnose a failed connection
 

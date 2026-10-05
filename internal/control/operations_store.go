@@ -57,10 +57,11 @@ func OpenOperationsStore(path string) (*OperationsStore, error) {
 		`CREATE TABLE IF NOT EXISTS server_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS agent_snapshots (id TEXT PRIMARY KEY, saved_at TEXT NOT NULL, info_json BLOB NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS agent_nicknames (id TEXT PRIMARY KEY, nickname TEXT NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS relay_listeners (agent_id TEXT NOT NULL, bind TEXT NOT NULL, PRIMARY KEY(agent_id,bind))`,
 		`CREATE TABLE IF NOT EXISTS transfers (id TEXT PRIMARY KEY, record_json BLOB NOT NULL, client_session_id TEXT NOT NULL, started TEXT NOT NULL)`,
 		"CREATE INDEX IF NOT EXISTS transfers_started ON transfers(started DESC)",
 		"CREATE INDEX IF NOT EXISTS screenshots_agent_at ON screenshots(agent_id, at DESC)",
-		"PRAGMA user_version=8",
+		"PRAGMA user_version=9",
 	} {
 		if _, err := db.Exec(statement); err != nil {
 			db.Close()
@@ -207,6 +208,32 @@ func (s *OperationsStore) SetAgentNickname(id, nickname string) error {
 		return err
 	}
 	_, err := s.db.Exec(`INSERT INTO agent_nicknames(id,nickname) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET nickname=excluded.nickname`, id, nickname)
+	return err
+}
+
+func (s *OperationsStore) LoadRelayListeners() ([]RelayInfo, error) {
+	rows, err := s.db.Query(`SELECT agent_id,bind FROM relay_listeners ORDER BY agent_id,bind`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []RelayInfo
+	for rows.Next() {
+		var item RelayInfo
+		if err := rows.Scan(&item.AgentID, &item.Bind); err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (s *OperationsStore) SetRelayListener(agentID, bind string, enabled bool) error {
+	if enabled {
+		_, err := s.db.Exec(`INSERT OR IGNORE INTO relay_listeners(agent_id,bind) VALUES(?,?)`, agentID, bind)
+		return err
+	}
+	_, err := s.db.Exec(`DELETE FROM relay_listeners WHERE agent_id=? AND bind=?`, agentID, bind)
 	return err
 }
 
