@@ -9,7 +9,8 @@ import (
 	"undertow/internal/mux"
 )
 
-// SleepPolicy is the idle callback interval. Zero preserves persistent sessions.
+// SleepPolicy controls the callback interval after a short idle grace. Zero
+// preserves a continuous session.
 type SleepPolicy struct {
 	IntervalSeconds int `json:"interval_seconds"`
 	JitterPercent   int `json:"jitter_percent"`
@@ -25,14 +26,122 @@ func (p SleepPolicy) Validate() error {
 	return nil
 }
 
+// SleepIdleGrace gives a check-in agent a short work window after connection
+// or its last active stream, independently of its callback interval.
+func SleepIdleGrace(policy SleepPolicy) time.Duration {
+	if policy.IntervalSeconds <= 0 {
+		return 0
+	}
+	grace := time.Duration(policy.IntervalSeconds) * time.Second / 10
+	if grace < time.Second {
+		return time.Second
+	}
+	if grace > 15*time.Second {
+		return 15 * time.Second
+	}
+	return grace
+}
+
 type SleepMessage struct {
-	Kind   string       `json:"sleep_control"`
-	Policy *SleepPolicy `json:"policy,omitempty"`
+	Kind            string       `json:"sleep_control"`
+	Policy          *SleepPolicy `json:"policy,omitempty"`
+	WakeAfterMillis int64        `json:"wake_after_ms,omitempty"`
 }
 
 func EncodeSleepMessage(kind string, policy *SleepPolicy) []byte {
 	b, _ := json.Marshal(SleepMessage{Kind: kind, Policy: policy})
 	return b
+}
+
+func EncodeSleepNotice(delay time.Duration) []byte {
+	b, _ := json.Marshal(SleepMessage{Kind: "sleeping", WakeAfterMillis: delay.Milliseconds()})
+	return b
+}
+
+// Three missed callback opportunities, including the first expected callback,
+// are required before an intentional sleep becomes a lost connection. The
+// jitter upper bound and a small transport grace avoid an early false alarm.
+func sleepLostAfter(expected time.Time, policy SleepPolicy) time.Time {
+	maximum := time.Duration(policy.IntervalSeconds) * time.Second * time.Duration(100+policy.JitterPercent) / 100
+	return expected.Add(2*maximum + 30*time.Second)
+}
+
+func validSleepDelay(policy SleepPolicy, millis int64) bool {
+	if policy.IntervalSeconds <= 0 || millis <= 0 {
+		return false
+	}
+	base := time.Duration(policy.IntervalSeconds) * time.Second
+	minimum := base * time.Duration(100-policy.JitterPercent) / 100
+	maximum := base * time.Duration(100+policy.JitterPercent) / 100
+	if millis > (maximum + time.Millisecond).Milliseconds() {
+		return false
+	}
+	delay := time.Duration(millis) * time.Millisecond
+	return delay >= minimum-time.Millisecond && delay <= maximum+time.Millisecond
+}
+
+func (m *Manager) recordSleepNotice(id string, stream *mux.Mux, message SleepMessage) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	state := m.agents[id]
+	if state == nil || state.mux != stream || !stream.IsSleepCommitted() || !state.inventory.SleepSupported {
+		return false
+	}
+	policy := state.inventory.Sleep
+	if policy.IntervalSeconds <= 0 {
+		return false
+	}
+	delay := time.Duration(policy.IntervalSeconds) * time.Second
+	if state.inventory.SleepProtocolVersion >= 2 {
+		if !validSleepDelay(policy, message.WakeAfterMillis) {
+			return false
+		}
+		delay = time.Duration(message.WakeAfterMillis) * time.Millisecond
+	}
+	started := time.Now().UTC()
+	state.inventory.ConnectionMode = "checkin"
+	state.inventory.ConnectionState = "sleeping"
+	state.inventory.ConnectionReason = "Intentional sleep confirmed by the server"
+	state.inventory.SleepStartedAt = started
+	state.inventory.ExpectedCheckIn = started.Add(delay)
+	state.inventory.SleepLostAfter = sleepLostAfter(state.inventory.ExpectedCheckIn, policy)
+	return true
+}
+
+func (m *Manager) scheduleSleepExpiry(id string, deadline time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.shuttingDown || !deadline.After(time.Now()) {
+		return
+	}
+	if timer := m.sleepTimers[id]; timer != nil {
+		timer.Stop()
+	}
+	m.sleepTimers[id] = time.AfterFunc(time.Until(deadline), func() { m.expireSleep(id, deadline) })
+}
+
+func (m *Manager) expireSleep(id string, deadline time.Time) {
+	m.mu.Lock()
+	if m.shuttingDown || m.agents[id] != nil {
+		m.mu.Unlock()
+		return
+	}
+	info, ok := m.offlineAgents[id]
+	if !ok || info.ConnectionState != "sleeping" || !info.SleepLostAfter.Equal(deadline) {
+		m.mu.Unlock()
+		return
+	}
+	info.ConnectionState = "disconnected"
+	info.ConnectionReason = "Three expected check-ins missed"
+	m.offlineAgents[id] = info
+	delete(m.sleepTimers, id)
+	m.recordLifecycleLocked(LifecycleEvent{AgentID: id, Kind: "sleep_missed", Transport: info.Transport, SessionID: info.SessionID})
+	store := m.operations
+	m.mu.Unlock()
+	if store != nil {
+		_ = store.SaveAgentSnapshot(info)
+	}
+	m.PublishEvent("agent.updated", id)
 }
 
 // SetAgentSleep updates one connected agent and retains its override for later callbacks.
@@ -93,53 +202,56 @@ func (m *Manager) handleSleepRequest(id string, stream *mux.Mux) {
 }
 
 func (m *Manager) canSleepLocked(id string, stream *mux.Mux) bool {
+	return m.sleepBlockReasonLocked(id, stream) == ""
+}
+
+// sleepBlockReasonLocked explains why a configured check-in agent remains
+// connected. It is also the eligibility check for the sleep handshake.
+func (m *Manager) sleepBlockReasonLocked(id string, stream *mux.Mux) string {
 	state := m.agents[id]
-	allowed := state != nil && state.mux == stream && state.inventoryReady && state.inventory.SleepSupported && state.inventory.Sleep.IntervalSeconds > 0
-	if allowed {
-		for _, route := range m.routes.List() {
-			if route.AgentID == id && route.Active {
-				allowed = false
-				break
+	if state == nil || state.mux != stream || !state.inventoryReady {
+		return "inventory is pending"
+	}
+	if !state.inventory.SleepSupported {
+		return "this agent build does not support sleep"
+	}
+	if state.inventory.Sleep.IntervalSeconds == 0 {
+		return "continuous connection is configured"
+	}
+	for _, route := range m.routes.List() {
+		if route.AgentID == id && route.Active {
+			return "an active server route depends on this agent"
+		}
+	}
+	for _, client := range m.clients {
+		for _, route := range client.accepted {
+			if route.AgentID == id {
+				return "a client-accepted route depends on this agent"
 			}
 		}
 	}
-	if allowed {
-		for _, client := range m.clients {
-			for _, route := range client.accepted {
-				if route.AgentID == id {
-					allowed = false
-				}
-			}
+	for childID, child := range m.agents {
+		if childID != id && child.inventory.Via == id {
+			return "a connected child agent depends on this relay path"
 		}
 	}
-	if allowed {
-		for childID, child := range m.agents {
-			if childID != id && child.inventory.Via == id {
-				allowed = false
-				break
-			}
+	if len(m.relays[id]) != 0 || len(m.restoringRelays[id]) != 0 {
+		return "a relay listener is active"
+	}
+	for _, forward := range m.forwards {
+		if forward.AgentID == id {
+			return "an active forward depends on this agent"
 		}
 	}
-	if allowed && (len(m.relays[id]) != 0 || len(m.restoringRelays[id]) != 0) {
-		allowed = false
-	}
-	if allowed {
-		for _, forward := range m.forwards {
-			if forward.AgentID == id {
-				allowed = false
-				break
-			}
+	for _, job := range m.jobs {
+		if job.info.AgentID == id && job.info.State == "running" {
+			return "a background job is running"
 		}
 	}
-	if allowed {
-		for _, job := range m.jobs {
-			if job.info.AgentID == id && job.info.State == "running" {
-				allowed = false
-				break
-			}
-		}
+	if stream.StreamCount() != 0 {
+		return "an operation stream is active"
 	}
-	return allowed && stream.StreamCount() == 0
+	return ""
 }
 
 // A condition may have become live after the grant. Recheck before closing.

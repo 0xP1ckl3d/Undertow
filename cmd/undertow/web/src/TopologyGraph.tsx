@@ -46,7 +46,14 @@ function GraphDetails({node,edge,localClient,topology,onMouseEnter,onMouseLeave}
       if(node.hostname&&node.hostname!==node.label)rows.push(['Hostname',node.hostname]);
       if(node.os)rows.push(['Platform',`${node.os}${node.arch?' / '+node.arch:''}`]);
       if(node.kind==='agent')rows.push(['Privilege',node.privilege==='high'?'Elevated (observed)':node.privilege==='low'?'Standard (observed)':'Unknown · run Privileges to classify']);
-      if(node.kind==='agent')rows.push(['State',node.active?'Connected':`${node.archived?'Archived · ':''}Disconnected${node.disconnected_at?' · '+new Date(node.disconnected_at).toLocaleString():''}`]);
+      if(node.kind==='agent'){
+        rows.push(['State',node.active?'Connected':node.connection_state==='sleeping'?'Sleeping by policy':`${node.archived?'Archived · ':''}Disconnected${node.disconnected_at?' · '+new Date(node.disconnected_at).toLocaleString():''}`]);
+        rows.push(['Mode',node.connection_mode==='checkin'?'Check-in':'Continuous']);
+        if(node.sleep?.interval_seconds)rows.push(['Sleep cadence',`${node.sleep.interval_seconds}s ±${node.sleep.jitter_percent}%`]);
+        if(node.connection_reason)rows.push(['Why',node.connection_reason]);
+        if(node.connection_state==='sleeping'&&node.expected_checkin&&!node.expected_checkin.startsWith('0001-'))rows.push(['Expected check-in',new Date(node.expected_checkin).toLocaleString()]);
+        if(node.connection_state==='sleeping'&&node.sleep_lost_after&&!node.sleep_lost_after.startsWith('0001-'))rows.push(['Mark lost after',new Date(node.sleep_lost_after).toLocaleString()]);
+      }
 	  if(node.kind==='agent'&&node.via)rows.push(['Via agent',node.via]);
       if(node.kind==='relay')rows.push(['State',node.active?'Listening on parent agent':'Inactive · last known listener']);
       if(node.kind==='client')rows.push(['Internal path',node.internal?'Enabled':'Disabled']);
@@ -115,7 +122,7 @@ export function TopologyGraph({topology,onAgent,localClient,actions}:{topology:T
     setNodes(topology.nodes.map(n=>{
       const column=n.kind==='client'?0:n.kind==='server'?1:n.kind==='agent'?2+2*(n.depth||0):n.kind==='relay'?3+2*(n.depth||0):6;
       const row=count[column]||0;count[column]=row+1;
-      return {id:n.id,position:layout[n.id]||{x:column*190,y:row*130+80},data:{label:<div className={`graph-device ${n.kind} ${n.kind==='agent'?(n.privilege||'unknown'):''} ${n.active?'':'offline'} ${n.archived?'archived':''}`} title={n.label}><div className="graph-device-square"><DeviceIcon node={n}/><span className={'device-state '+(n.active?'online':'')}/></div><span className="graph-device-name">{n.label}</span><span className="graph-device-subtitle">{n.kind==='agent'&&n.archived?'Archived':n.kind==='agent'&&!n.active?'Disconnected':n.kind==='agent'?n.os||'Agent':n.kind==='client'?`Operator${n.accepted_count?` · ${n.accepted_count} routes`:''}`:n.kind==='server'?'Server':n.kind==='relay'?(n.active?'Relay · listening':'Relay · inactive'):'Network'}</span></div>},style:{padding:0,border:0,background:'transparent',width:110},sourcePosition:Position.Right,targetPosition:Position.Left,draggable:true};
+      return {id:n.id,position:layout[n.id]||{x:column*190,y:row*130+80},data:{label:<div className={`graph-device ${n.kind} ${n.kind==='agent'?(n.privilege||'unknown'):''} ${n.kind==='agent'&&n.connection_state==='sleeping'?'sleeping':n.active?'':'offline'} ${n.archived?'archived':''}`} title={n.label}><div className="graph-device-square"><DeviceIcon node={n}/><span className={'device-state '+(n.kind==='agent'&&n.connection_state==='sleeping'?'sleeping':n.active?'online':'')}/></div><span className="graph-device-name">{n.label}</span><span className="graph-device-subtitle">{n.kind==='agent'&&n.archived?'Archived':n.kind==='agent'&&n.connection_state==='sleeping'?'Sleeping':n.kind==='agent'&&!n.active?'Disconnected':n.kind==='agent'?n.os||'Agent':n.kind==='client'?`Operator${n.accepted_count?` · ${n.accepted_count} routes`:''}`:n.kind==='server'?'Server':n.kind==='relay'?(n.active?'Relay · listening':'Relay · inactive'):'Network'}</span></div>},style:{padding:0,border:0,background:'transparent',width:110},sourcePosition:Position.Right,targetPosition:Position.Left,draggable:true};
     }));
   },[topology,layout,setNodes]);
   const edges=useMemo<Edge[]>(()=>topology?.edges.map(e=>{const accepted=!!e.accepted_by?.length;const color=e.kind==='forward'?'#cd85dd':accepted?'#4ecb94':e.kind==='relay_path'?'#e7aa4d':'#bc8c40';return {id:e.id,source:e.source,target:e.target,label:e.kind==='accepted_route'?undefined:e.label,type:'smoothstep',animated:e.kind==='carrier'&&e.active,style:{stroke:color,strokeWidth:accepted?2.8:e.kind==='carrier'?2.2:1.8,opacity:e.active?1:.45,strokeDasharray:e.kind==='forward'||!e.active?'5 4':undefined},labelStyle:{fill:'#c9d0c8',fontSize:10,fontWeight:600},labelBgStyle:{fill:'#111714',fillOpacity:.96,stroke:'#485248',strokeWidth:1},labelBgPadding:[8,5],markerEnd:{type:MarkerType.ArrowClosed,color}}})||[],[topology]);
@@ -128,7 +135,7 @@ export function TopologyGraph({topology,onAgent,localClient,actions}:{topology:T
     const id=menuNode.agent_id;
     menuItems.push({label:menuNode.active?'Open workspace':'View retained workspace',run:()=>onAgent(id)});
     menuItems.push({label:'Rename agent',run:()=>actions.renameAgent(id)});
-    if(!menuNode.active)menuItems.push({label:menuNode.archived?'Restore to agent list':'Archive agent',run:()=>actions.archiveAgent(id,!menuNode.archived)});
+    if(!menuNode.active&&menuNode.connection_state!=='sleeping')menuItems.push({label:menuNode.archived?'Restore to agent list':'Archive agent',run:()=>actions.archiveAgent(id,!menuNode.archived)});
     if(menuNode.active){
       menuItems.push({label:'Kill current session',run:()=>actions.killSession(id),confirm:'The current session will disconnect. The agent may reconnect.'});
       menuItems.push({label:'Shut down agent',run:()=>actions.shutdownAgent(id),confirm:'This sends the existing agent shutdown operation.'});

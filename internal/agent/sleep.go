@@ -96,7 +96,7 @@ func idleSleep(ctx context.Context, session *mux.Mux, initial control.SleepPolic
 					}
 					continue
 				}
-				if time.Since(idleSince) < time.Duration(policy.IntervalSeconds)*time.Second {
+				if time.Since(idleSince) < control.SleepIdleGrace(policy) {
 					continue
 				}
 				requestCtx, cancel := context.WithTimeout(ctx, 2*time.Second)

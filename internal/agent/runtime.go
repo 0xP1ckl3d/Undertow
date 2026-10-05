@@ -230,7 +230,7 @@ func Run(ctx context.Context, c Config, ready func() error) error {
 						ackCancel()
 						if ack == "committed" {
 							finalCtx, finalCancel := context.WithTimeout(ctx, 5*time.Second)
-							_ = streamMux.SendControl(finalCtx, control.EncodeSleepMessage("sleeping", nil))
+							_ = streamMux.SendControl(finalCtx, control.EncodeSleepNotice(idleDelay))
 							final := receiveSleepMessage(finalCtx, streamMux, "final")
 							finalCancel()
 							streamMux.Close()

@@ -19,34 +19,42 @@ type Topology struct {
 }
 
 type TopologyNode struct {
-	ID             string         `json:"id"`
-	Kind           string         `json:"kind"`
-	Label          string         `json:"label"`
-	Hostname       string         `json:"hostname,omitempty"`
-	AgentID        string         `json:"agent_id,omitempty"`
-	Via            string         `json:"via,omitempty"`
-	ClientID       string         `json:"client_id,omitempty"`
-	SessionID      uint64         `json:"session_id,omitempty"`
-	Carrier        string         `json:"carrier,omitempty"`
-	RelayBind      string         `json:"relay_bind,omitempty"`
-	Remote         string         `json:"remote,omitempty"`
-	PublicIP       string         `json:"public_ip,omitempty"`
-	LastSeen       time.Time      `json:"last_seen,omitempty"`
-	RTTNs          int64          `json:"rtt_ns,omitempty"`
-	Depth          int            `json:"depth,omitempty"`
-	OS             string         `json:"os,omitempty"`
-	Arch           string         `json:"arch,omitempty"`
-	Connected      time.Time      `json:"connected,omitempty"`
-	DisconnectedAt time.Time      `json:"disconnected_at,omitempty"`
-	Privilege      string         `json:"privilege,omitempty"`
-	Archived       bool           `json:"archived,omitempty"`
-	Internal       bool           `json:"internal,omitempty"`
-	VPN            bool           `json:"vpn,omitempty"`
-	AcceptedCount  int            `json:"accepted_count,omitempty"`
-	Listeners      []ListenerInfo `json:"listeners,omitempty"`
-	Carriers       []CarrierState `json:"carriers,omitempty"`
-	PublicHost     string         `json:"public_host,omitempty"`
-	Active         bool           `json:"active"`
+	ID                   string         `json:"id"`
+	Kind                 string         `json:"kind"`
+	Label                string         `json:"label"`
+	Hostname             string         `json:"hostname,omitempty"`
+	AgentID              string         `json:"agent_id,omitempty"`
+	Via                  string         `json:"via,omitempty"`
+	ClientID             string         `json:"client_id,omitempty"`
+	SessionID            uint64         `json:"session_id,omitempty"`
+	Carrier              string         `json:"carrier,omitempty"`
+	RelayBind            string         `json:"relay_bind,omitempty"`
+	Remote               string         `json:"remote,omitempty"`
+	PublicIP             string         `json:"public_ip,omitempty"`
+	LastSeen             time.Time      `json:"last_seen,omitempty"`
+	RTTNs                int64          `json:"rtt_ns,omitempty"`
+	Depth                int            `json:"depth,omitempty"`
+	OS                   string         `json:"os,omitempty"`
+	Arch                 string         `json:"arch,omitempty"`
+	Connected            time.Time      `json:"connected,omitempty"`
+	DisconnectedAt       time.Time      `json:"disconnected_at,omitempty"`
+	Privilege            string         `json:"privilege,omitempty"`
+	Archived             bool           `json:"archived,omitempty"`
+	ConnectionMode       string         `json:"connection_mode,omitempty"`
+	ConnectionState      string         `json:"connection_state,omitempty"`
+	ConnectionReason     string         `json:"connection_reason,omitempty"`
+	Sleep                SleepPolicy    `json:"sleep"`
+	SleepProtocolVersion int            `json:"sleep_protocol_version,omitempty"`
+	IdleGraceSeconds     int            `json:"idle_grace_seconds,omitempty"`
+	ExpectedCheckIn      time.Time      `json:"expected_checkin,omitempty"`
+	SleepLostAfter       time.Time      `json:"sleep_lost_after,omitempty"`
+	Internal             bool           `json:"internal,omitempty"`
+	VPN                  bool           `json:"vpn,omitempty"`
+	AcceptedCount        int            `json:"accepted_count,omitempty"`
+	Listeners            []ListenerInfo `json:"listeners,omitempty"`
+	Carriers             []CarrierState `json:"carriers,omitempty"`
+	PublicHost           string         `json:"public_host,omitempty"`
+	Active               bool           `json:"active"`
 }
 
 type CarrierState struct {
@@ -105,7 +113,7 @@ func BuildTopology(agents []AgentInfo, clients []ClientInfo, routes []routing.Ro
 			server.Carriers = append(server.Carriers, state)
 		}
 	}
-	t := Topology{Version: 7, At: time.Now().UTC(), Nodes: []TopologyNode{server}, Edges: []TopologyEdge{}}
+	t := Topology{Version: 8, At: time.Now().UTC(), Nodes: []TopologyNode{server}, Edges: []TopologyEdge{}}
 	_ = routes // Server configured routes remain in the Routes view; they do not imply client acceptance.
 	type relayNode struct {
 		agentID, bind string
@@ -133,7 +141,7 @@ func BuildTopology(agents []AgentInfo, clients []ClientInfo, routes []routing.Ro
 		if label == "" {
 			label = a.ID
 		}
-		t.Nodes = append(t.Nodes, TopologyNode{ID: id, Kind: "agent", Label: label, Hostname: a.Hostname, AgentID: a.ID, Via: a.Via, SessionID: a.SessionID, Carrier: a.Transport, RelayBind: a.RelayBind, Remote: a.Remote, PublicIP: a.PublicIP, LastSeen: a.LastSeen, RTTNs: int64(a.RTT), Depth: a.Depth, OS: a.OS, Arch: a.Arch, Connected: a.Connected, DisconnectedAt: a.DisconnectedAt, Privilege: a.Privilege, Archived: a.Archived, Active: a.Online})
+		t.Nodes = append(t.Nodes, TopologyNode{ID: id, Kind: "agent", Label: label, Hostname: a.Hostname, AgentID: a.ID, Via: a.Via, SessionID: a.SessionID, Carrier: a.Transport, RelayBind: a.RelayBind, Remote: a.Remote, PublicIP: a.PublicIP, LastSeen: a.LastSeen, RTTNs: int64(a.RTT), Depth: a.Depth, OS: a.OS, Arch: a.Arch, Connected: a.Connected, DisconnectedAt: a.DisconnectedAt, Privilege: a.Privilege, Archived: a.Archived, ConnectionMode: a.ConnectionMode, ConnectionState: a.ConnectionState, ConnectionReason: a.ConnectionReason, Sleep: a.Sleep, SleepProtocolVersion: a.SleepProtocolVersion, IdleGraceSeconds: a.IdleGraceSeconds, ExpectedCheckIn: a.ExpectedCheckIn, SleepLostAfter: a.SleepLostAfter, Active: a.Online})
 		parent, kind := "server", "carrier"
 		if a.Via != "" {
 			parent, kind = "agent:"+a.Via, "relay_path"

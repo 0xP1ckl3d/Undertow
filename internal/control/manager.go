@@ -35,51 +35,59 @@ type RouteDevice interface {
 
 type AgentInfo struct {
 	ArtifactIdentity
-	ID                 string                  `json:"id"`
-	Transport          string                  `json:"transport,omitempty"`
-	Via                string                  `json:"via,omitempty"`
-	RelayBind          string                  `json:"relay_bind,omitempty"`
-	Depth              int                     `json:"depth,omitempty"`
-	SessionID          uint64                  `json:"session_id"`
-	VirtualIP          string                  `json:"virtual_ip"`
-	Remote             string                  `json:"remote"`
-	PublicIP           string                  `json:"public_ip,omitempty"`
-	Online             bool                    `json:"online"`
-	Offline            bool                    `json:"offline,omitempty"`
-	DisconnectedAt     time.Time               `json:"disconnected_at,omitempty"`
-	Hostname           string                  `json:"hostname,omitempty"`
-	OS                 string                  `json:"os,omitempty"`
-	Arch               string                  `json:"arch,omitempty"`
-	Privilege          string                  `json:"privilege,omitempty"`
-	Nickname           string                  `json:"nickname,omitempty"`
-	Archived           bool                    `json:"archived,omitempty"`
-	Sleep              SleepPolicy             `json:"sleep"`
-	SleepSupported     bool                    `json:"sleep_supported,omitempty"`
-	Interfaces         []string                `json:"interfaces,omitempty"`
-	AdvertisedRoutes   []string                `json:"advertised_routes,omitempty"`
-	Routes             []NetworkRoute          `json:"routes,omitempty"`
-	DefaultRoute       *NetworkRoute           `json:"default_route,omitempty"`
-	Capabilities       *pivot.CapabilityReport `json:"capabilities,omitempty"`
-	Connected          time.Time               `json:"connected"`
-	LastSeen           time.Time               `json:"last_seen"`
-	RTT                time.Duration           `json:"rtt_ns"`
-	RXBytes            uint64                  `json:"rx_bytes"`
-	TXBytes            uint64                  `json:"tx_bytes"`
-	Retransmits        uint64                  `json:"retransmits"`
-	Duplicates         uint64                  `json:"duplicates"`
-	RXRate             float64                 `json:"rx_rate_bytes_per_second"`
-	TXRate             float64                 `json:"tx_rate_bytes_per_second"`
-	Streams            int                     `json:"streams"`
-	ActiveForwards     int                     `json:"active_forwards"`
-	Forwards           []ForwardInfo           `json:"forwards,omitempty"`
-	InFlight           int                     `json:"in_flight"`
-	Queued             int                     `json:"queued"`
-	Window             int                     `json:"congestion_window"`
-	ReceiveWindow      int                     `json:"receive_window"`
-	PeerReceiveWindow  int                     `json:"peer_receive_window"`
-	FragmentSize       int                     `json:"fragment_size"`
-	PayloadAdjustments uint64                  `json:"payload_adjustments"`
-	ActiveJobs         int                     `json:"active_jobs"`
+	ID                   string                  `json:"id"`
+	Transport            string                  `json:"transport,omitempty"`
+	Via                  string                  `json:"via,omitempty"`
+	RelayBind            string                  `json:"relay_bind,omitempty"`
+	Depth                int                     `json:"depth,omitempty"`
+	SessionID            uint64                  `json:"session_id"`
+	VirtualIP            string                  `json:"virtual_ip"`
+	Remote               string                  `json:"remote"`
+	PublicIP             string                  `json:"public_ip,omitempty"`
+	Online               bool                    `json:"online"`
+	Offline              bool                    `json:"offline,omitempty"`
+	DisconnectedAt       time.Time               `json:"disconnected_at,omitempty"`
+	Hostname             string                  `json:"hostname,omitempty"`
+	OS                   string                  `json:"os,omitempty"`
+	Arch                 string                  `json:"arch,omitempty"`
+	Privilege            string                  `json:"privilege,omitempty"`
+	Nickname             string                  `json:"nickname,omitempty"`
+	Archived             bool                    `json:"archived,omitempty"`
+	Sleep                SleepPolicy             `json:"sleep"`
+	SleepSupported       bool                    `json:"sleep_supported,omitempty"`
+	SleepProtocolVersion int                     `json:"sleep_protocol_version,omitempty"`
+	IdleGraceSeconds     int                     `json:"idle_grace_seconds,omitempty"`
+	ConnectionMode       string                  `json:"connection_mode,omitempty"`
+	ConnectionState      string                  `json:"connection_state,omitempty"`
+	ConnectionReason     string                  `json:"connection_reason,omitempty"`
+	SleepStartedAt       time.Time               `json:"sleep_started_at,omitempty"`
+	ExpectedCheckIn      time.Time               `json:"expected_checkin,omitempty"`
+	SleepLostAfter       time.Time               `json:"sleep_lost_after,omitempty"`
+	Interfaces           []string                `json:"interfaces,omitempty"`
+	AdvertisedRoutes     []string                `json:"advertised_routes,omitempty"`
+	Routes               []NetworkRoute          `json:"routes,omitempty"`
+	DefaultRoute         *NetworkRoute           `json:"default_route,omitempty"`
+	Capabilities         *pivot.CapabilityReport `json:"capabilities,omitempty"`
+	Connected            time.Time               `json:"connected"`
+	LastSeen             time.Time               `json:"last_seen"`
+	RTT                  time.Duration           `json:"rtt_ns"`
+	RXBytes              uint64                  `json:"rx_bytes"`
+	TXBytes              uint64                  `json:"tx_bytes"`
+	Retransmits          uint64                  `json:"retransmits"`
+	Duplicates           uint64                  `json:"duplicates"`
+	RXRate               float64                 `json:"rx_rate_bytes_per_second"`
+	TXRate               float64                 `json:"tx_rate_bytes_per_second"`
+	Streams              int                     `json:"streams"`
+	ActiveForwards       int                     `json:"active_forwards"`
+	Forwards             []ForwardInfo           `json:"forwards,omitempty"`
+	InFlight             int                     `json:"in_flight"`
+	Queued               int                     `json:"queued"`
+	Window               int                     `json:"congestion_window"`
+	ReceiveWindow        int                     `json:"receive_window"`
+	PeerReceiveWindow    int                     `json:"peer_receive_window"`
+	FragmentSize         int                     `json:"fragment_size"`
+	PayloadAdjustments   uint64                  `json:"payload_adjustments"`
+	ActiveJobs           int                     `json:"active_jobs"`
 }
 
 type LifecycleEvent struct {
@@ -190,6 +198,7 @@ type Manager struct {
 	nicknames          map[string]string
 	archivedAgents     map[string]bool
 	sleepOverrides     map[string]SleepPolicy
+	sleepTimers        map[string]*time.Timer
 	eventBus           *EventBroker
 	workerLogs         *WorkerLogBuffer
 	lifecycleEvents    []LifecycleEvent
@@ -256,6 +265,20 @@ func (m *Manager) SetOperationsStore(store *OperationsStore) error {
 		}
 		agent.Online = false
 		agent.Offline = true
+		if agent.ConnectionMode == "" {
+			agent.ConnectionMode = "continuous"
+			if agent.SleepSupported && agent.Sleep.IntervalSeconds > 0 {
+				agent.ConnectionMode = "checkin"
+			}
+		}
+		if agent.ConnectionState != "sleeping" && agent.ConnectionState != "disconnected" {
+			agent.ConnectionState = "disconnected"
+			agent.ConnectionReason = "No active session after server restart"
+		}
+		if agent.ConnectionState == "sleeping" && (agent.SleepLostAfter.IsZero() || !time.Now().Before(agent.SleepLostAfter)) {
+			agent.ConnectionState = "disconnected"
+			agent.ConnectionReason = "Three expected check-ins missed"
+		}
 		m.offlineAgents[agent.ID] = agent
 	}
 	m.desiredRelays = make(map[string]map[string]bool)
@@ -266,6 +289,11 @@ func (m *Manager) SetOperationsStore(store *OperationsStore) error {
 		m.desiredRelays[relay.AgentID][relay.Bind] = true
 	}
 	m.mu.Unlock()
+	for _, agent := range previous {
+		if agent.ConnectionState == "sleeping" && !agent.SleepLostAfter.IsZero() && time.Now().Before(agent.SleepLostAfter) {
+			m.scheduleSleepExpiry(agent.ID, agent.SleepLostAfter)
+		}
+	}
 	return nil
 }
 
@@ -369,7 +397,7 @@ func (m *Manager) SetRelayPayloadAcceptor(accept func(context.Context, string, *
 }
 
 func NewManager(routes *routing.Table, device RouteDevice, virtualNetwork netip.Prefix, proxyIP netip.Addr) *Manager {
-	return &Manager{eventBus: NewEventBroker(), agents: make(map[string]*agentState), offlineAgents: make(map[string]AgentInfo), nicknames: make(map[string]string), archivedAgents: make(map[string]bool), sleepOverrides: make(map[string]SleepPolicy), clients: make(map[uint64]*clientState), forwards: make(map[string]*forwardState), jobs: make(map[string]*jobState), relays: make(map[string]map[string]*relayState), desiredRelays: make(map[string]map[string]bool), restoringRelays: make(map[string]map[string]bool), routes: routes, device: device, virtualNetwork: virtualNetwork.Masked(), proxyIP: proxyIP, virtualByAgent: make(map[string]netip.Addr), virtualUsed: make(map[netip.Addr]bool)}
+	return &Manager{eventBus: NewEventBroker(), agents: make(map[string]*agentState), offlineAgents: make(map[string]AgentInfo), nicknames: make(map[string]string), archivedAgents: make(map[string]bool), sleepOverrides: make(map[string]SleepPolicy), sleepTimers: make(map[string]*time.Timer), clients: make(map[uint64]*clientState), forwards: make(map[string]*forwardState), jobs: make(map[string]*jobState), relays: make(map[string]map[string]*relayState), desiredRelays: make(map[string]map[string]bool), restoringRelays: make(map[string]map[string]bool), routes: routes, device: device, virtualNetwork: virtualNetwork.Masked(), proxyIP: proxyIP, virtualByAgent: make(map[string]netip.Addr), virtualUsed: make(map[netip.Addr]bool)}
 }
 
 // SetAgentArchived changes visibility of a retained, disconnected agent only.
@@ -380,9 +408,14 @@ func (m *Manager) SetAgentArchived(id string, archived bool) error {
 		m.mu.Unlock()
 		return errors.New("connected agents cannot be archived")
 	}
-	if _, exists := m.offlineAgents[id]; !exists {
+	record, exists := m.offlineAgents[id]
+	if !exists {
 		m.mu.Unlock()
 		return errors.New("agent not found")
+	}
+	if archived && record.ConnectionState == "sleeping" {
+		m.mu.Unlock()
+		return errors.New("sleeping agents cannot be archived until their check-ins are missed")
 	}
 	if m.operations == nil {
 		m.mu.Unlock()
@@ -702,6 +735,10 @@ func (m *Manager) Register(peer transport.Peer, streamMux *mux.Mux) {
 	} else if snapshot, found := m.offlineAgents[id]; found {
 		privilege = snapshot.Privilege
 	}
+	if timer := m.sleepTimers[id]; timer != nil {
+		timer.Stop()
+		delete(m.sleepTimers, id)
+	}
 	m.agents[id] = &agentState{peer: peer, mux: streamMux, privilege: privilege, inventory: AgentInfo{Via: peer.Snapshot().Via, RelayBind: peer.Snapshot().RelayBind, Depth: depth}}
 	if m.archivedAgents[id] {
 		if m.operations != nil {
@@ -733,6 +770,10 @@ func (m *Manager) Register(peer transport.Peer, streamMux *mux.Mux) {
 func (m *Manager) ShutdownAgentSessions() {
 	m.mu.Lock()
 	m.shuttingDown = true
+	for id, timer := range m.sleepTimers {
+		timer.Stop()
+		delete(m.sleepTimers, id)
+	}
 	sessions := make([]*mux.Mux, 0, len(m.agents))
 	for _, state := range m.agents {
 		sessions = append(sessions, state.mux)
@@ -760,8 +801,13 @@ func (m *Manager) receiveInventory(id string, streamMux *mux.Mux) {
 			case "sleeping":
 				if streamMux.IsSleepCommitted() {
 					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-					_ = streamMux.SendControl(ctx, EncodeSleepMessage("final", nil))
+					err := streamMux.SendControl(ctx, EncodeSleepMessage("final", nil))
 					cancel()
+					if err != nil {
+						streamMux.Close()
+						return
+					}
+					m.recordSleepNotice(id, streamMux, sleep)
 					m.Unregister(id, streamMux)
 				}
 			case "cancel":
@@ -857,6 +903,7 @@ func (m *Manager) UpdateInventory(id string, streamMux *mux.Mux, b []byte) {
 		state.inventory.ArtifactIdentity = info.ArtifactIdentity
 		state.inventory.Sleep = info.Sleep
 		state.inventory.SleepSupported = info.SleepSupported
+		state.inventory.SleepProtocolVersion = info.SleepProtocolVersion
 		if override, ok := m.sleepOverrides[id]; ok {
 			state.inventory.Sleep = override
 		}
@@ -1020,11 +1067,30 @@ func (m *Manager) Unregister(id string, streamMux *mux.Mux) {
 	if !peerInfo.Connected.IsZero() {
 		duration = int64(time.Since(peerInfo.Connected).Seconds())
 	}
-	m.recordLifecycleLocked(LifecycleEvent{AgentID: id, Kind: "disconnected", Transport: peerInfo.Carrier, ProfileID: state.inventory.ProfileID, ArtifactID: state.inventory.ArtifactID, SessionID: peerInfo.ID, DurationSeconds: duration})
+	sleeping := state.inventory.ConnectionState == "sleeping" && !state.inventory.ExpectedCheckIn.IsZero()
+	eventKind := "disconnected"
+	if sleeping {
+		eventKind = "sleeping"
+	}
+	m.recordLifecycleLocked(LifecycleEvent{AgentID: id, Kind: eventKind, Transport: peerInfo.Carrier, ProfileID: state.inventory.ProfileID, ArtifactID: state.inventory.ArtifactID, SessionID: peerInfo.ID, DurationSeconds: duration})
 	delete(m.agents, id)
 	last.Online = false
 	last.Offline = true
 	last.DisconnectedAt = time.Now().UTC()
+	if sleeping {
+		last.ConnectionMode = "checkin"
+		last.ConnectionState = "sleeping"
+		last.ConnectionReason = state.inventory.ConnectionReason
+		last.SleepStartedAt = state.inventory.SleepStartedAt
+		last.ExpectedCheckIn = state.inventory.ExpectedCheckIn
+		last.SleepLostAfter = state.inventory.SleepLostAfter
+	} else {
+		last.ConnectionState = "disconnected"
+		last.ConnectionReason = "Session ended without an intentional sleep handshake"
+		last.SleepStartedAt = time.Time{}
+		last.ExpectedCheckIn = time.Time{}
+		last.SleepLostAfter = time.Time{}
+	}
 	last.Streams = 0
 	last.ActiveForwards = 0
 	last.ActiveJobs = 0
@@ -1071,7 +1137,12 @@ func (m *Manager) Unregister(id string, streamMux *mux.Mux) {
 			log.Printf("save disconnected agent %s: %v", id, err)
 		}
 	}
-	m.PublishEvent("agent.disconnected", id)
+	if sleeping {
+		m.scheduleSleepExpiry(id, last.SleepLostAfter)
+		m.PublishEvent("agent.sleeping", id)
+	} else {
+		m.PublishEvent("agent.disconnected", id)
+	}
 	for _, stream := range closed {
 		_ = stream.Close()
 	}
@@ -1136,6 +1207,32 @@ func (m *Manager) AgentList() []AgentInfo {
 		info.Nickname = m.nicknames[info.ID]
 		info.Archived = false
 		info.Sleep = state.inventory.Sleep
+		if info.SleepSupported && info.Sleep.IntervalSeconds > 0 {
+			info.IdleGraceSeconds = info.Sleep.IntervalSeconds
+			if info.SleepProtocolVersion >= 2 {
+				info.IdleGraceSeconds = int(SleepIdleGrace(info.Sleep).Seconds())
+			}
+		}
+		info.ConnectionState = "connected"
+		info.SleepStartedAt = time.Time{}
+		info.ExpectedCheckIn = time.Time{}
+		info.SleepLostAfter = time.Time{}
+		if !info.SleepSupported {
+			info.ConnectionMode = "continuous"
+			info.ConnectionReason = "This agent build does not support check-in sleep"
+		} else if info.Sleep.IntervalSeconds == 0 {
+			info.ConnectionMode = "continuous"
+			info.ConnectionReason = "Configured for a continuous connection"
+		} else {
+			info.ConnectionMode = "checkin"
+			if reason := m.sleepBlockReasonLocked(info.ID, state.mux); reason != "" {
+				info.ConnectionReason = "Check-in sleep paused: " + reason
+			} else if info.SleepProtocolVersion < 2 {
+				info.ConnectionReason = "Legacy check-in timing: idle wait equals the sleep interval"
+			} else {
+				info.ConnectionReason = "Waiting for a brief idle grace before sleep"
+			}
+		}
 		info.Transport = p.Carrier
 		info.Via = p.Via
 		info.RelayBind = p.RelayBind
@@ -1195,6 +1292,10 @@ func (m *Manager) AgentCatalog() []AgentInfo {
 		if !seen[id] {
 			agent.Nickname = m.nicknames[id]
 			agent.Archived = m.archivedAgents[id]
+			if agent.ConnectionState == "sleeping" && !agent.SleepLostAfter.IsZero() && !time.Now().Before(agent.SleepLostAfter) {
+				agent.ConnectionState = "disconnected"
+				agent.ConnectionReason = "Three expected check-ins missed"
+			}
 			live = append(live, agent)
 		}
 	}
