@@ -175,11 +175,14 @@ function AgentOverviewRoutes({agent,agents,client,openRoutes,onRefresh}:{agent:A
     {!canInstall&&<small>Route changes require a VPN client with a TUN device.</small>}{error&&<p className="control-error" role="alert">{error}</p>}
   </div>
 }
-type ConsoleLine={kind:'command'|'output'|'error';text:string;source?:string};
-type ConsoleEntry={id:number;at:string;source:string;kind:'command'|'output'|'error'|'stderr'|'exit';text:string};
+type ConsoleFile={name:string;size:number;download:string};
+type ConsoleLine={kind:'command'|'output'|'error'|'file';text:string;source?:string;file?:ConsoleFile};
+type ConsoleEntry={id:number;at:string;source:string;kind:'command'|'output'|'error'|'stderr'|'exit'|'file';text:string};
+function parseConsoleFile(data:string):ConsoleFile|null {try{const file=JSON.parse(data) as ConsoleFile;return typeof file.name==='string'&&typeof file.size==='number'&&/^\/api\/transfers\/[a-f0-9]{64}\/download$/.test(file.download)?file:null}catch{return null}}
 const agentConsoleLog=new Map<string,ConsoleLine[]>();
 const agentConsoleCommands=new Map<string,string[]>();
 function ConsoleText({entry}:{entry:ConsoleLine}){
+  if(entry.kind==='file')return entry.file?<a href={entry.file.download} download>Download {entry.file.name} ({entry.file.size.toLocaleString()} bytes)</a>:<>Received file link is unavailable.</>;
   if(entry.kind!=='output'||!entry.text.trimStart().startsWith('UNDERTOW  GUI CLIENT / AGENT COMMANDS'))return <>{entry.text}</>;
   return <div className="console-help">{entry.text.split('\n').map((line,index)=>{
     if(line.startsWith('UNDERTOW  '))return <div className="console-help-title" key={index}>{line}</div>;
@@ -197,7 +200,7 @@ function AgentCommandConsole({agent,openShell,readOnly=false}:{agent:Agent;openS
   const outputRef=useRef<HTMLDivElement>(null);
   const activeCommand=useRef<AbortController|null>(null);
   useEffect(()=>()=>activeCommand.current?.abort(),[agent.id]);
-  useEffect(()=>{let mounted=true;const load=()=>api<ConsoleEntry[]>(`/agents/${encodeURIComponent(agent.id)}/console-history`).then(entries=>{if(!mounted)return;setHistory(entries);setLines(entries.length?entries.map(entry=>({kind:entry.kind==='command'?'command':entry.kind==='error'?'error':'output',source:entry.source,text:entry.kind==='exit'?`[exit ${entry.text}]\n`:entry.kind==='stderr'?`[stderr] ${entry.text}`:entry.text})): [{kind:'output',text:`Attached to ${agent.hostname||agent.id}. Type help for Undertow agent commands.\n`}]);agentConsoleCommands.set(agent.id,entries.filter(entry=>entry.kind==='command'&&entry.source==='console').map(entry=>entry.text).reverse().slice(0,100))}).catch(()=>{});load();const listener=(event:Event)=>{if((event as CustomEvent<{agentID:string}>).detail?.agentID===agent.id)load()};window.addEventListener('undertow-console-updated',listener);return()=>{mounted=false;window.removeEventListener('undertow-console-updated',listener)}},[agent.id]);
+  useEffect(()=>{let mounted=true;const load=()=>api<ConsoleEntry[]>(`/agents/${encodeURIComponent(agent.id)}/console-history`).then(entries=>{if(!mounted)return;setHistory(entries);setLines(entries.length?entries.map(entry=>({kind:entry.kind==='command'?'command':entry.kind==='error'?'error':entry.kind==='file'?'file':'output',source:entry.source,file:entry.kind==='file'?parseConsoleFile(entry.text)||undefined:undefined,text:entry.kind==='exit'?`[exit ${entry.text}]\n`:entry.kind==='stderr'?`[stderr] ${entry.text}`:entry.kind==='file'?'':entry.text})): [{kind:'output',text:`Attached to ${agent.hostname||agent.id}. Type help for Undertow agent commands.\n`}]);agentConsoleCommands.set(agent.id,entries.filter(entry=>entry.kind==='command'&&entry.source==='console').map(entry=>entry.text).reverse().slice(0,100))}).catch(()=>{});load();const listener=(event:Event)=>{if((event as CustomEvent<{agentID:string}>).detail?.agentID===agent.id)load()};window.addEventListener('undertow-console-updated',listener);return()=>{mounted=false;window.removeEventListener('undertow-console-updated',listener)}},[agent.id]);
   useEffect(()=>{agentConsoleLog.set(agent.id,lines);outputRef.current?.scrollTo({top:outputRef.current.scrollHeight})},[agent.id,lines]);
   const append=(kind:ConsoleLine['kind'],text:string)=>setLines(v=>[...v,{kind,text}].slice(-300));
   const submit=async()=>{
@@ -214,7 +217,7 @@ function AgentCommandConsole({agent,openShell,readOnly=false}:{agent:Agent;openS
       if(!response.body)throw new Error('Command output stream unavailable');
       const reader=response.body.getReader(),decoder=new TextDecoder();let pending='';
       for(;;){const {done,value}=await reader.read();if(done)break;pending+=decoder.decode(value,{stream:true});let newline;
-        while((newline=pending.indexOf('\n'))>=0){const row=pending.slice(0,newline);pending=pending.slice(newline+1);if(!row)continue;const event=JSON.parse(row) as {kind:string;data:string};if(event.kind==='shell')openShell();else append(event.kind==='error'?'error':'output',event.kind==='exit'?`[exit ${event.data}]\n`:event.kind==='stderr'?`[stderr] ${event.data}`:event.data)}
+        while((newline=pending.indexOf('\n'))>=0){const row=pending.slice(0,newline);pending=pending.slice(newline+1);if(!row)continue;const event=JSON.parse(row) as {kind:string;data:string};if(event.kind==='shell')openShell();else if(event.kind==='file')setLines(v=>[...v,{kind:'file',text:'',file:parseConsoleFile(event.data)||undefined} as ConsoleLine].slice(-300));else append(event.kind==='error'?'error':'output',event.kind==='exit'?`[exit ${event.data}]\n`:event.kind==='stderr'?`[stderr] ${event.data}`:event.data)}
       }
     }catch(e){append((e as Error).name==='AbortError'?'output':'error',(e as Error).name==='AbortError'?'Command stream stopped.\n':String(e))}finally{activeCommand.current=null;setBusy(false);window.dispatchEvent(new CustomEvent('undertow-console-updated',{detail:{agentID:agent.id}}))}
   };

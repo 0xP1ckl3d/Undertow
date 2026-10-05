@@ -95,7 +95,7 @@ func (s *clientGUIStore) AppendConsoleEntry(agentID, source, kind, value string)
 	if source != "console" && source != "modules" {
 		return errors.New("invalid console source")
 	}
-	if kind != "command" && kind != "output" && kind != "error" && kind != "stderr" && kind != "exit" {
+	if kind != "command" && kind != "output" && kind != "error" && kind != "stderr" && kind != "exit" && kind != "file" {
 		return errors.New("invalid console entry kind")
 	}
 	if len(value) > 64<<10 {

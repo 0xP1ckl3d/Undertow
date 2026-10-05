@@ -45,6 +45,7 @@
 .console-history-row button,.console-history-row span{display:block;width:100%;padding:0;border:0;background:transparent;color:var(--text);text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px}
 .console-source{color:#8cb9d7;border:1px solid #345369;padding:1px 4px;margin-right:8px;font-size:9px}
 .console-history>p{padding:0 12px;color:var(--muted);font-size:10px}
+.command-entry.file a{color:#efbe72;text-decoration:underline}
 .console-help{white-space:normal;line-height:1.5;min-width:520px}
 .console-help-title{color:#f0aaa4;font-weight:800;letter-spacing:1px;font-size:13px}
 .console-help-rule{color:#66583c;overflow:hidden;white-space:nowrap}

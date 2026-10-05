@@ -24,6 +24,10 @@ func TestGUIConsoleHistoryPersistsAcrossClientRestart(t *testing.T) {
 	if err := writer.event("output", "foreground result\n"); err != nil {
 		t.Fatal(err)
 	}
+	fileEvent := `{"name":"proof.bin","size":10,"download":"/api/transfers/abc/download"}`
+	if err := writer.event("file", fileEvent); err != nil {
+		t.Fatal(err)
+	}
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +37,7 @@ func TestGUIConsoleHistoryPersistsAcrossClientRestart(t *testing.T) {
 	}
 	defer reopened.Close()
 	entries, err := reopened.ConsoleEntries("agent-a")
-	if err != nil || len(entries) != 2 || entries[0].Text != "help" || entries[1].Source != "modules" || entries[1].Text != "foreground result\n" {
+	if err != nil || len(entries) != 3 || entries[0].Text != "help" || entries[1].Source != "modules" || entries[1].Text != "foreground result\n" || entries[2].Kind != "file" || entries[2].Text != fileEvent {
 		t.Fatalf("history=%+v err=%v", entries, err)
 	}
 	other, err := reopened.ConsoleEntries("agent-b")

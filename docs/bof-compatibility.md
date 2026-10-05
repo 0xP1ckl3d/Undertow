@@ -35,6 +35,8 @@ The bridge also handles the standard `BeaconOutput` file callbacks: `CALLBACK_FI
 
 For a foreground console run, completed files are saved under `outputs/bof/run-*/` on the **operator** computer. The console prints the final path. For a background run, completed files are retained with the job on the **server**; use `job show ID` to list file IDs and `job file ID FILE_ID [LOCAL_FILE]` to download one. Files are limited to 512 MiB each, individual Beacon callbacks to 64 MiB, and share the configured per-job and total job-output storage limits. Incomplete files are discarded when a BOF fails, is cancelled, or disconnects. Ordinary Beacon stdout/stderr callbacks retain their existing output handling and 4 MiB text limit.
 
+In the GUI, a foreground BOF run shows completed files as **Received files** download links below the text output. The agent console also shows a download link. Foreground GUI links remain available for ten minutes; download them before they expire. Background BOF files appear as download links in the job detail view and remain subject to the server's job retention policy. File bytes are never rendered as text when the agent and client both support typed BOF callbacks. An older agent may still send file bytes as ordinary output, so rebuild or reconnect the agent when validating file callback support.
+
 ## Inspect and run
 
 ```text

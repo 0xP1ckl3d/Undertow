@@ -155,7 +155,14 @@ func (g *guiServer) streamGUISession(writer *guiCommandEventWriter, session *piv
 				g.transferMu.Lock()
 				g.downloads[id] = guiDownload{path: file.Path, name: file.Name, expires: time.Now().Add(10 * time.Minute)}
 				g.transferMu.Unlock()
-				writer.event("output", fmt.Sprintf("Received file %s (%d bytes): /api/transfers/%s/download", file.Name, file.Size, id))
+				message, err := json.Marshal(map[string]any{"name": file.Name, "size": file.Size, "download": "/api/transfers/" + id + "/download"})
+				if err != nil {
+					writer.event("error", err.Error())
+					return
+				}
+				if writer.event("file", string(message)) != nil {
+					return
+				}
 			}
 			continue
 		}
