@@ -53,6 +53,7 @@ control connection. Profile and payload views never show enrollment secrets.
   use NUMBER|AGENT_ID|HOSTNAME    Select one agent.
   show                           Inspect the selected agent.
   agent events AGENT_ID          Read server-side lifecycle events.
+  agent rename AGENT_ID NAME     Set a shared nickname; use "" to clear it.
   agent shutdown AGENT_ID        Ask a running packaged agent to exit.
   session kill AGENT_ID          Close only its session; it may reconnect.
 For deployment binaries, use payload and type help payload for the workflow.

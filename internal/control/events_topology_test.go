@@ -13,10 +13,19 @@ func TestTopologyShowsOnlyAcceptedRoutesAndRelayParent(t *testing.T) {
 	routes := []routing.Route{{Prefix: netip.MustParsePrefix("10.20.0.0/16"), AgentID: "child", Active: true}}
 	topology := BuildTopology(agents, clients, routes, []RelayInfo{{AgentID: "parent", Bind: "10.0.0.5:8443"}}, nil)
 	kinds := map[string]bool{}
+	acceptedPath := map[string]bool{}
 	for _, edge := range topology.Edges {
 		kinds[edge.Kind] = true
+		if len(edge.AcceptedBy) == 1 && edge.AcceptedBy[0] == "client:client-a" {
+			acceptedPath[edge.ID] = true
+		}
 		if edge.Kind == "relay_path" && (edge.Source != "relay:parent:10.0.0.5:8443" || edge.Target != "agent:child") {
 			t.Fatalf("wrong parent edge %+v", edge)
+		}
+	}
+	for _, id := range []string{"carrier:client:client-a", "carrier:server:agent:parent", "relay-listener:relay:parent:10.0.0.5:8443", "relay_path:relay:parent:10.0.0.5:8443:agent:child", "accepted:client:client-a:10.20.0.0/16"} {
+		if !acceptedPath[id] {
+			t.Errorf("accepted path missing edge %s", id)
 		}
 	}
 	for _, kind := range []string{"relay_path", "relay_listener", "accepted_route", "carrier"} {

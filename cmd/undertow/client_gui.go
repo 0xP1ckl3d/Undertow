@@ -165,6 +165,7 @@ func (g *guiServer) handler() http.Handler {
 		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("GET /api/agents/{id}", g.remote(http.MethodGet, func(r *http.Request) string { return "/v1/agents/" + url.PathEscape(r.PathValue("id")) }))
+	mux.HandleFunc("PUT /api/agents/{id}/nickname", g.remote(http.MethodPut, func(r *http.Request) string { return "/v1/agents/" + url.PathEscape(r.PathValue("id")) + "/nickname" }))
 	mux.HandleFunc("POST /api/agents/{id}/shutdown", g.remote(http.MethodPost, func(r *http.Request) string { return "/v1/agents/" + url.PathEscape(r.PathValue("id")) + "/shutdown" }))
 	mux.HandleFunc("POST /api/agents/{id}/session/kill", g.killAgentSession)
 	mux.HandleFunc("GET /api/agents/{id}/host-results", g.remote(http.MethodGet, func(r *http.Request) string {

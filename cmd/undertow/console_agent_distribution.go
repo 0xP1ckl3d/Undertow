@@ -26,6 +26,28 @@ func runConsoleAgentDistribution(ctx context.Context, out io.Writer, call consol
 		legacy := append([]string{"payload"}, args[1:]...)
 		return runConsolePayload(ctx, out, call, legacy)
 	}
+	if args[1] == "rename" {
+		if len(args) != 4 {
+			return errors.New("use agent rename AGENT_NUMBER|ID|HOSTNAME NICKNAME; quote nicknames with spaces, or use \"\" to clear")
+		}
+		agents, err := consoleAgents(ctx, call)
+		if err != nil {
+			return err
+		}
+		agent, err := findConsoleAgent(agents, args[2])
+		if err != nil {
+			return err
+		}
+		if _, err := call(ctx, http.MethodPut, "/v1/agents/"+url.PathEscape(agent.ID)+"/nickname", map[string]string{"nickname": args[3]}); err != nil {
+			return err
+		}
+		if args[3] == "" {
+			fmt.Fprintf(out, "Nickname cleared for %s (%s).\n", agent.Hostname, agent.ID)
+		} else {
+			fmt.Fprintf(out, "Nickname for %s (%s) set to %q.\n", agent.Hostname, agent.ID, args[3])
+		}
+		return nil
+	}
 	if args[1] != "shutdown" && args[1] != "events" {
 		return fmt.Errorf("unknown connected-agent command %q; use agents for live sessions or payload help for deployment", args[1])
 	}

@@ -10,6 +10,14 @@
 .graph-device.agent.offline{opacity:.6;filter:grayscale(.8)}
 .graph-device.agent.offline .graph-device-square{border-style:dashed}
 .graph-device.agent.offline .graph-device-subtitle{color:#c5b6a3}
+.workspace-identity{min-width:0;flex:1}.workspace-identity h2,.workspace-identity p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.workspace-header .workspace-rename{margin-left:auto;border:1px solid #5b5140;background:#1b1d17;color:#f0bd67;padding:8px 10px;font-size:10px}
+.workspace-header .workspace-rename:hover{border-color:#f0bd67}
+.workspace-header .badge{margin-left:0}
+.agent-nickname-editor{display:flex;align-items:end;flex-wrap:wrap;gap:10px;padding:12px 24px;border-bottom:1px solid #3f3829;background:#181a14}
+.agent-nickname-editor label{display:grid;gap:5px;color:#c7cebd;font-size:10px}.agent-nickname-editor input{width:230px}
+.agent-nickname-editor span{color:#879389;font-size:9px;align-self:center}.agent-nickname-editor button{background:#27251a;border:1px solid #76602f;color:#e8d3a3;padding:10px;font-size:10px}
+.agent-nickname-editor strong{color:#f09887;font-size:10px;width:100%}
 .graph-inspector.hint{top:auto;bottom:12px;right:12px;max-width:280px}
 .agent-overview-heading h3{margin:0}
 .agent-overview-heading button,.agent-overview-routes .route-item button{background:#27241b;color:var(--amber);border:1px solid #65532d;padding:7px 10px;font-size:10px}

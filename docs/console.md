@@ -126,6 +126,7 @@ background
 | `job cancel NUMBER|ID` | Either menu | Stop a running task. |
 | `show` | Selected agent | Show detailed agent telemetry and discovered networks. |
 | `agent show AGENT_ID` | Main menu | Show that agent's detailed telemetry. |
+| `agent rename AGENT_ID "NAME"` | Main menu | Set a server-shared nickname without changing the agent's hostname or ID. Use `""` to clear it; omit the ID inside a selected agent. |
 | `exec AGENT_ID PROGRAM [ARGS]` | Main menu | Start one program directly on the named agent. |
 | `HOST_OP AGENT_ID [ARGS]` | Main menu | Run a built-in host operation on the named agent. See the table below. |
 | `logs` / `logs follow` | Either menu | Show recent worker logs or follow new lines until Enter. |

@@ -404,6 +404,28 @@ func TestInteractiveServerAgentContext(t *testing.T) {
 	}
 }
 
+func TestInteractiveAgentNickname(t *testing.T) {
+	var renamedID, nickname string
+	caller := func(_ context.Context, method, path string, body any) ([]byte, error) {
+		if path == "/v1/status" {
+			return json.Marshal(map[string]any{"agents": []control.AgentInfo{{ID: "agent-long-id", Hostname: "pivot-host"}}})
+		}
+		if method == http.MethodPut && strings.HasSuffix(path, "/nickname") {
+			renamedID = path
+			nickname = body.(map[string]string)["nickname"]
+		}
+		return nil, nil
+	}
+	var output bytes.Buffer
+	input := strings.NewReader("use 1\nagent rename \"File server\"\nquit\n")
+	if err := runConsole(context.Background(), input, &output, caller, nil, nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if renamedID != "/v1/agents/agent-long-id/nickname" || nickname != "File server" {
+		t.Fatalf("rename route=%q nickname=%q output=%q", renamedID, nickname, output.String())
+	}
+}
+
 func TestInteractiveClientAgentContext(t *testing.T) {
 	var routeArgs []string
 	caller := func(_ context.Context, _, path string, _ any) ([]byte, error) {

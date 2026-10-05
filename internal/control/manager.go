@@ -19,6 +19,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"undertow/internal/mux"
 	"undertow/internal/pivot"
@@ -49,6 +51,7 @@ type AgentInfo struct {
 	OS                 string                  `json:"os,omitempty"`
 	Arch               string                  `json:"arch,omitempty"`
 	Privilege          string                  `json:"privilege,omitempty"`
+	Nickname           string                  `json:"nickname,omitempty"`
 	Interfaces         []string                `json:"interfaces,omitempty"`
 	AdvertisedRoutes   []string                `json:"advertised_routes,omitempty"`
 	Routes             []NetworkRoute          `json:"routes,omitempty"`
@@ -178,6 +181,7 @@ type Manager struct {
 	mu                 sync.RWMutex
 	operations         *OperationsStore
 	offlineAgents      map[string]AgentInfo
+	nicknames          map[string]string
 	eventBus           *EventBroker
 	workerLogs         *WorkerLogBuffer
 	lifecycleEvents    []LifecycleEvent
@@ -210,8 +214,13 @@ func (m *Manager) SetOperationsStore(store *OperationsStore) error {
 	if err != nil {
 		return err
 	}
+	nicknames, err := store.LoadAgentNicknames()
+	if err != nil {
+		return err
+	}
 	m.mu.Lock()
 	m.operations = store
+	m.nicknames = nicknames
 	m.offlineAgents = make(map[string]AgentInfo, len(previous))
 	for _, agent := range previous {
 		agent.Online = false
@@ -322,7 +331,42 @@ func (m *Manager) SetRelayPayloadAcceptor(accept func(context.Context, string, *
 }
 
 func NewManager(routes *routing.Table, device RouteDevice, virtualNetwork netip.Prefix, proxyIP netip.Addr) *Manager {
-	return &Manager{eventBus: NewEventBroker(), agents: make(map[string]*agentState), offlineAgents: make(map[string]AgentInfo), clients: make(map[uint64]*clientState), forwards: make(map[string]*forwardState), jobs: make(map[string]*jobState), relays: make(map[string]map[string]*relayState), routes: routes, device: device, virtualNetwork: virtualNetwork.Masked(), proxyIP: proxyIP, virtualByAgent: make(map[string]netip.Addr), virtualUsed: make(map[netip.Addr]bool)}
+	return &Manager{eventBus: NewEventBroker(), agents: make(map[string]*agentState), offlineAgents: make(map[string]AgentInfo), nicknames: make(map[string]string), clients: make(map[uint64]*clientState), forwards: make(map[string]*forwardState), jobs: make(map[string]*jobState), relays: make(map[string]map[string]*relayState), routes: routes, device: device, virtualNetwork: virtualNetwork.Masked(), proxyIP: proxyIP, virtualByAgent: make(map[string]netip.Addr), virtualUsed: make(map[netip.Addr]bool)}
+}
+
+func (m *Manager) SetAgentNickname(id, nickname string) error {
+	nickname = strings.TrimSpace(nickname)
+	if utf8.RuneCountInString(nickname) > 48 {
+		return errors.New("nickname must be 48 characters or fewer")
+	}
+	for _, r := range nickname {
+		if unicode.IsControl(r) {
+			return errors.New("nickname must be one line")
+		}
+	}
+	m.mu.Lock()
+	if m.agents[id] == nil {
+		if _, exists := m.offlineAgents[id]; !exists {
+			m.mu.Unlock()
+			return errors.New("agent not found")
+		}
+	}
+	if m.operations == nil {
+		m.mu.Unlock()
+		return errors.New("operations store unavailable")
+	}
+	if err := m.operations.SetAgentNickname(id, nickname); err != nil {
+		m.mu.Unlock()
+		return err
+	}
+	if nickname == "" {
+		delete(m.nicknames, id)
+	} else {
+		m.nicknames[id] = nickname
+	}
+	m.mu.Unlock()
+	m.PublishEvent("agent.updated", id)
+	return nil
 }
 
 func (m *Manager) RegisterClient(peer transport.Peer, streamMux *mux.Mux, internal bool, hostname string, vpn ...bool) {
@@ -570,7 +614,13 @@ func (m *Manager) Register(peer transport.Peer, streamMux *mux.Mux) {
 	if parent := peer.Snapshot().Via; parent != "" {
 		depth = m.agents[parent].inventory.Depth + 1
 	}
-	m.agents[id] = &agentState{peer: peer, mux: streamMux, inventory: AgentInfo{Via: peer.Snapshot().Via, RelayBind: peer.Snapshot().RelayBind, Depth: depth}}
+	privilege := ""
+	if old != nil {
+		privilege = old.privilege
+	} else if snapshot, found := m.offlineAgents[id]; found {
+		privilege = snapshot.Privilege
+	}
+	m.agents[id] = &agentState{peer: peer, mux: streamMux, privilege: privilege, inventory: AgentInfo{Via: peer.Snapshot().Via, RelayBind: peer.Snapshot().RelayBind, Depth: depth}}
 	delete(m.offlineAgents, id)
 	m.recordLifecycleLocked(LifecycleEvent{AgentID: id, Kind: "connected", Transport: peer.Snapshot().Carrier, SessionID: peer.Snapshot().ID})
 	m.mu.Unlock()
@@ -665,6 +715,9 @@ func (m *Manager) UpdateInventory(id string, streamMux *mux.Mux, b []byte) {
 		state.inventory.Hostname = safeHostname(info.Hostname)
 		state.inventory.OS = info.OS
 		state.inventory.Arch = info.Arch
+		if info.Privilege == "high" || info.Privilege == "low" {
+			state.privilege = info.Privilege
+		}
 		state.inventory.Interfaces = append([]string(nil), info.Interfaces...)
 		state.inventory.AdvertisedRoutes = validRoutes
 		state.inventory.Capabilities = info.Capabilities
@@ -697,6 +750,7 @@ func (m *Manager) UpdateInventory(id string, streamMux *mux.Mux, b []byte) {
 	}
 	m.mu.Unlock()
 	m.persistAgentSnapshot(id)
+	m.PublishEvent("agent.updated", id)
 }
 
 func (m *Manager) updateNetworkRoutes(id string, streamMux *mux.Mux, update networkRouteUpdate) {
@@ -932,6 +986,7 @@ func (m *Manager) AgentList() []AgentInfo {
 		info.Offline = false
 		info.DisconnectedAt = time.Time{}
 		info.Privilege = state.privilege
+		info.Nickname = m.nicknames[info.ID]
 		info.Transport = p.Carrier
 		info.Via = p.Via
 		info.RelayBind = p.RelayBind
@@ -989,6 +1044,7 @@ func (m *Manager) AgentCatalog() []AgentInfo {
 	m.mu.RLock()
 	for id, agent := range m.offlineAgents {
 		if !seen[id] {
+			agent.Nickname = m.nicknames[id]
 			live = append(live, agent)
 		}
 	}
@@ -1440,6 +1496,22 @@ func (m *Manager) handler(token string) http.Handler {
 			}
 		}
 		http.Error(w, "agent not found", http.StatusNotFound)
+	})
+	muxer.HandleFunc("PUT /v1/agents/{id}/nickname", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Nickname string `json:"nickname"`
+		}
+		decoder := json.NewDecoder(io.LimitReader(r.Body, 512))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&request); err != nil {
+			http.Error(w, "invalid nickname request", http.StatusBadRequest)
+			return
+		}
+		if err := m.SetAgentNickname(r.PathValue("id"), request.Nickname); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		jsonReply(w, http.StatusOK, map[string]string{"nickname": strings.TrimSpace(request.Nickname)})
 	})
 	muxer.HandleFunc("GET /v1/agents/{id}/events", func(w http.ResponseWriter, r *http.Request) {
 		jsonReply(w, http.StatusOK, m.LifecycleEvents(r.PathValue("id")))

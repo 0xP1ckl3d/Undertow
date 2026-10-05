@@ -105,13 +105,19 @@ func TestDisconnectedAgentRemainsInServerCatalogAcrossRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	manager.Register(&dns.Peer{Session: sess, AgentID: "agent-record", Connected: time.Now()}, serverMux)
-	manager.UpdateInventory("agent-record", serverMux, []byte(`{"hostname":"WS01","os":"windows","advertised_routes":["10.44.0.0/16"]}`))
+	manager.UpdateInventory("agent-record", serverMux, []byte(`{"hostname":"WS01","os":"windows","privilege":"high","advertised_routes":["10.44.0.0/16"]}`))
+	if err := manager.SetAgentNickname("agent-record", "File server relay"); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.SetAgentNickname("agent-record", "bad\nname"); err == nil {
+		t.Fatal("accepted multiline nickname")
+	}
 	manager.Unregister("agent-record", serverMux)
 	if len(manager.AgentList()) != 0 {
 		t.Fatal("offline agent remained operational")
 	}
 	catalog := manager.AgentCatalog()
-	if len(catalog) != 1 || catalog[0].Online || catalog[0].Hostname != "WS01" || len(catalog[0].AdvertisedRoutes) != 1 || catalog[0].DisconnectedAt.IsZero() {
+	if len(catalog) != 1 || catalog[0].Online || catalog[0].Hostname != "WS01" || catalog[0].Nickname != "File server relay" || catalog[0].Privilege != "high" || len(catalog[0].AdvertisedRoutes) != 1 || catalog[0].DisconnectedAt.IsZero() {
 		t.Fatalf("catalog=%+v", catalog)
 	}
 	if err := store.Close(); err != nil {
@@ -127,10 +133,15 @@ func TestDisconnectedAgentRemainsInServerCatalogAcrossRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	catalog = restarted.AgentCatalog()
-	if len(catalog) != 1 || catalog[0].Online || catalog[0].Hostname != "WS01" {
+	if len(catalog) != 1 || catalog[0].Online || catalog[0].Hostname != "WS01" || catalog[0].Nickname != "File server relay" || catalog[0].Privilege != "high" {
 		t.Fatalf("restored=%+v", catalog)
 	}
 	topology := restarted.Topology()
+	for _, node := range topology.Nodes {
+		if node.ID == "agent:agent-record" && (node.Label != "File server relay" || node.Privilege != "high") {
+			t.Fatalf("retained topology agent=%+v", node)
+		}
+	}
 	found := false
 	for _, node := range topology.Nodes {
 		if node.ID == "agent:agent-record" {

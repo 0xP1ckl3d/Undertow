@@ -5,7 +5,7 @@ import {api, type Agent} from './api';
 type Forward={agent_id:string;bind:string;target:string;active?:boolean};
 type Listener={transport:string;listen:string;network:string;tls_mode?:string;sessions:number;agents:number;clients:number};
 type ClientMode={session_id:string;operator_only:boolean;vpn:boolean;internal:boolean;transport:string};
-const label=(agent:Agent)=>agent.hostname||agent.id.slice(0,16);
+const label=(agent:Agent)=>agent.nickname||agent.hostname||agent.id.slice(0,16);
 
 export function AgentLifecycle({agent,onRefresh}:{agent:Agent;onRefresh:()=>Promise<void>}){
   const [pending,setPending]=useState<'kill'|'shutdown'|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState('');

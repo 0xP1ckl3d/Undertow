@@ -170,6 +170,9 @@ func clientRequestAllowed(request *http.Request, clientID uint64) bool {
 	if request.Method == http.MethodGet && strings.HasPrefix(path, "/v1/agents/") && strings.HasSuffix(path, "/events") && request.URL.RawQuery == "" {
 		return true
 	}
+	if request.Method == http.MethodPut && strings.HasPrefix(path, "/v1/agents/") && strings.HasSuffix(path, "/nickname") && request.URL.RawQuery == "" {
+		return true
+	}
 	if request.Method == http.MethodGet && request.URL.RawQuery == "" {
 		parts := strings.Split(path, "/")
 		if len(parts) == 4 && parts[1] == "v1" && parts[2] == "agents" && parts[3] != "" && !strings.ContainsAny(parts[3], "%\\") {

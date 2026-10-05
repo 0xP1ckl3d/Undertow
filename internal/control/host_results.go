@@ -84,6 +84,10 @@ func (m *Manager) retainHostResult(agentID, operation string, result pivot.ExecR
 		entry.Truncated = true
 	}
 	if err := store.SaveHostResult(entry); err == nil {
+		if operation == "privileges" && result.Error == "" && result.ExitCode == 0 {
+			m.persistAgentSnapshot(agentID)
+			m.PublishEvent("agent.updated", agentID)
+		}
 		m.PublishEvent("host.result", agentID)
 	}
 }

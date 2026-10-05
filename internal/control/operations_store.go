@@ -56,10 +56,11 @@ func OpenOperationsStore(path string) (*OperationsStore, error) {
 		`CREATE TABLE IF NOT EXISTS screenshots (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, screen INTEGER NOT NULL, at TEXT NOT NULL, size INTEGER NOT NULL, sha256 TEXT NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL, client_id TEXT NOT NULL, client_session_id TEXT NOT NULL, operator_id TEXT NOT NULL, display_name TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS server_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS agent_snapshots (id TEXT PRIMARY KEY, saved_at TEXT NOT NULL, info_json BLOB NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS agent_nicknames (id TEXT PRIMARY KEY, nickname TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS transfers (id TEXT PRIMARY KEY, record_json BLOB NOT NULL, client_session_id TEXT NOT NULL, started TEXT NOT NULL)`,
 		"CREATE INDEX IF NOT EXISTS transfers_started ON transfers(started DESC)",
 		"CREATE INDEX IF NOT EXISTS screenshots_agent_at ON screenshots(agent_id, at DESC)",
-		"PRAGMA user_version=7",
+		"PRAGMA user_version=8",
 	} {
 		if _, err := db.Exec(statement); err != nil {
 			db.Close()
@@ -181,6 +182,32 @@ func (s *OperationsStore) LoadAgentSnapshots() ([]AgentInfo, error) {
 		out = append(out, agent)
 	}
 	return out, rows.Err()
+}
+
+func (s *OperationsStore) LoadAgentNicknames() (map[string]string, error) {
+	rows, err := s.db.Query(`SELECT id,nickname FROM agent_nicknames`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]string)
+	for rows.Next() {
+		var id, nickname string
+		if err := rows.Scan(&id, &nickname); err != nil {
+			return nil, err
+		}
+		out[id] = nickname
+	}
+	return out, rows.Err()
+}
+
+func (s *OperationsStore) SetAgentNickname(id, nickname string) error {
+	if nickname == "" {
+		_, err := s.db.Exec(`DELETE FROM agent_nicknames WHERE id=?`, id)
+		return err
+	}
+	_, err := s.db.Exec(`INSERT INTO agent_nicknames(id,nickname) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET nickname=excluded.nickname`, id, nickname)
+	return err
 }
 
 func (s *OperationsStore) RecordAudit(record AuditRecord) error {

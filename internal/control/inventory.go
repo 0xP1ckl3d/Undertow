@@ -35,11 +35,12 @@ func SendInventoryWithIdentity(ctx context.Context, streamMux *mux.Mux, explicit
 		Hostname         string                 `json:"hostname"`
 		OS               string                 `json:"os"`
 		Arch             string                 `json:"arch"`
+		Privilege        string                 `json:"privilege,omitempty"`
 		Interfaces       []string               `json:"interfaces,omitempty"`
 		AdvertisedRoutes []string               `json:"advertised_routes,omitempty"`
 		Capabilities     pivot.CapabilityReport `json:"capabilities"`
 		ArtifactIdentity
-	}{Hostname: hostname, OS: runtime.GOOS, Arch: runtime.GOARCH, Capabilities: caps.Report(), ArtifactIdentity: identity}
+	}{Hostname: hostname, OS: runtime.GOOS, Arch: runtime.GOARCH, Privilege: currentPrivilege(), Capabilities: caps.Report(), ArtifactIdentity: identity}
 	seen := make(map[string]bool)
 	for _, raw := range explicit {
 		prefix, err := netip.ParsePrefix(raw)

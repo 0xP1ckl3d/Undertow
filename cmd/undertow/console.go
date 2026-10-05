@@ -398,6 +398,8 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 			case "agent":
 				if len(args) == 2 && (args[1] == "shutdown" || args[1] == "events") {
 					args = append(args, selectedID)
+				} else if len(args) == 3 && args[1] == "rename" {
+					args = []string{"agent", "rename", selectedID, args[2]}
 				}
 			case "session":
 				if len(args) == 2 && args[1] == "kill" {
@@ -568,6 +570,9 @@ func shortAgentID(id string) string {
 }
 
 func consoleAgentName(agent control.AgentInfo) string {
+	if agent.Nickname != "" {
+		return agent.Nickname
+	}
 	if agent.Hostname != "" {
 		return agent.Hostname
 	}
@@ -577,7 +582,7 @@ func consoleAgentName(agent control.AgentInfo) string {
 func printConsoleAgents(output io.Writer, agents []control.AgentInfo) {
 	fmt.Fprintf(output, "Connected agents (%d):\n", len(agents))
 	if len(agents) > 0 {
-		fmt.Fprintln(output, "  No.  Hostname              Agent ID                          Virtual IP      Carrier    Path")
+		fmt.Fprintln(output, "  No.  Agent name            Agent ID                          Virtual IP      Carrier    Path")
 	}
 	for i, agent := range agents {
 		path := "direct"
@@ -604,7 +609,7 @@ func findConsoleAgent(agents []control.AgentInfo, target string) (control.AgentI
 	}
 	var match control.AgentInfo
 	for _, agent := range agents {
-		if agent.ID == target || strings.HasPrefix(agent.ID, target) || agent.Hostname == target {
+		if agent.ID == target || strings.HasPrefix(agent.ID, target) || agent.Hostname == target || agent.Nickname == target {
 			if match.ID != "" {
 				return control.AgentInfo{}, errors.New("agent name or ID prefix is ambiguous; use its number")
 			}
