@@ -12,6 +12,7 @@ import (
 	agentpkg "undertow/internal/agent"
 	"undertow/internal/agentprofile"
 	"undertow/internal/control"
+	"undertow/internal/pivot"
 )
 
 func deploymentArtifactStore(t *testing.T) (*agentprofile.Store, agentprofile.Artifact) {
@@ -47,7 +48,7 @@ func TestWindowsDeploymentPreflightUsesAgentChannelAndRevalidatesArtifact(t *tes
 	executor := &windowsDeploymentExecutor{distribution: &agentDistribution{store: store}}
 	record := control.DeploymentRecord{ID: "deployment-one", SourceAgentID: "source", ArtifactID: artifact.ID, ArtifactSHA256: artifact.SHA256, Method: "winrm", Context: "current-user"}
 
-	for _, delivery := range []string{"", "agent-channel", "direct-share"} {
+	for _, delivery := range []string{"", "agent-channel"} {
 		plan, err := executor.Preflight(context.Background(), record, control.DeploymentStartRequest{Delivery: delivery})
 		if err != nil {
 			t.Fatalf("delivery %q: %v", delivery, err)
@@ -56,7 +57,7 @@ func TestWindowsDeploymentPreflightUsesAgentChannelAndRevalidatesArtifact(t *tes
 			t.Fatalf("delivery %q plan: %+v", delivery, plan)
 		}
 	}
-	for _, delivery := range []string{"server", "agent-host:host-one"} {
+	for _, delivery := range []string{"direct-share", "server", "agent-host:host-one"} {
 		if _, err := executor.Preflight(context.Background(), record, control.DeploymentStartRequest{Delivery: delivery}); err == nil {
 			t.Fatalf("hosted delivery %q passed deployment preflight", delivery)
 		}
@@ -113,12 +114,11 @@ func TestWindowsDeploymentMethodsUseNativeToolsOnly(t *testing.T) {
 	methods := []struct {
 		method  string
 		context string
-		program string
 	}{
-		{"winrm", "current-user", "winrs.exe"},
-		{"wmi", "current-user", "wmic.exe"},
-		{"service-control", "local-system", "sc.exe"},
-		{"scheduled-task", "local-system", "schtasks.exe"},
+		{"winrm", "current-user"},
+		{"wmi", "current-user"},
+		{"service-control", "local-system"},
+		{"scheduled-task", "local-system"},
 	}
 	for _, item := range methods {
 		t.Run(item.method, func(t *testing.T) {
@@ -128,18 +128,18 @@ func TestWindowsDeploymentMethodsUseNativeToolsOnly(t *testing.T) {
 				t.Fatal(err)
 			}
 			command := strings.Join(argv, " ")
-			if !strings.Contains(strings.ToLower(command), strings.ToLower(item.program)) {
-				t.Fatalf("command does not use %s: %q", item.program, argv)
+			if len(argv) != 7 || argv[0] != pivot.AgentExecutable || argv[1] != "_jump" || argv[2] != item.method {
+				t.Fatalf("method worker command=%q", argv)
 			}
-			for _, forbidden := range []string{"powershell", "invoke-command", ".ps1", "https://", "smb-pipe://"} {
+			for _, forbidden := range []string{"undertow", "powershell", "invoke-command", ".ps1", "cmd.exe", "wmic.exe", "ping.exe", "https://", "smb-pipe://"} {
 				if strings.Contains(strings.ToLower(command), forbidden) {
 					t.Fatalf("native command contains %q: %q", forbidden, argv)
 				}
 			}
-			if item.method == "service-control" && service != "Undertow-0123456789ab" {
+			if item.method == "service-control" && service != "S0123456789ab" {
 				t.Fatalf("service name=%q", service)
 			}
-			if item.method == "scheduled-task" && task != "Undertow-Deploy-0123456789ab" {
+			if (item.method == "scheduled-task" || item.method == "winrm") && task != "T0123456789ab" {
 				t.Fatalf("task name=%q", task)
 			}
 		})
@@ -152,8 +152,7 @@ func TestWindowsDeploymentCurrentUserTaskUsesSourceIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	command := strings.Join(argv, " ")
-	if !strings.Contains(command, `%USERDOMAIN%\%USERNAME%`) || !strings.Contains(command, " /IT /NP") {
+	if len(argv) != 7 || argv[2] != "scheduled-task" || argv[5] != "current-user" {
 		t.Fatalf("current-user task command=%q", argv)
 	}
 }

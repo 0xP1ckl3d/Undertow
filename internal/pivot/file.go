@@ -29,6 +29,7 @@ type FileMessage struct {
 	OK        bool   `json:"ok,omitempty"`
 	Error     string `json:"error,omitempty"`
 	SHA256    string `json:"sha256,omitempty"`
+	Direct    bool   `json:"direct,omitempty"`
 }
 
 type TransferProgress struct {
@@ -120,6 +121,17 @@ func TransferFile(parent context.Context, session *mux.Mux, agentID, operation, 
 }
 
 func TransferFileProgress(parent context.Context, session *mux.Mux, agentID, operation, localPath, remotePath string, progress func(TransferProgress)) (FileMessage, error) {
+	return transferFileProgress(parent, session, agentID, operation, localPath, remotePath, false, progress)
+}
+
+// TransferFileDirectProgress writes an upload to its final destination using
+// exclusive creation. It is reserved for Jump's unique target paths so the
+// destination never has a second executable-bearing temporary entry.
+func TransferFileDirectProgress(parent context.Context, session *mux.Mux, agentID, operation, localPath, remotePath string, progress func(TransferProgress)) (FileMessage, error) {
+	return transferFileProgress(parent, session, agentID, operation, localPath, remotePath, true, progress)
+}
+
+func transferFileProgress(parent context.Context, session *mux.Mux, agentID, operation, localPath, remotePath string, direct bool, progress func(TransferProgress)) (FileMessage, error) {
 	var result FileMessage
 	if session == nil {
 		return result, errors.New("VPN session is not connected")
@@ -164,7 +176,7 @@ func TransferFileProgress(parent context.Context, session *mux.Mux, agentID, ope
 		case <-done:
 		}
 	}()
-	if err := WriteFileMessage(stream, FileMessage{AgentID: agentID, Operation: operation, Path: remotePath, Size: size}); err != nil {
+	if err := WriteFileMessage(stream, FileMessage{AgentID: agentID, Operation: operation, Path: remotePath, Size: size, Direct: direct}); err != nil {
 		return result, err
 	}
 	if operation == "download" || operation == "screenshot" {
@@ -319,12 +331,23 @@ func serveUpload(stream *mux.Stream, reader *bufio.Reader, request FileMessage) 
 		fileError(stream, reader, err)
 		return
 	}
-	temp, err := os.CreateTemp(filepath.Dir(request.Path), ".tmp-*")
+	var temp *os.File
+	var err error
+	if request.Direct {
+		temp, err = os.OpenFile(request.Path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	} else {
+		temp, err = os.CreateTemp(filepath.Dir(request.Path), ".tmp-*")
+	}
 	if err != nil {
 		fileError(stream, reader, err)
 		return
 	}
-	defer os.Remove(temp.Name())
+	committed := false
+	defer func() {
+		if !committed || !request.Direct {
+			_ = os.Remove(temp.Name())
+		}
+	}()
 	if err := WriteFileMessage(stream, FileMessage{OK: true}); err != nil {
 		temp.Close()
 		return
@@ -350,10 +373,13 @@ func serveUpload(stream *mux.Stream, reader *bufio.Reader, request FileMessage) 
 		fileError(stream, reader, err)
 		return
 	}
-	if err := os.Link(temp.Name(), request.Path); err != nil {
-		fileError(stream, reader, err)
-		return
+	if !request.Direct {
+		if err := os.Link(temp.Name(), request.Path); err != nil {
+			fileError(stream, reader, err)
+			return
+		}
 	}
+	committed = true
 	_ = WriteFileMessage(stream, FileMessage{OK: true, Size: request.Size, SHA256: hex.EncodeToString(expected)})
 	_ = stream.CloseWrite()
 }

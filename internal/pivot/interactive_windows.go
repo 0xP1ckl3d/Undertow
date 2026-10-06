@@ -83,6 +83,22 @@ type interactiveWindowsProcess struct {
 
 type interactiveWindowsExit struct{ code int }
 
+type interactivePipeTerminal struct {
+	input  *os.File
+	output *os.File
+}
+
+func (p *interactivePipeTerminal) Read(b []byte) (int, error)  { return p.output.Read(b) }
+func (p *interactivePipeTerminal) Write(b []byte) (int, error) { return p.input.Write(b) }
+func (p *interactivePipeTerminal) Close() error {
+	_ = p.input.Close()
+	return p.output.Close()
+}
+
+type interactiveCommandProcess struct{ command *exec.Cmd }
+
+func (p *interactiveCommandProcess) Wait() error { return p.command.Wait() }
+
 var updateProcThreadAttribute = windows.NewLazySystemDLL("kernel32.dll").NewProc("UpdateProcThreadAttribute")
 
 func attachPseudoConsole(list *windows.ProcThreadAttributeList, console windows.Handle) error {
@@ -127,9 +143,18 @@ func startInteractiveProcess(ctx context.Context, request InteractiveRequest) (i
 	if len(argv) == 0 {
 		argv = []string{"cmd.exe"}
 	}
-	path, err := exec.LookPath(argv[0])
+	var path string
+	var err error
+	if argv[0] == AgentExecutable {
+		path, err = os.Executable()
+	} else {
+		path, err = exec.LookPath(argv[0])
+	}
 	if err != nil {
 		return nil, nil, nil, err
+	}
+	if request.NoPTY {
+		return startPipedInteractiveProcess(ctx, path, argv[1:])
 	}
 	app, err := windows.UTF16PtrFromString(path)
 	if err != nil {
@@ -208,4 +233,31 @@ func startInteractiveProcess(ctx context.Context, request InteractiveRequest) (i
 		}
 	}()
 	return process, terminal, terminal.resize, nil
+}
+
+func startPipedInteractiveProcess(ctx context.Context, path string, args []string) (interactiveProcess, io.ReadWriteCloser, func(uint16, uint16) error, error) {
+	inputRead, inputWrite, err := os.Pipe()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	outputRead, outputWrite, err := os.Pipe()
+	if err != nil {
+		_ = inputRead.Close()
+		_ = inputWrite.Close()
+		return nil, nil, nil, err
+	}
+	command := exec.CommandContext(ctx, path, args...)
+	configureExecProcess(command)
+	command.Stdin, command.Stdout, command.Stderr = inputRead, outputWrite, outputWrite
+	if err := command.Start(); err != nil {
+		_ = inputRead.Close()
+		_ = inputWrite.Close()
+		_ = outputRead.Close()
+		_ = outputWrite.Close()
+		return nil, nil, nil, err
+	}
+	_ = inputRead.Close()
+	_ = outputWrite.Close()
+	terminal := &interactivePipeTerminal{input: inputWrite, output: outputRead}
+	return &interactiveCommandProcess{command: command}, terminal, func(uint16, uint16) error { return nil }, nil
 }

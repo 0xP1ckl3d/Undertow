@@ -35,14 +35,15 @@ func deploymentPrerequisites(method, context string) string {
 
 func runConsoleDeployment(ctx context.Context, output io.Writer, call consoleCaller, args []string, selectedAgentID string) error {
 	if len(args) == 0 {
-		return errors.New("use deployments [SOURCE_AGENT]; deploy create [SOURCE_AGENT] TARGET ARTIFACT_ID METHOD CONTEXT; deploy show|prepare|start|link")
+		return errors.New("use jumps [SOURCE_AGENT]; jump create [SOURCE_AGENT] TARGET ARTIFACT_ID METHOD CONTEXT; jump show|prepare|start|link")
 	}
-	if args[0] == "deployments" || len(args) == 2 && args[1] == "list" {
-		if args[0] == "deployments" && len(args) > 2 {
-			return errors.New("use deployments [SOURCE_AGENT]")
+	isList := args[0] == "jumps" || args[0] == "deployments" || (args[0] == "jump" || args[0] == "deploy") && len(args) == 2 && args[1] == "list"
+	if isList {
+		if (args[0] == "jumps" || args[0] == "deployments") && len(args) > 2 {
+			return errors.New("use jumps [SOURCE_AGENT]")
 		}
 		source := selectedAgentID
-		if args[0] == "deployments" && len(args) > 1 {
+		if (args[0] == "jumps" || args[0] == "deployments") && len(args) > 1 {
 			source = args[1]
 		}
 		path := "/v1/deployments"
@@ -58,15 +59,15 @@ func runConsoleDeployment(ctx context.Context, output io.Writer, call consoleCal
 			return err
 		}
 		if len(records) == 0 {
-			fmt.Fprintln(output, "No deployment records.")
+			fmt.Fprintln(output, "No Jump records.")
 		}
 		for _, record := range records {
 			fmt.Fprintf(output, "%s  %s  %s  %s  source=%s\n", record.ID, record.State, record.Target, record.Method, record.SourceAgentID)
 		}
 		return nil
 	}
-	if args[0] != "deploy" || len(args) < 2 {
-		return errors.New("use deploy create|show|prepare|start|link or deployments")
+	if args[0] != "jump" && args[0] != "deploy" || len(args) < 2 {
+		return errors.New("use jump create|show|prepare|start|link or jumps")
 	}
 	switch args[1] {
 	case "create":
@@ -74,12 +75,12 @@ func runConsoleDeployment(ctx context.Context, output io.Writer, call consoleCal
 		source := selectedAgentID
 		if source == "" {
 			if len(values) < 5 {
-				return errors.New("use deploy create SOURCE_AGENT TARGET ARTIFACT_ID METHOD CONTEXT")
+				return errors.New("use jump create SOURCE_AGENT TARGET ARTIFACT_ID METHOD CONTEXT")
 			}
 			source, values = values[0], values[1:]
 		}
 		if len(values) != 4 {
-			return errors.New("use deploy create [SOURCE_AGENT] TARGET ARTIFACT_ID METHOD CONTEXT")
+			return errors.New("use jump create [SOURCE_AGENT] TARGET ARTIFACT_ID METHOD CONTEXT")
 		}
 		request := map[string]string{"source_agent_id": source, "target": values[0], "artifact_id": values[1], "method": values[2], "context": values[3]}
 		data, err := call(ctx, http.MethodPost, "/v1/deployments", request)
@@ -90,11 +91,11 @@ func runConsoleDeployment(ctx context.Context, output io.Writer, call consoleCal
 		if err := json.Unmarshal(data, &record); err != nil {
 			return err
 		}
-		fmt.Fprintf(output, "Created deployment %s for %s using %s. Use deploy prepare %s to validate readiness.\n", record.ID, record.Target, record.Method, record.ID)
+		fmt.Fprintf(output, "Created Jump %s for %s using %s. Use jump prepare %s to validate readiness.\n", record.ID, record.Target, record.Method, record.ID)
 		return nil
 	case "show":
 		if len(args) != 3 {
-			return errors.New("use deploy show ID")
+			return errors.New("use jump show ID")
 		}
 		data, err := call(ctx, http.MethodGet, "/v1/deployments/"+url.PathEscape(args[2]), nil)
 		if err != nil {
@@ -143,7 +144,7 @@ func runConsoleDeployment(ctx context.Context, output io.Writer, call consoleCal
 		return nil
 	case "prepare":
 		if len(args) != 3 {
-			return errors.New("use deploy prepare ID")
+			return errors.New("use jump prepare ID")
 		}
 		data, err := call(ctx, http.MethodPost, "/v1/deployments/"+url.PathEscape(args[2])+"/prepare", map[string]any{})
 		if err != nil {
@@ -153,11 +154,11 @@ func runConsoleDeployment(ctx context.Context, output io.Writer, call consoleCal
 		if err := json.Unmarshal(data, &record); err != nil {
 			return err
 		}
-		fmt.Fprintf(output, "Deployment %s prepared. Source may be sleeping; start queues the Job for its next check-in. Prerequisites: %s. Use deploy start %s [INSTALL_PATH].\n", record.ID, deploymentPrerequisites(record.Method, record.Context), record.ID)
+		fmt.Fprintf(output, "Jump %s prepared. Source may be sleeping; start queues the Job for its next check-in. Prerequisites: %s. Use jump start %s [INSTALL_PATH].\n", record.ID, deploymentPrerequisites(record.Method, record.Context), record.ID)
 		return nil
 	case "start":
 		if len(args) < 3 || len(args) > 4 {
-			return errors.New("use deploy start ID [INSTALL_PATH]")
+			return errors.New("use jump start ID [INSTALL_PATH]")
 		}
 		request := map[string]string{"delivery": "agent-channel"}
 		if len(args) == 4 {
@@ -171,11 +172,11 @@ func runConsoleDeployment(ctx context.Context, output io.Writer, call consoleCal
 		if err := json.Unmarshal(data, &record); err != nil {
 			return err
 		}
-		fmt.Fprintf(output, "Deployment %s started as Job %s. State: %s.\n", record.ID, record.JobID, record.State)
+		fmt.Fprintf(output, "Jump %s started as Job %s. State: %s.\n", record.ID, record.JobID, record.State)
 		return nil
 	case "link":
 		if len(args) != 4 {
-			return errors.New("use deploy link ID AGENT_ID")
+			return errors.New("use jump link ID AGENT_ID")
 		}
 		data, err := call(ctx, http.MethodPost, "/v1/deployments/"+url.PathEscape(args[2])+"/link", map[string]string{"agent_id": args[3]})
 		if err != nil {
@@ -185,9 +186,9 @@ func runConsoleDeployment(ctx context.Context, output io.Writer, call consoleCal
 		if err := json.Unmarshal(data, &record); err != nil {
 			return err
 		}
-		fmt.Fprintf(output, "Deployment %s linked to agent %s.\n", record.ID, record.ResultAgentID)
+		fmt.Fprintf(output, "Jump %s linked to agent %s.\n", record.ID, record.ResultAgentID)
 		return nil
 	default:
-		return fmt.Errorf("unknown deploy command %q; use create, show, prepare, start, or link", strings.TrimSpace(args[1]))
+		return fmt.Errorf("unknown jump command %q; use create, show, prepare, start, or link", strings.TrimSpace(args[1]))
 	}
 }

@@ -139,7 +139,7 @@ func (m *Manager) StartDeploymentCommandJob(ctx context.Context, agentID, deploy
 	}
 	startCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	session, err := pivot.OpenInteractive(startCtx, state.mux, pivot.InteractiveRequest{Argv: argv})
+	session, err := pivot.OpenInteractive(startCtx, state.mux, pivot.InteractiveRequest{Argv: argv, NoPTY: true})
 	if err != nil {
 		return JobInfo{}, err
 	}

@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
 	"regexp"
 	"strings"
 	"time"
@@ -15,15 +16,12 @@ import (
 	"undertow/internal/agentprofile"
 	"undertow/internal/control"
 	"undertow/internal/mux"
+	"undertow/internal/pivot"
 )
 
 type windowsDeploymentExecutor struct {
 	manager      *control.Manager
 	distribution *agentDistribution
-}
-
-type windowsDeploymentEndpoint struct {
-	artifactPath string
 }
 
 var windowsInstallPath = regexp.MustCompile(`^[A-Za-z]:\\[^\x00-\x1f"<>:|?*]+\.exe$`)
@@ -76,22 +74,24 @@ func (e *windowsDeploymentExecutor) Preflight(_ context.Context, record control.
 		return control.DeploymentExecutionPlan{}, err
 	}
 	selection := strings.TrimSpace(request.Delivery)
-	if selection != "" && selection != "agent-channel" && selection != "direct-share" {
+	if selection != "" && selection != "agent-channel" {
 		return control.DeploymentExecutionPlan{}, errors.New("Windows deployments stream the artifact through the source agent channel")
 	}
-	return control.DeploymentExecutionPlan{DeliveryType: "agent-channel", DeliveryID: record.SourceAgentID, InstallPath: path, Opaque: windowsDeploymentEndpoint{artifactPath: artifactPath}}, nil
+	if ip := net.ParseIP(strings.Trim(record.Target, "[]")); ip != nil && ip.To4() == nil {
+		return control.DeploymentExecutionPlan{}, errors.New("IPv6 targets are not supported by Windows administrative-share delivery")
+	}
+	return control.DeploymentExecutionPlan{DeliveryType: "agent-channel", DeliveryID: record.SourceAgentID, InstallPath: path, ArtifactPath: artifactPath}, nil
 }
 
 func (e *windowsDeploymentExecutor) Start(ctx context.Context, record control.DeploymentRecord, plan control.DeploymentExecutionPlan, source *mux.Mux, existingJobID string, report func(control.DeploymentProgress) error) error {
-	endpoint, ok := plan.Opaque.(windowsDeploymentEndpoint)
-	if !ok {
+	if plan.ArtifactPath == "" {
 		return errors.New("Windows deployment endpoint is unavailable")
 	}
 	sharePath, err := windowsAdminSharePath(record.Target, plan.InstallPath)
 	if err != nil {
 		return err
 	}
-	transfer, history, err := e.manager.StreamDeploymentArtifact(ctx, record.SourceAgentID, source, endpoint.artifactPath, sharePath)
+	transfer, history, err := e.manager.StreamDeploymentArtifact(ctx, record.SourceAgentID, source, plan.ArtifactPath, sharePath)
 	transferID := history.ID
 	if err != nil {
 		if transferID != "" {
@@ -188,27 +188,19 @@ func buildWindowsDeploymentCommand(record control.DeploymentRecord, installPath 
 	if len(shortID) > 12 {
 		shortID = shortID[:12]
 	}
-	quotedPath := `"` + installPath + `"`
+	worker := []string{pivot.AgentExecutable, "_jump", record.Method, record.Target, installPath, record.Context, shortID}
 	switch record.Method {
 	case "winrm":
-		command := `start "" ` + quotedPath + ` && echo Undertow WinRM launch accepted`
-		return []string{"winrs.exe", "-r:" + record.Target, "cmd.exe", "/d", "/s", "/c", command}, "", "", nil
+		taskName := "T" + shortID
+		return worker, "", taskName, nil
 	case "wmi":
-		return []string{"wmic.exe", "/node:" + record.Target, "process", "call", "create", quotedPath}, "", "", nil
+		return worker, "", "", nil
 	case "service-control":
-		serviceName := "Undertow-" + shortID
-		command := `sc.exe \\` + record.Target + ` create ` + serviceName + ` binPath= "\"` + installPath + `\"" start= auto obj= LocalSystem && sc.exe \\` + record.Target + ` start ` + serviceName
-		return []string{"cmd.exe", "/d", "/s", "/c", command}, serviceName, "", nil
+		serviceName := "S" + shortID
+		return worker, serviceName, "", nil
 	case "scheduled-task":
-		taskName := "Undertow-Deploy-" + shortID
-		runAs := "SYSTEM"
-		extra := ""
-		if record.Context == "current-user" {
-			runAs = `%USERDOMAIN%\%USERNAME%`
-			extra = " /IT /NP"
-		}
-		command := `schtasks.exe /Create /S ` + record.Target + ` /TN ` + taskName + ` /SC ONCE /ST 00:00 /TR "\"` + installPath + `\"" /RU "` + runAs + `"` + extra + ` /RL HIGHEST /F && schtasks.exe /Run /S ` + record.Target + ` /TN ` + taskName + ` && ping.exe -n 3 127.0.0.1 >NUL && schtasks.exe /Delete /S ` + record.Target + ` /TN ` + taskName + ` /F`
-		return []string{"cmd.exe", "/d", "/s", "/c", command}, "", taskName, nil
+		taskName := "T" + shortID
+		return worker, "", taskName, nil
 	default:
 		return nil, "", "", errors.New("unsupported Windows deployment method")
 	}

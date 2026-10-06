@@ -117,7 +117,7 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 				return matches
 			}
 		}
-		commands := []string{"agents", "agent", "payload", "deploy", "deployments", "session", "use", "status", "routes", "topology", "transports", "start", "stop", "help", "clear", "cls", "quit", "exit"}
+		commands := []string{"agents", "agent", "payload", "jump", "jumps", "session", "use", "status", "routes", "topology", "transports", "start", "stop", "help", "clear", "cls", "quit", "exit"}
 		if selected {
 			commands = append(commands, loadedNames...)
 		}
@@ -153,7 +153,7 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 		if len(before) == 1 {
 			return wordCompletions([]string{"kill"}, partial)
 		}
-	case "deploy":
+	case "jump", "deploy":
 		if len(before) == 1 {
 			return wordCompletions([]string{"create", "list", "show", "prepare", "start", "link"}, partial)
 		}
@@ -234,7 +234,7 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 		}
 	case "help":
 		if len(before) == 1 {
-			topics := []string{"agents", "agent", "payload", "deploy", "deployments", "profile", "artifacts", "status", "route", "relay", "topology", "transport", "transports", "lifecycle", "clear", "load", "unload", "bofs", "modules"}
+			topics := []string{"agents", "agent", "payload", "jump", "jumps", "profile", "artifacts", "status", "route", "relay", "topology", "transport", "transports", "lifecycle", "clear", "load", "unload", "bofs", "modules"}
 			if vpn {
 				topics = append(topics, "operators")
 			}

@@ -37,7 +37,7 @@ type DeploymentExecutionPlan struct {
 	DeliveryType string
 	DeliveryID   string
 	InstallPath  string
-	Opaque       any
+	ArtifactPath string
 }
 
 type DeploymentProgress struct {

@@ -18,6 +18,11 @@ import (
 const InteractiveDestination = "interactive.undertow.invalid:0"
 const InteractiveRelayDestination = "interactive-relay.undertow.invalid:0"
 
+// AgentExecutable asks a Windows agent to launch its own executable. It is
+// used for small built-in workers that must run outside the long-lived agent
+// process while retaining the normal Job stream and cancellation semantics.
+const AgentExecutable = "__agent_executable__"
+
 const (
 	InteractiveReady       byte = 'R'
 	InteractiveInput       byte = 'I'
@@ -31,9 +36,10 @@ const (
 )
 
 type InteractiveRequest struct {
-	Argv []string `json:"argv,omitempty"`
-	Cols uint16   `json:"cols,omitempty"`
-	Rows uint16   `json:"rows,omitempty"`
+	Argv  []string `json:"argv,omitempty"`
+	Cols  uint16   `json:"cols,omitempty"`
+	Rows  uint16   `json:"rows,omitempty"`
+	NoPTY bool     `json:"no_pty,omitempty"`
 }
 
 type interactiveProcess interface {

@@ -66,7 +66,7 @@ func (m *Manager) StreamDeploymentArtifact(ctx context.Context, agentID string, 
 		return empty, TransferRecord{}, err
 	}
 	m.PublishEvent("transfer.changed", record.ID)
-	result, transferErr := pivot.TransferFileProgress(ctx, source, agentID, "upload", localPath, remotePath, func(progress pivot.TransferProgress) {
+	result, transferErr := pivot.TransferFileDirectProgress(ctx, source, agentID, "upload", localPath, remotePath, func(progress pivot.TransferProgress) {
 		record.Bytes = progress.Bytes
 		if store.saveTransfer(record) == nil {
 			m.PublishEvent("transfer.changed", record.ID)

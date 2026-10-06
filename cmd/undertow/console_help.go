@@ -80,19 +80,19 @@ If a listener binds 0.0.0.0 or ::, set server= to its reachable address.
 Connected VPN clients can manage profiles and payloads through the authenticated
 control connection. Profile and payload views never show enrollment secrets.
 `)
-	case "deploy", "deployments":
-		fmt.Fprint(output, `Windows deployment records:
-  deployments [SOURCE_AGENT]        List server-retained deployment records.
-  deploy create [SOURCE_AGENT] TARGET ARTIFACT_ID METHOD CONTEXT
-  deploy show ID                     Inspect the request, progress, and result.
-  deploy prepare ID                  Validate the source snapshot and Windows build.
-  deploy start ID [INSTALL_PATH]
-  deploy link ID AGENT_ID            Associate a matching enrolled agent.
+	case "jump", "jumps", "deploy", "deployments":
+		fmt.Fprint(output, `Windows Jump records:
+  jumps [SOURCE_AGENT]               List server-retained Jump records.
+  jump create [SOURCE_AGENT] TARGET ARTIFACT_ID METHOD CONTEXT
+  jump show ID                       Inspect the request, progress, and result.
+  jump prepare ID                    Validate the source snapshot and Windows build.
+  jump start ID [INSTALL_PATH]
+  jump link ID AGENT_ID              Associate a matching enrolled agent.
 Methods: winrm, wmi, service-control, scheduled-task.
 Contexts: WinRM and WMI use current-user; Service Control uses local-system;
 Scheduled Task supports both. A selected agent supplies SOURCE_AGENT automatically.
-Start streams through the source agent or uses an existing hosted artifact
-endpoint, then creates one linked Job for the selected Windows method.
+Start streams through the source agent to the target administrative share,
+then creates one linked Job for the selected native Windows method.
 `)
 	case "agent":
 		fmt.Fprint(output, `Connected agents:
