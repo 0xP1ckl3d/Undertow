@@ -144,18 +144,27 @@ func (m *Manager) expireSleep(id string, deadline time.Time) {
 	m.PublishEvent("agent.updated", id)
 }
 
-// SetAgentSleep updates one connected agent and retains its override for later callbacks.
+// SetAgentSleep retains a policy for a known agent and sends it immediately when
+// the agent has a live session. Sleeping agents receive it on their next callback.
 func (m *Manager) SetAgentSleep(id string, policy SleepPolicy) error {
 	if err := policy.Validate(); err != nil {
 		return err
 	}
 	m.mu.Lock()
 	state := m.agents[id]
-	if state == nil || !state.inventoryReady {
-		m.mu.Unlock()
-		return errors.New("agent is not connected or inventory is pending")
+	known := state != nil && state.inventoryReady
+	if !known {
+		_, known = m.offlineAgents[id]
 	}
-	if !state.inventory.SleepSupported {
+	if !known {
+		m.mu.Unlock()
+		return errors.New("agent is unknown or inventory is pending")
+	}
+	supported := state != nil && state.inventory.SleepSupported
+	if state == nil {
+		supported = m.offlineAgents[id].SleepSupported
+	}
+	if !supported {
 		m.mu.Unlock()
 		return errors.New("agent does not support idle sleep; rebuild its payload")
 	}
@@ -168,14 +177,26 @@ func (m *Manager) SetAgentSleep(id string, policy SleepPolicy) error {
 		return err
 	}
 	m.sleepOverrides[id] = policy
-	state.inventory.Sleep = policy
-	stream := state.mux
+	var stream *mux.Mux
+	if state != nil {
+		state.inventory.Sleep = policy
+		stream = state.mux
+	} else {
+		info := m.offlineAgents[id]
+		info.Sleep = policy
+		m.offlineAgents[id] = info
+	}
 	m.mu.Unlock()
+	m.persistAgentSnapshot(id)
+	if stream == nil {
+		m.PublishEvent("agent.updated", id)
+		return nil
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := stream.SendControl(ctx, EncodeSleepMessage("policy", &policy)); err != nil {
-		return err
-	}
+	// A sleep handshake may close the stream after the override has been saved.
+	// The retained policy is resent from UpdateInventory on the next callback.
+	_ = stream.SendControl(ctx, EncodeSleepMessage("policy", &policy))
 	m.PublishEvent("agent.updated", id)
 	return nil
 }

@@ -87,6 +87,28 @@ function GraphDetails({node,edge,localClient,topology,onMouseEnter,onMouseLeave}
   return <div className="graph-inspector" onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave}><strong>{node?.label||'Connection details'}</strong><dl>{rows.map(([label,value],i)=><div key={label+i}><dt>{label}</dt><dd>{value}</dd></div>)}</dl></div>;
 }
 
+function AgentCheckInClock({node}:{node:TopologyNode}) {
+  const [now,setNow]=useState(Date.now());
+  const show=node.kind==='agent'&&node.connection_mode==='checkin'&&node.connection_state!=='disconnected'&&!!node.last_seen;
+  useEffect(()=>{
+    if(!show)return;
+    setNow(Date.now());
+    const timer=window.setInterval(()=>setNow(Date.now()),1000);
+    return()=>window.clearInterval(timer);
+  },[show,node.last_seen]);
+  if(!show)return null;
+  const seconds=Math.max(0,Math.floor((now-Date.parse(node.last_seen!))/1000));
+  if(!Number.isFinite(seconds))return null;
+  const label=seconds<60?`${seconds}s`:seconds<3600?`${Math.floor(seconds/60)}m`:seconds<86400?`${Math.floor(seconds/3600)}h ${Math.floor(seconds%3600/60)}m`:`${Math.floor(seconds/86400)}d`;
+  return <span className="graph-device-checkin" title={`Last seen ${new Date(node.last_seen!).toLocaleString()} · ${label} ago`}>{label}</span>;
+}
+
+function lostAt(node:TopologyNode){
+  if(node.kind!=='agent'||node.connection_state!=='disconnected'||!node.disconnected_at||node.disconnected_at.startsWith('0001-'))return '';
+  const value=new Date(node.disconnected_at);
+  return Number.isFinite(value.getTime())?value.toLocaleString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';
+}
+
 type GraphActions = {
   renameAgent:(id:string)=>void;
   archiveAgent:(id:string,archived:boolean)=>void;
@@ -122,7 +144,7 @@ export function TopologyGraph({topology,onAgent,localClient,actions}:{topology:T
     setNodes(topology.nodes.map(n=>{
       const column=n.kind==='client'?0:n.kind==='server'?1:n.kind==='agent'?2+2*(n.depth||0):n.kind==='relay'?3+2*(n.depth||0):6;
       const row=count[column]||0;count[column]=row+1;
-      return {id:n.id,position:layout[n.id]||{x:column*190,y:row*130+80},data:{label:<div className={`graph-device ${n.kind} ${n.kind==='agent'?(n.privilege||'unknown'):''} ${n.kind==='agent'&&n.connection_state==='sleeping'?'sleeping':n.active?'':'offline'} ${n.archived?'archived':''}`} title={n.label}><div className="graph-device-square"><DeviceIcon node={n}/><span className={'device-state '+(n.kind==='agent'&&n.connection_state==='sleeping'?'sleeping':n.active?'online':'')}/></div><span className="graph-device-name">{n.label}</span><span className="graph-device-subtitle">{n.kind==='agent'&&n.archived?'Archived':n.kind==='agent'&&n.connection_state==='sleeping'?'Sleeping':n.kind==='agent'&&!n.active?'Disconnected':n.kind==='agent'?n.os||'Agent':n.kind==='client'?`Operator${n.accepted_count?` · ${n.accepted_count} routes`:''}`:n.kind==='server'?'Server':n.kind==='relay'?(n.active?'Relay · listening':'Relay · inactive'):'Network'}</span></div>},style:{padding:0,border:0,background:'transparent',width:110},sourcePosition:Position.Right,targetPosition:Position.Left,draggable:true};
+      return {id:n.id,position:layout[n.id]||{x:column*190,y:row*130+80},data:{label:<div className={`graph-device ${n.kind} ${n.kind==='agent'?(n.privilege||'unknown'):''} ${n.kind==='agent'&&n.connection_state==='sleeping'?'sleeping':n.active?'':'offline'} ${n.archived?'archived':''}`} title={n.label}><div className="graph-device-square"><DeviceIcon node={n}/><AgentCheckInClock node={n}/><span className={'device-state '+(n.kind==='agent'&&n.connection_state==='sleeping'?'sleeping':n.active?'online':'')}/></div><span className="graph-device-name">{n.label}</span><span className="graph-device-subtitle">{n.kind==='agent'&&n.archived?'Archived':n.kind==='agent'&&n.connection_state==='sleeping'?'Sleeping':n.kind==='agent'&&!n.active?'Disconnected':n.kind==='agent'?n.os||'Agent':n.kind==='client'?`Operator${n.accepted_count?` · ${n.accepted_count} routes`:''}`:n.kind==='server'?'Server':n.kind==='relay'?(n.active?'Relay · listening':'Relay · inactive'):'Network'}</span>{lostAt(n)&&<span className="graph-device-lost-at">Lost {lostAt(n)}</span>}</div>},style:{padding:0,border:0,background:'transparent',width:110},sourcePosition:Position.Right,targetPosition:Position.Left,draggable:true};
     }));
   },[topology,layout,setNodes]);
   const edges=useMemo<Edge[]>(()=>topology?.edges.map(e=>{const accepted=!!e.accepted_by?.length;const color=e.kind==='forward'?'#cd85dd':accepted?'#4ecb94':e.kind==='relay_path'?'#e7aa4d':'#bc8c40';return {id:e.id,source:e.source,target:e.target,label:e.kind==='accepted_route'?undefined:e.label,type:'smoothstep',animated:e.kind==='carrier'&&e.active,style:{stroke:color,strokeWidth:accepted?2.8:e.kind==='carrier'?2.2:1.8,opacity:e.active?1:.45,strokeDasharray:e.kind==='forward'||!e.active?'5 4':undefined},labelStyle:{fill:'#c9d0c8',fontSize:10,fontWeight:600},labelBgStyle:{fill:'#111714',fillOpacity:.96,stroke:'#485248',strokeWidth:1},labelBgPadding:[8,5],markerEnd:{type:MarkerType.ArrowClosed,color}}})||[],[topology]);

@@ -295,6 +295,29 @@ func TestAgentDistributionAPIAndRetrieval(t *testing.T) {
 	}
 }
 
+func TestAgentDistributionHostOnlyUsesCarrierListenerPort(t *testing.T) {
+	manager := control.NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	manager.SetServerInfo(control.ServerInfo{Transport: "quic", Fingerprint: strings.Repeat("a", 64), Domain: "t.undertow.invalid", WebSocketPath: "/undertow", Listeners: []control.ListenerInfo{
+		{Transport: "quic", Listen: "[::]:443", TLSMode: "self-signed"},
+		{Transport: "websocket", Listen: "[::]:8443", TLSMode: "self-signed"},
+		{Transport: "dns", Listen: "[::]:53"},
+	}})
+	d := &agentDistribution{manager: manager, authMode: "token", credential: make([]byte, 32), deployment: deployment.Default()}
+	for _, test := range []struct {
+		carrier, want string
+		tls           bool
+	}{{"dns", "203.0.113.10:53", false}, {"websocket", "example.test:8443", true}, {"quic", "example.test:443", true}} {
+		carrier, host := test.carrier, "example.test"
+		if carrier == "dns" {
+			host = "203.0.113.10"
+		}
+		config, err := d.apply(d.defaults(), profileRequest{Transport: &carrier, Server: &host})
+		if err != nil || config.Server != test.want || config.TLSInsecureSkipVerify != test.tls {
+			t.Fatalf("%s host-only profile: server=%q tls=%t error=%v", carrier, config.Server, config.TLSInsecureSkipVerify, err)
+		}
+	}
+}
+
 func TestRetrievalPathValidation(t *testing.T) {
 	for _, value := range []string{"/", "/dl/", "/a/b/"} {
 		if !validRetrievalPath(value) {

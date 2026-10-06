@@ -74,6 +74,32 @@ func TestSleepPolicyAndOverrideSurviveReconnect(t *testing.T) {
 	}
 }
 
+func TestSleepPolicyCanBeSavedWhileAgentIsSleeping(t *testing.T) {
+	store, err := OpenOperationsStore(filepath.Join(t.TempDir(), "operations.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	m := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	if err := m.SetOperationsStore(store); err != nil {
+		t.Fatal(err)
+	}
+	m.mu.Lock()
+	m.offlineAgents["agent-a"] = AgentInfo{ID: "agent-a", SleepSupported: true, ConnectionMode: "checkin", ConnectionState: "sleeping", Sleep: SleepPolicy{IntervalSeconds: 15}}
+	m.mu.Unlock()
+	policy := SleepPolicy{IntervalSeconds: 3600, JitterPercent: 20}
+	if err := m.SetAgentSleep("agent-a", policy); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.AgentCatalog()[0].Sleep; got != policy {
+		t.Fatalf("sleeping record has %+v, want %+v", got, policy)
+	}
+	loaded, err := store.LoadAgentSleepOverrides()
+	if err != nil || loaded["agent-a"] != policy {
+		t.Fatalf("saved override: %+v %v", loaded, err)
+	}
+}
+
 func TestSleepTimingAndMissedCheckIns(t *testing.T) {
 	for _, test := range []struct {
 		seconds int

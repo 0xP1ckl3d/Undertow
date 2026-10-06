@@ -1319,7 +1319,7 @@ func (m *Manager) persistAgentSnapshot(id string) {
 	if store == nil {
 		return
 	}
-	for _, agent := range m.AgentList() {
+	for _, agent := range m.AgentCatalog() {
 		if agent.ID == id {
 			if err := store.SaveAgentSnapshot(agent); err != nil {
 				log.Printf("save agent %s: %v", id, err)

@@ -290,6 +290,26 @@ func (d *agentDistribution) apply(c agentruntime.Config, req profileRequest) (ag
 			c.Credential = secret
 		}
 	}
+	if c.Transport == "dns" || c.Transport == "quic" || c.Transport == "websocket" {
+		if _, _, err := net.SplitHostPort(c.Server); err != nil {
+			host := strings.Trim(c.Server, "[]")
+			if host != "" && !strings.Contains(host, "/") {
+				port := "443"
+				if c.Transport == "dns" {
+					port = "53"
+				}
+				for _, listener := range d.manager.ServerInfo().Listeners {
+					if listener.Transport == c.Transport {
+						if _, activePort, splitErr := net.SplitHostPort(listener.Listen); splitErr == nil {
+							port = activePort
+						}
+						break
+					}
+				}
+				c.Server = net.JoinHostPort(host, port)
+			}
+		}
+	}
 	return c, c.Validate()
 }
 

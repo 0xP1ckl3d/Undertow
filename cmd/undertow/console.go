@@ -119,7 +119,7 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 		go func() {
 			refreshCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 			defer cancel()
-			agents, err := consoleAgents(refreshCtx, call)
+			agents, err := consoleAgentRecords(refreshCtx, call)
 			select {
 			case refreshes <- agentRefresh{agents: agents, err: err, started: started}:
 			case <-ctx.Done():
@@ -170,17 +170,33 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 		emitted := false
 		for _, agent := range agents {
 			next[agent.ID] = agent
-			if _, ok := known[agent.ID]; !ok {
+			previous, seen := known[agent.ID]
+			switch consoleAgentTransition(previous, seen, agent) {
+			case "connected":
 				if editor != nil {
 					editor.notice(fmt.Sprintf("Agent connected: %s (%s)", consoleAgentName(agent), shortAgentID(agent.ID)))
 				} else {
 					fmt.Fprintf(output, "\n[Agent connected: %s (%s)]\n", consoleAgentName(agent), shortAgentID(agent.ID))
 				}
 				emitted = true
+			case "lost":
+				if editor != nil {
+					editor.notice(fmt.Sprintf("Agent lost: %s (%s)", consoleAgentName(agent), shortAgentID(agent.ID)))
+				} else {
+					fmt.Fprintf(output, "\n[Agent lost: %s (%s)]\n", consoleAgentName(agent), shortAgentID(agent.ID))
+				}
+				emitted = true
+				if selectedID == agent.ID {
+					selectedID, selectedLabel = "", ""
+					jobSelection = consoleJobSelection{}
+				}
 			}
 		}
 		for id, agent := range known {
 			if _, ok := next[id]; !ok {
+				if agent.Offline {
+					continue
+				}
 				if editor != nil {
 					editor.notice(fmt.Sprintf("Agent lost: %s (%s)", consoleAgentName(agent), shortAgentID(id)))
 				} else {
@@ -342,13 +358,14 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 			continue
 		}
 		if args[0] == "agents" || args[0] == "use" || args[0] == "select" {
-			agents, err := consoleAgents(ctx, call)
+			records, err := consoleAgentRecords(ctx, call)
 			if err != nil {
 				fmt.Fprintln(output, "error:", err)
 				continue
 			}
-			applyAgents(agents)
+			applyAgents(records)
 			lastApplied = time.Now()
+			agents := connectedConsoleAgents(records)
 			if args[0] == "agents" || len(args) == 1 {
 				printConsoleAgents(output, agents)
 				continue
@@ -538,6 +555,14 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 }
 
 func consoleAgents(ctx context.Context, call consoleCaller) ([]control.AgentInfo, error) {
+	agents, err := consoleAgentRecords(ctx, call)
+	if err != nil {
+		return nil, err
+	}
+	return connectedConsoleAgents(agents), nil
+}
+
+func consoleAgentRecords(ctx context.Context, call consoleCaller) ([]control.AgentInfo, error) {
 	data, err := call(ctx, http.MethodGet, "/v1/status", nil)
 	if err != nil {
 		return nil, err
@@ -548,13 +573,6 @@ func consoleAgents(ctx context.Context, call consoleCaller) ([]control.AgentInfo
 	if err := json.Unmarshal(data, &status); err != nil {
 		return nil, err
 	}
-	connected := status.Agents[:0]
-	for _, agent := range status.Agents {
-		if !agent.Offline {
-			connected = append(connected, agent)
-		}
-	}
-	status.Agents = connected
 	sort.Slice(status.Agents, func(i, j int) bool {
 		if status.Agents[i].Hostname != status.Agents[j].Hostname {
 			return status.Agents[i].Hostname < status.Agents[j].Hostname
@@ -562,6 +580,29 @@ func consoleAgents(ctx context.Context, call consoleCaller) ([]control.AgentInfo
 		return status.Agents[i].ID < status.Agents[j].ID
 	})
 	return status.Agents, nil
+}
+
+func connectedConsoleAgents(records []control.AgentInfo) []control.AgentInfo {
+	connected := make([]control.AgentInfo, 0, len(records))
+	for _, agent := range records {
+		if !agent.Offline {
+			connected = append(connected, agent)
+		}
+	}
+	return connected
+}
+
+func consoleAgentTransition(previous control.AgentInfo, seen bool, current control.AgentInfo) string {
+	if !current.Offline {
+		if !seen || previous.ConnectionState == "disconnected" {
+			return "connected"
+		}
+		return ""
+	}
+	if seen && current.ConnectionState == "disconnected" && previous.ConnectionState != "disconnected" {
+		return "lost"
+	}
+	return ""
 }
 
 func shortAgentID(id string) string {

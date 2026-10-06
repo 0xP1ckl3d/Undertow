@@ -12,9 +12,9 @@
 .graph-device.agent.offline{opacity:.6;filter:grayscale(.8)}
 .graph-device.agent.offline .graph-device-square{border-style:dashed}
 .graph-device.agent.offline .graph-device-subtitle{color:#c5b6a3}
-.graph-device.agent.sleeping .graph-device-square{border-color:#b9944a;background:#292416}
-.graph-device.agent.sleeping .graph-device-subtitle{color:#e5c787}
 .graph-device.agent.sleeping .device-state{background:#eab458;box-shadow:0 0 0 2px #5d451e}
+.graph-device-checkin{position:absolute;left:3px;top:3px;padding:1px 2px;background:#111a18d9;color:#dbe7dd;font-size:8px;font-variant-numeric:tabular-nums;line-height:1.1;white-space:nowrap}
+.graph-device-lost-at{margin-top:3px;color:#c4b3a3;font-size:8px;line-height:1.2;white-space:nowrap}
 .graph-device.agent.archived .graph-device-subtitle{color:#aab2a9}
 .archive-control{display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap}
 .archive-control p{margin:0;color:var(--muted);font-size:10px;line-height:1.5;max-width:650px}
