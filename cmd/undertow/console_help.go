@@ -85,7 +85,7 @@ control connection. Profile and payload views never show enrollment secrets.
   deployments [SOURCE_AGENT]        List server-retained deployment records.
   deploy create [SOURCE_AGENT] TARGET ARTIFACT_ID METHOD CONTEXT
   deploy show ID                     Inspect the request, progress, and result.
-  deploy prepare ID                  Validate the live source and Windows build.
+  deploy prepare ID                  Validate the source snapshot and Windows build.
   deploy start ID direct-share|server|agent-host:HOST_ID [INSTALL_PATH]
   deploy link ID AGENT_ID            Associate a matching enrolled agent.
 Methods: winrm, wmi, service-control, scheduled-task.

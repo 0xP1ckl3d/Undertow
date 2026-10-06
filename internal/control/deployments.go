@@ -56,7 +56,7 @@ type DeploymentProgress struct {
 // touch the target; Start must report waiting or failed before returning.
 type DeploymentMethodExecutor interface {
 	Preflight(context.Context, DeploymentRecord, DeploymentStartRequest) (DeploymentExecutionPlan, error)
-	Start(context.Context, DeploymentRecord, DeploymentExecutionPlan, *mux.Mux, func(DeploymentProgress) error) error
+	Start(context.Context, DeploymentRecord, DeploymentExecutionPlan, *mux.Mux, string, func(DeploymentProgress) error) error
 }
 
 type createDeploymentRequest struct {
@@ -199,13 +199,12 @@ func (m *Manager) prepareDeployment(id string) (DeploymentRecord, error) {
 	if record.State != "created" {
 		return DeploymentRecord{}, ErrDeploymentConflict
 	}
+	_, _, sourceReady := m.deploymentSource(record.SourceAgentID)
 	m.mu.RLock()
-	state := m.agents[record.SourceAgentID]
-	sourceReady := state != nil && state.inventoryReady && state.inventory.OS == "windows"
 	lookup := m.deploymentArtifactLookup
 	m.mu.RUnlock()
 	if !sourceReady {
-		return DeploymentRecord{}, errors.New("source Windows agent must be connected and inventory ready")
+		return DeploymentRecord{}, errors.New("source Windows agent must have retained inventory and be connected or within its expected sleep window")
 	}
 	if lookup == nil {
 		return DeploymentRecord{}, errors.New("artifact catalog is unavailable")
@@ -230,6 +229,22 @@ func (m *Manager) prepareDeployment(id string) (DeploymentRecord, error) {
 		m.PublishEvent("deployment.changed", id)
 	}
 	return record, err
+}
+
+// deploymentSource returns the current mux when one exists and accepts a
+// retained sleeping inventory as ready for queued work. A sleeping check-in
+// agent is intentionally not treated as disconnected here.
+func (m *Manager) deploymentSource(agentID string) (AgentInfo, *mux.Mux, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if state := m.agents[agentID]; state != nil && state.inventoryReady && state.inventory.OS == "windows" {
+		return state.inventory, state.mux, true
+	}
+	retained, ok := m.offlineAgents[agentID]
+	if ok && retained.OS == "windows" && retained.ConnectionState == "sleeping" && !retained.SleepLostAfter.IsZero() && time.Now().Before(retained.SleepLostAfter) {
+		return retained, nil, true
+	}
+	return AgentInfo{}, nil, false
 }
 
 // AdvanceDeployment is called by the method executor, never directly by the
@@ -302,10 +317,12 @@ func (m *Manager) startDeployment(ctx context.Context, id string, request Deploy
 	if err != nil {
 		return err
 	}
+	if record.State != "prepared" {
+		return ErrDeploymentConflict
+	}
+	_, source, sourceReady := m.deploymentSource(record.SourceAgentID)
 	m.mu.RLock()
-	state := m.agents[record.SourceAgentID]
 	lookup := m.deploymentArtifactLookup
-	sourceReady := state != nil && state.inventoryReady && state.inventory.OS == "windows"
 	m.mu.RUnlock()
 	if !sourceReady || lookup == nil {
 		return errors.New("source Windows agent or artifact catalog is unavailable")
@@ -321,10 +338,6 @@ func (m *Manager) startDeployment(ctx context.Context, id string, request Deploy
 	if err != nil {
 		return err
 	}
-	source := m.Get(record.SourceAgentID)
-	if source == nil {
-		return errors.New("source agent is disconnected")
-	}
 	claimed, err := store.ChangeDeployment(id, func(item *DeploymentRecord) error {
 		if item.State != "prepared" {
 			return ErrDeploymentConflict
@@ -337,7 +350,39 @@ func (m *Manager) startDeployment(ctx context.Context, id string, request Deploy
 		return err
 	}
 	m.PublishEvent("deployment.changed", id)
-	if err := executor.Start(ctx, claimed, plan, source, func(update DeploymentProgress) error {
+	queuedRequest := queuedJobRequest{Kind: "deployment", DeploymentID: id, Delivery: request.Delivery, InstallPath: plan.InstallPath, Actor: boundActionFromContext(ctx), deferDispatch: true}
+	job, queued, queueErr := m.queueJobIfSleeping(0, record.SourceAgentID, queuedRequest)
+	if queueErr != nil {
+		failure := queueErr.Error()
+		_ = m.AdvanceDeployment(id, DeploymentProgress{State: "failed", Progress: "Deployment could not be queued", Failure: failure})
+		return queueErr
+	}
+	if queued {
+		_, err = store.ChangeDeployment(id, func(item *DeploymentRecord) error {
+			if item.State != "dispatching" {
+				return ErrDeploymentConflict
+			}
+			item.JobID = job.ID
+			item.Progress = "Queued for the source agent's next check-in"
+			item.UpdatedAt = time.Now().UTC()
+			return nil
+		})
+		if err != nil {
+			_ = m.CancelJob(0, job.ID)
+			return err
+		}
+		m.PublishEvent("deployment.changed", id)
+		if source != nil {
+			go m.dispatchQueuedJobs(record.SourceAgentID, source)
+		}
+		return nil
+	}
+	if source == nil {
+		failure := "source agent is no longer connected; retry while it is awake or in a valid sleeping window"
+		_ = m.AdvanceDeployment(id, DeploymentProgress{State: "failed", Progress: "Source agent unavailable", Failure: failure})
+		return errors.New(failure)
+	}
+	if err := executor.Start(ctx, claimed, plan, source, "", func(update DeploymentProgress) error {
 		return m.AdvanceDeployment(id, update)
 	}); err != nil {
 		failure := err.Error()
@@ -357,6 +402,84 @@ func (m *Manager) startDeployment(ctx context.Context, id string, request Deploy
 		return errors.New(failure)
 	}
 	return nil
+}
+
+// dispatchQueuedDeployment runs only after the source agent has authenticated
+// its next check-in. The queued record contains only the deployment ID,
+// delivery selection, and resolved install path; endpoint capabilities and
+// artifact integrity are revalidated here before any target action starts.
+func (m *Manager) dispatchQueuedDeployment(agentID string, stream *mux.Mux, job *jobState, request queuedJobRequest) {
+	ctx, cancel := context.WithCancel(context.WithValue(context.Background(), actionContextKey{}, request.Actor))
+	defer cancel()
+	m.mu.RLock()
+	executor := m.deploymentExecutor
+	store := m.operations
+	m.mu.RUnlock()
+	if executor == nil || store == nil || request.DeploymentID == "" {
+		m.failQueuedDeploymentJob(job, "queued deployment executor is unavailable")
+		return
+	}
+	record, err := store.Deployment(request.DeploymentID)
+	if err != nil || record.SourceAgentID != agentID || record.JobID != job.info.ID || record.State != "dispatching" {
+		m.failQueuedDeploymentJob(job, "queued deployment record is no longer dispatching")
+		return
+	}
+	plan, err := executor.Preflight(ctx, record, DeploymentStartRequest{Delivery: request.Delivery, InstallPath: request.InstallPath})
+	if err != nil {
+		_ = m.AdvanceDeployment(record.ID, DeploymentProgress{State: "failed", Progress: "Queued deployment preflight failed", Failure: err.Error(), JobID: job.info.ID})
+		m.failQueuedDeploymentJob(job, "Queued deployment preflight failed: "+err.Error())
+		return
+	}
+	err = executor.Start(ctx, record, plan, stream, job.info.ID, func(update DeploymentProgress) error {
+		return m.AdvanceDeployment(record.ID, update)
+	})
+	if err == nil {
+		return
+	}
+	select {
+	case <-stream.Done():
+		_ = m.AdvanceDeployment(record.ID, DeploymentProgress{State: "waiting", Progress: "Source agent check-in ended during deployment; target outcome is uncertain. Review before retrying or linking a late enrolment.", JobID: job.info.ID})
+		m.interruptQueuedDeploymentJob(job, "Source agent check-in ended during deployment; execution outcome is uncertain.")
+	default:
+		_ = m.AdvanceDeployment(record.ID, DeploymentProgress{State: "failed", Progress: "Queued Windows method failed", Failure: err.Error(), JobID: job.info.ID})
+		m.failQueuedDeploymentJob(job, err.Error())
+	}
+}
+
+func (m *Manager) failQueuedDeploymentJob(job *jobState, reason string) {
+	m.mu.Lock()
+	if job.info.State != "dispatching" && job.info.State != "queued" {
+		m.mu.Unlock()
+		return
+	}
+	now := time.Now().UTC()
+	job.info.State, job.info.Ended, job.info.OutputError = "failed", &now, reason
+	job.request = nil
+	info, ownerKey, store := job.info, job.ownerKey, m.operations
+	if store != nil {
+		_ = store.SaveJob(info, ownerKey, "")
+		_ = store.DeleteQueuedJob(info.ID)
+	}
+	m.mu.Unlock()
+	m.PublishEvent("job.failed", info.ID)
+}
+
+func (m *Manager) interruptQueuedDeploymentJob(job *jobState, reason string) {
+	m.mu.Lock()
+	if job.info.State != "dispatching" && job.info.State != "queued" {
+		m.mu.Unlock()
+		return
+	}
+	now := time.Now().UTC()
+	job.info.State, job.info.Ended, job.info.OutputError = "interrupted", &now, reason
+	job.request = nil
+	info, ownerKey, store := job.info, job.ownerKey, m.operations
+	if store != nil {
+		_ = store.SaveJob(info, ownerKey, "")
+		_ = store.DeleteQueuedJob(info.ID)
+	}
+	m.mu.Unlock()
+	m.PublishEvent("job.interrupted", info.ID)
 }
 
 func (m *Manager) linkDeployment(id, agentID string, automatic bool) (DeploymentRecord, error) {

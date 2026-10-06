@@ -18,22 +18,26 @@ import (
 // queuedJobRequest is retained by the server while an agent is intentionally
 // sleeping. The original typed job API validates the payload before enqueue.
 type queuedJobRequest struct {
-	Kind      string             `json:"kind"`
-	Language  string             `json:"language,omitempty"`
-	Argv      []string           `json:"argv,omitempty"`
-	Source    []byte             `json:"source,omitempty"`
-	Input     []byte             `json:"input,omitempty"`
-	Arguments []byte             `json:"arguments,omitempty"`
-	Exec      *pivot.ExecRequest `json:"exec,omitempty"`
-	Screen    int                `json:"screen,omitempty"`
-	Actor     actionContext      `json:"actor,omitempty"`
+	Kind          string             `json:"kind"`
+	Language      string             `json:"language,omitempty"`
+	Argv          []string           `json:"argv,omitempty"`
+	Source        []byte             `json:"source,omitempty"`
+	Input         []byte             `json:"input,omitempty"`
+	Arguments     []byte             `json:"arguments,omitempty"`
+	Exec          *pivot.ExecRequest `json:"exec,omitempty"`
+	Screen        int                `json:"screen,omitempty"`
+	Actor         actionContext      `json:"actor,omitempty"`
+	DeploymentID  string             `json:"deployment_id,omitempty"`
+	Delivery      string             `json:"delivery,omitempty"`
+	InstallPath   string             `json:"install_path,omitempty"`
+	deferDispatch bool               `json:"-"`
 }
 
 const maxQueuedJobs = 32
 const maxQueuedJobBytes = 64 << 20
 
 func (r queuedJobRequest) size() int {
-	n := len(r.Source) + len(r.Input) + len(r.Arguments) + len(r.Language)
+	n := len(r.Source) + len(r.Input) + len(r.Arguments) + len(r.Language) + len(r.DeploymentID) + len(r.Delivery) + len(r.InstallPath)
 	for _, arg := range r.Argv {
 		n += len(arg)
 	}
@@ -89,7 +93,7 @@ func (m *Manager) queueJobIfSleeping(owner uint64, agentID string, request queue
 		return JobInfo{}, true, err
 	}
 	now := time.Now().UTC()
-	info := JobInfo{ID: hex.EncodeToString(random[:]), AgentID: agentID, Kind: request.Kind, Language: request.Language, Argv: append([]string(nil), request.Argv...), Started: now, QueuedAt: &now, State: "queued"}
+	info := JobInfo{ID: hex.EncodeToString(random[:]), AgentID: agentID, Kind: request.Kind, Language: request.Language, Argv: append([]string(nil), request.Argv...), Started: now, QueuedAt: &now, State: "queued", DeploymentID: request.DeploymentID}
 	if request.Exec != nil {
 		info.Builtin = request.Exec.Builtin
 		info.Argv = append([]string(nil), request.Exec.Argv...)
@@ -110,7 +114,7 @@ func (m *Manager) queueJobIfSleeping(owner uint64, agentID string, request queue
 	}
 	m.mu.Unlock()
 	m.PublishEvent("job.queued", info.ID)
-	if stream != nil {
+	if stream != nil && !request.deferDispatch {
 		go m.dispatchQueuedJobs(agentID, stream)
 	}
 	return info, true, nil
@@ -187,6 +191,10 @@ func (m *Manager) dispatchQueuedJob(agentID string, stream *mux.Mux, job *jobSta
 	m.mu.RUnlock()
 	if request.Kind == "exec" {
 		m.dispatchQueuedExec(agentID, stream, job, request.Exec)
+		return
+	}
+	if request.Kind == "deployment" {
+		m.dispatchQueuedDeployment(agentID, stream, job, request)
 		return
 	}
 	if request.Kind == "screenshot" {

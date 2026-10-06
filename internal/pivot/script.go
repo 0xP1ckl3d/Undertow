@@ -169,7 +169,12 @@ func scriptExecutable(language string) (string, []string, error) {
 		}
 		for _, name := range candidates {
 			if path, err := exec.LookPath(name); err == nil {
-				return path, []string{"-NoProfile", "-NonInteractive", "-Command", "-"}, nil
+				// Windows PowerShell's `-Command -` consumes stdin as an
+				// interactive command stream. Multi-line constructs such as
+				// try blocks can then reach EOF without executing and still
+				// return exit code zero. Read the complete source and compile it
+				// as one script block so the in-memory script has file semantics.
+				return path, []string{"-NoProfile", "-NonInteractive", "-Command", "$source=[Console]::In.ReadToEnd(); & ([ScriptBlock]::Create($source))"}, nil
 			}
 		}
 		return "", nil, errors.New("PowerShell interpreter is not installed")

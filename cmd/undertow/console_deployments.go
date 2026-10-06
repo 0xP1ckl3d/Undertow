@@ -153,7 +153,7 @@ func runConsoleDeployment(ctx context.Context, output io.Writer, call consoleCal
 		if err := json.Unmarshal(data, &record); err != nil {
 			return err
 		}
-		fmt.Fprintf(output, "Deployment %s prepared. Prerequisites: %s. Use deploy start %s direct-share|server|agent-host:HOST_ID [INSTALL_PATH].\n", record.ID, deploymentPrerequisites(record.Method, record.Context), record.ID)
+		fmt.Fprintf(output, "Deployment %s prepared. Source may be sleeping; start queues the Job for its next check-in. Prerequisites: %s. Use deploy start %s direct-share|server|agent-host:HOST_ID [INSTALL_PATH].\n", record.ID, deploymentPrerequisites(record.Method, record.Context), record.ID)
 		return nil
 	case "start":
 		if len(args) < 4 || len(args) > 5 {

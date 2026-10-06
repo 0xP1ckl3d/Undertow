@@ -119,10 +119,65 @@ func (m *Manager) StartScriptJob(ctx context.Context, owner uint64, agentID, lan
 	return m.startScriptJob(ctx, owner, agentID, language, source, "", true)
 }
 
-// StartDeploymentScriptJob starts immediately so retrieval capabilities in
-// the in-memory script are never retained in the durable sleeping-agent queue.
-func (m *Manager) StartDeploymentScriptJob(ctx context.Context, agentID, deploymentID string, source []byte) (JobInfo, error) {
-	return m.startScriptJob(ctx, 0, agentID, "powershell", source, deploymentID, false)
+// StartDeploymentScriptJob starts immediately, or attaches a script session to
+// an already-created queued deployment Job. Retrieval capabilities remain only
+// in the live session and are never serialized into the sleeping-agent queue.
+func (m *Manager) StartDeploymentScriptJob(ctx context.Context, agentID, deploymentID, existingJobID string, source []byte) (JobInfo, error) {
+	if existingJobID == "" {
+		return m.startScriptJob(ctx, 0, agentID, "powershell", source, deploymentID, false)
+	}
+	if len(source) == 0 || len(source) > pivot.ScriptSourceLimit {
+		return JobInfo{}, errors.New("script source exceeds the 1 MiB limit or is empty")
+	}
+	m.mu.RLock()
+	state := m.agents[agentID]
+	m.mu.RUnlock()
+	if state == nil || state.mux == nil {
+		return JobInfo{}, errors.New("agent disconnected")
+	}
+	startCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	session, err := pivot.OpenScript(startCtx, state.mux, "powershell", source)
+	if err != nil {
+		return JobInfo{}, err
+	}
+	m.mu.Lock()
+	job := m.jobs[existingJobID]
+	if job == nil || job.info.AgentID != agentID || job.info.DeploymentID != deploymentID || job.info.State != "dispatching" || job.request == nil || job.request.Kind != "deployment" {
+		m.mu.Unlock()
+		_ = session.Close()
+		return JobInfo{}, errors.New("queued deployment Job is unavailable")
+	}
+	if current := m.agents[agentID]; current == nil || current.mux != state.mux {
+		m.mu.Unlock()
+		_ = session.Close()
+		return JobInfo{}, errors.New("agent disconnected")
+	}
+	job.info.State = "running"
+	job.info.Started = time.Now().UTC()
+	job.info.Language = "powershell"
+	queuedRequest := *job.request
+	job.agent, job.session, job.request = state.mux, session, nil
+	info, ownerKey, store := job.info, job.ownerKey, m.operations
+	if store != nil {
+		if err := store.SaveJob(info, ownerKey, ""); err != nil {
+			job.info.State = "dispatching"
+			job.agent, job.session = nil, nil
+			job.request = &queuedRequest
+			m.mu.Unlock()
+			_ = session.Close()
+			return JobInfo{}, err
+		}
+		if err := store.DeleteQueuedJob(info.ID); err != nil {
+			// The running Job is already durable; retain it and let recovery
+			// surface any stale request on restart.
+			log.Printf("remove dispatched deployment request: %v", err)
+		}
+	}
+	m.mu.Unlock()
+	m.PublishEvent("job.running", info.ID)
+	go m.collectJob(job)
+	return info, nil
 }
 
 func (m *Manager) startScriptJob(ctx context.Context, owner uint64, agentID, language string, source []byte, deploymentID string, allowQueue bool) (JobInfo, error) {
@@ -590,6 +645,12 @@ func (m *Manager) CancelJob(owner uint64, id string) error {
 		}
 	}
 	m.PublishEvent("job.cancelled", id)
+	if info.DeploymentID != "" {
+		_ = m.AdvanceDeployment(info.DeploymentID, DeploymentProgress{
+			State: "failed", Progress: "Deployment Job cancelled",
+			Failure: "The queued source-agent Job was cancelled.", JobID: info.ID,
+		})
+	}
 	if session != nil {
 		return session.Close()
 	}

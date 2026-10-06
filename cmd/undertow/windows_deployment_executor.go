@@ -5,7 +5,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"regexp"
@@ -29,12 +31,24 @@ type windowsDeploymentEndpoint struct {
 	artifactPath string
 }
 
-var windowsInstallPath = regexp.MustCompile(`^[A-Za-z]:\\[^\x00-\x1f"<>|?*]+\.exe$`)
+var windowsInstallPath = regexp.MustCompile(`^[A-Za-z]:\\[^\x00-\x1f"<>:|?*]+\.exe$`)
 
-func normalizeWindowsInstallPath(record control.DeploymentRecord, requested, filename string) (string, error) {
+func randomWindowsPathID() (string, error) {
+	value := make([]byte, 16)
+	if _, err := rand.Read(value); err != nil {
+		return "", fmt.Errorf("generate deployment path: %w", err)
+	}
+	return hex.EncodeToString(value), nil
+}
+
+func normalizeWindowsInstallPath(requested string) (string, error) {
 	value := strings.TrimSpace(strings.ReplaceAll(requested, "/", `\`))
 	if value == "" {
-		value = `C:\ProgramData\Undertow\Deployments\` + record.ID + `\` + filename
+		id, err := randomWindowsPathID()
+		if err != nil {
+			return "", err
+		}
+		value = `C:\Windows\Temp\` + id + `.exe`
 	}
 	if len(value) > 1024 || !windowsInstallPath.MatchString(value) {
 		return "", errors.New("install path must be an absolute Windows .exe path")
@@ -62,7 +76,7 @@ func (e *windowsDeploymentExecutor) Preflight(_ context.Context, record control.
 	if record.Context == "named-account" || record.Account != "" {
 		return control.DeploymentExecutionPlan{}, errors.New("named-account deployments require a future credential integration")
 	}
-	path, err := normalizeWindowsInstallPath(record, request.InstallPath, a.Filename)
+	path, err := normalizeWindowsInstallPath(request.InstallPath)
 	if err != nil {
 		return control.DeploymentExecutionPlan{}, err
 	}
@@ -98,7 +112,7 @@ func (e *windowsDeploymentExecutor) Preflight(_ context.Context, record control.
 	return control.DeploymentExecutionPlan{DeliveryType: deliveryType, DeliveryID: deliveryID, InstallPath: path, Opaque: windowsDeploymentEndpoint{hosted: hosted, directShare: deliveryType == "direct-share", artifactPath: artifactPath}}, nil
 }
 
-func (e *windowsDeploymentExecutor) Start(ctx context.Context, record control.DeploymentRecord, plan control.DeploymentExecutionPlan, source *mux.Mux, report func(control.DeploymentProgress) error) error {
+func (e *windowsDeploymentExecutor) Start(ctx context.Context, record control.DeploymentRecord, plan control.DeploymentExecutionPlan, source *mux.Mux, existingJobID string, report func(control.DeploymentProgress) error) error {
 	endpoint, ok := plan.Opaque.(windowsDeploymentEndpoint)
 	if !ok {
 		return errors.New("Windows deployment endpoint is unavailable")
@@ -112,13 +126,13 @@ func (e *windowsDeploymentExecutor) Start(ctx context.Context, record control.De
 		prepare := `$path='` + psQuote(sharePath) + `'; [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($path)) | Out-Null`
 		result, err := pivot.Execute(ctx, source, []string{"powershell.exe", "-NoProfile", "-NonInteractive", "-Command", prepare})
 		if err != nil || result.Error != "" || result.ExitCode != 0 {
-			return errors.New("source agent could not prepare the target administrative share")
+			return fmt.Errorf("source agent could not prepare the target administrative share: %s", deploymentCommandError(err, result))
 		}
 		transfer, history, err := e.manager.StreamDeploymentArtifact(ctx, record.SourceAgentID, source, endpoint.artifactPath, sharePath)
 		transferID = history.ID
 		if err != nil {
 			if transferID != "" {
-				_ = report(control.DeploymentProgress{State: "failed", Progress: "Artifact stream failed", Failure: "The source agent could not stream the artifact to the target administrative share. Inspect the linked Transfer.", TransferID: transferID, InstallPath: plan.InstallPath})
+				_ = report(control.DeploymentProgress{State: "failed", Progress: "Artifact stream failed", Failure: "Artifact stream failed: " + trimDeploymentError(err), TransferID: transferID, InstallPath: plan.InstallPath})
 			}
 			return fmt.Errorf("stream artifact through source agent to target share: %w", err)
 		}
@@ -134,10 +148,10 @@ func (e *windowsDeploymentExecutor) Start(ctx context.Context, record control.De
 		}
 		return err
 	}
-	job, err := e.manager.StartDeploymentScriptJob(ctx, record.SourceAgentID, record.ID, script)
+	job, err := e.manager.StartDeploymentScriptJob(ctx, record.SourceAgentID, record.ID, existingJobID, script)
 	if err != nil {
 		if transferID != "" {
-			_ = report(control.DeploymentProgress{State: "failed", Progress: "Method Job start failed", Failure: "The artifact Transfer completed, but the Windows method Job could not start.", TransferID: transferID, InstallPath: plan.InstallPath})
+			_ = report(control.DeploymentProgress{State: "failed", Progress: "Method Job start failed", Failure: "Windows method Job could not start after artifact transfer: " + trimDeploymentError(err), TransferID: transferID, InstallPath: plan.InstallPath})
 		}
 		return err
 	}
@@ -149,20 +163,30 @@ func (e *windowsDeploymentExecutor) Start(ctx context.Context, record control.De
 	return nil
 }
 
-func (e *windowsDeploymentExecutor) monitor(_ string, jobID string, report func(control.DeploymentProgress) error) {
+func (e *windowsDeploymentExecutor) monitor(deploymentID string, jobID string, report func(control.DeploymentProgress) error) {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 	for range ticker.C {
-		job, err := e.manager.Job(0, jobID, false)
+		job, err := e.manager.Job(0, jobID, true)
 		if err != nil {
 			return
 		}
 		switch job.State {
 		case "completed":
-			_ = report(control.DeploymentProgress{State: "waiting", Progress: "Windows method completed; waiting for target enrolment", JobID: jobID})
+			_ = report(completedDeploymentProgress(deploymentID, job))
 			return
 		case "failed":
-			_ = report(control.DeploymentProgress{State: "failed", Progress: "Windows method failed", Failure: "The source-agent Job failed. Inspect the linked Job for its sanitized result.", JobID: jobID})
+			failure := strings.TrimSpace(job.OutputError)
+			if failure == "" {
+				failure = strings.TrimSpace(job.Output)
+			}
+			if failure == "" {
+				failure = "The source-agent Job failed without diagnostic output."
+			}
+			if len(failure) > 1024 {
+				failure = failure[len(failure)-1024:]
+			}
+			_ = report(control.DeploymentProgress{State: "failed", Progress: "Windows method failed", Failure: "Source-agent Job failed: " + failure, JobID: jobID})
 			return
 		case "cancelled":
 			_ = report(control.DeploymentProgress{State: "failed", Progress: "Windows method cancelled", Failure: "The linked source-agent Job was cancelled.", JobID: jobID})
@@ -172,6 +196,43 @@ func (e *windowsDeploymentExecutor) monitor(_ string, jobID string, report func(
 			return
 		}
 	}
+}
+
+func deploymentSuccessMarker(id string) string {
+	return "UNDERTOW_DEPLOYMENT_METHOD_OK " + id
+}
+
+func completedDeploymentProgress(deploymentID string, job control.JobInfo) control.DeploymentProgress {
+	if !strings.Contains(job.Output, deploymentSuccessMarker(deploymentID)) {
+		return control.DeploymentProgress{State: "failed", Progress: "Windows method did not confirm launch", Failure: "The source-agent Job exited without the method's final success marker. Review its output and target state before retrying.", JobID: job.ID}
+	}
+	return control.DeploymentProgress{State: "waiting", Progress: "Windows method completed; waiting for target enrolment", JobID: job.ID}
+}
+
+func deploymentCommandError(err error, result pivot.ExecResult) string {
+	if err != nil {
+		return err.Error()
+	}
+	for _, value := range []string{result.Error, result.Stderr, result.Stdout} {
+		if value = strings.TrimSpace(value); value != "" {
+			if len(value) > 512 {
+				value = value[len(value)-512:]
+			}
+			return value
+		}
+	}
+	return fmt.Sprintf("remote command exited with code %d", result.ExitCode)
+}
+
+func trimDeploymentError(err error) string {
+	if err == nil {
+		return "unknown error"
+	}
+	value := strings.TrimSpace(err.Error())
+	if len(value) > 768 {
+		value = value[len(value)-768:]
+	}
+	return value
 }
 
 func powershellArtifactHelper(hosted hostedArtifactInfo, launch bool) (string, error) {
@@ -193,6 +254,10 @@ func powershellArtifactHelper(hosted hostedArtifactInfo, launch bool) (string, e
 func windowsAdminSharePath(target, installPath string) (string, error) {
 	if !windowsInstallPath.MatchString(installPath) {
 		return "", errors.New("invalid Windows install path")
+	}
+	const windowsRoot = `C:\Windows\`
+	if len(installPath) >= len(windowsRoot) && strings.EqualFold(installPath[:len(windowsRoot)], windowsRoot) {
+		return `\\` + target + `\ADMIN$\` + installPath[len(windowsRoot):], nil
 	}
 	return `\\` + target + `\` + strings.ToUpper(installPath[:1]) + `$\` + installPath[3:], nil
 }
@@ -227,30 +292,34 @@ func buildWindowsDeploymentScript(record control.DeploymentRecord, installPath s
 			body.WriteString("  Invoke-Command -ComputerName $target -ErrorAction Stop -ArgumentList $destination -ScriptBlock { param($path) Start-Process -FilePath $path -WindowStyle Hidden }\n")
 		} else {
 			fmt.Fprintf(&body, "  $helper = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('%s'))\n", encodedLaunch)
-			body.WriteString("  Invoke-Command -ComputerName $target -ErrorAction Stop -ArgumentList $helper,$destination -ScriptBlock { param($source,$path) try { [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($path)) | Out-Null; & ([ScriptBlock]::Create($source)) -Destination $path } catch { throw 'Target payload launch failed.' } }\n")
+			body.WriteString("  Invoke-Command -ComputerName $target -ErrorAction Stop -ArgumentList $helper,$destination -ScriptBlock { param($source,$path) try { [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($path)) | Out-Null; & ([ScriptBlock]::Create($source)) -Destination $path } catch { throw ('Target payload launch failed: ' + $_.Exception.Message) } }\n")
 		}
 		body.WriteString("  Write-Output 'WinRM accepted and completed the verified deployment helper.'\n")
 	case "wmi", "scheduled-task":
 		if directShare {
 			body.WriteString("  $command = '\"' + $destination + '\"'\n")
 			if record.Method == "wmi" {
-				body.WriteString("  $result = ([WMIClass]('\\\\' + $target + '\\root\\cimv2:Win32_Process')).Create($command)\n  if ($result.ReturnValue -ne 0) { throw 'WMI rejected the deployment process.' }\n  Write-Output 'WMI started the streamed agent binary.'\n")
+				body.WriteString("  $result = ([WMIClass]('\\\\' + $target + '\\root\\cimv2:Win32_Process')).Create($command)\n  if ($result.ReturnValue -ne 0) { throw ('WMI process creation failed with return code ' + $result.ReturnValue) }\n  Write-Output ('WMI started the streamed agent binary as process ' + $result.ProcessId + '.')\n")
 			} else {
-				taskName = `\Undertow\Deploy-` + shortID
+				taskName = `Undertow-Deploy-` + shortID
 				fmt.Fprintf(&body, "  $taskName = '%s'\n", psQuote(taskName))
 				if record.Context == "local-system" {
-					body.WriteString("  & schtasks.exe /Create /S $target /TN $taskName /SC ONCE /ST 00:00 /TR $command /RU SYSTEM /RL HIGHEST /F | Out-Null\n")
+					body.WriteString("  $taskOutput = (& schtasks.exe /Create /S $target /TN $taskName /SC ONCE /ST 00:00 /TR $command /RU SYSTEM /RL HIGHEST /F 2>&1 | Out-String).Trim()\n")
 				} else {
-					body.WriteString("  $runAs = $env:USERDOMAIN + '\\' + $env:USERNAME\n  & schtasks.exe /Create /S $target /TN $taskName /SC ONCE /ST 00:00 /TR $command /RU $runAs /IT /NP /RL HIGHEST /F | Out-Null\n")
+					body.WriteString("  $runAs = $env:USERDOMAIN + '\\' + $env:USERNAME\n  $taskOutput = (& schtasks.exe /Create /S $target /TN $taskName /SC ONCE /ST 00:00 /TR $command /RU $runAs /IT /NP /RL HIGHEST /F 2>&1 | Out-String).Trim()\n")
 				}
-				body.WriteString("  if ($LASTEXITCODE -ne 0) { throw 'Scheduled Task creation failed.' }\n  & schtasks.exe /Run /S $target /TN $taskName | Out-Null\n  if ($LASTEXITCODE -ne 0) { throw 'Scheduled Task start failed.' }\n  Start-Sleep -Seconds 2\n  & schtasks.exe /Delete /S $target /TN $taskName /F | Out-Null\n  Write-Output 'Scheduled Task started the streamed agent binary.'\n")
+				body.WriteString("  if ($LASTEXITCODE -ne 0) { throw ('Scheduled Task creation failed: ' + $taskOutput) }\n  $taskOutput = (& schtasks.exe /Run /S $target /TN $taskName 2>&1 | Out-String).Trim()\n  if ($LASTEXITCODE -ne 0) { throw ('Scheduled Task start failed: ' + $taskOutput) }\n  Start-Sleep -Seconds 2\n  & schtasks.exe /Delete /S $target /TN $taskName /F 2>$null | Out-Null\n  Write-Output 'Scheduled Task started the streamed agent binary.'\n")
 			}
 			break
 		}
-		remoteHelper := `C:\Windows\Temp\Undertow-` + shortID + `.ps1`
-		remoteOK := `C:\Windows\Temp\Undertow-` + shortID + `.ok`
-		remoteFail := `C:\Windows\Temp\Undertow-` + shortID + `.failed`
-		shareBase := `\\` + record.Target + `\ADMIN$\Temp\Undertow-` + shortID
+		helperID, err := randomWindowsPathID()
+		if err != nil {
+			return nil, "", "", err
+		}
+		remoteHelper := `C:\Windows\Temp\` + helperID + `.ps1`
+		remoteOK := `C:\Windows\Temp\` + helperID + `.ok`
+		remoteFail := `C:\Windows\Temp\` + helperID + `.failed`
+		shareBase := `\\` + record.Target + `\ADMIN$\Temp\` + helperID
 		staged := stagedWindowsHelper(launchHelper, remoteOK, remoteFail)
 		encodedStaged := base64.StdEncoding.EncodeToString([]byte(staged))
 		fmt.Fprintf(&body, "  $staged = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('%s'))\n", encodedStaged)
@@ -259,20 +328,21 @@ func buildWindowsDeploymentScript(record control.DeploymentRecord, installPath s
 		body.WriteString("  Set-Content -LiteralPath $helperShare -Value $staged -Encoding UTF8 -Force\n")
 		body.WriteString("  $command = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"' + $remoteHelper + '\" -Destination \"' + $destination + '\"'\n")
 		if record.Method == "wmi" {
-			body.WriteString("  $result = ([WMIClass]('\\\\' + $target + '\\root\\cimv2:Win32_Process')).Create($command)\n  if ($result.ReturnValue -ne 0) { throw 'WMI rejected the deployment process.' }\n")
+			body.WriteString("  $result = ([WMIClass]('\\\\' + $target + '\\root\\cimv2:Win32_Process')).Create($command)\n  if ($result.ReturnValue -ne 0) { throw ('WMI helper creation failed with return code ' + $result.ReturnValue) }\n")
 		} else {
-			taskName = `\Undertow\Deploy-` + shortID
+			taskName = `Undertow-Deploy-` + shortID
 			fmt.Fprintf(&body, "  $taskName = '%s'\n", psQuote(taskName))
 			if record.Context == "local-system" {
-				body.WriteString("  & schtasks.exe /Create /S $target /TN $taskName /SC ONCE /ST 00:00 /TR $command /RU SYSTEM /RL HIGHEST /F | Out-Null\n")
+				body.WriteString("  $taskOutput = (& schtasks.exe /Create /S $target /TN $taskName /SC ONCE /ST 00:00 /TR $command /RU SYSTEM /RL HIGHEST /F 2>&1 | Out-String).Trim()\n")
 			} else {
-				body.WriteString("  $runAs = $env:USERDOMAIN + '\\' + $env:USERNAME\n  & schtasks.exe /Create /S $target /TN $taskName /SC ONCE /ST 00:00 /TR $command /RU $runAs /IT /NP /RL HIGHEST /F | Out-Null\n")
+				body.WriteString("  $runAs = $env:USERDOMAIN + '\\' + $env:USERNAME\n  $taskOutput = (& schtasks.exe /Create /S $target /TN $taskName /SC ONCE /ST 00:00 /TR $command /RU $runAs /IT /NP /RL HIGHEST /F 2>&1 | Out-String).Trim()\n")
 			}
-			body.WriteString("  if ($LASTEXITCODE -ne 0) { throw 'Scheduled Task creation failed.' }\n  & schtasks.exe /Run /S $target /TN $taskName | Out-Null\n  if ($LASTEXITCODE -ne 0) { throw 'Scheduled Task start failed.' }\n")
+			body.WriteString("  if ($LASTEXITCODE -ne 0) { throw ('Scheduled Task creation failed: ' + $taskOutput) }\n  $taskOutput = (& schtasks.exe /Run /S $target /TN $taskName 2>&1 | Out-String).Trim()\n  if ($LASTEXITCODE -ne 0) { throw ('Scheduled Task start failed: ' + $taskOutput) }\n")
 		}
-		body.WriteString("  $deadline = [DateTime]::UtcNow.AddMinutes(3)\n  while ([DateTime]::UtcNow -lt $deadline -and -not (Test-Path -LiteralPath $okShare) -and -not (Test-Path -LiteralPath $failedShare)) { Start-Sleep -Milliseconds 500 }\n  if (Test-Path -LiteralPath $failedShare) { throw 'Target deployment helper reported failure.' }\n  if (-not (Test-Path -LiteralPath $okShare)) { throw 'Timed out waiting for the target deployment helper.' }\n")
+		body.WriteString("  $deadline = [DateTime]::UtcNow.AddMinutes(3)\n  while ([DateTime]::UtcNow -lt $deadline -and -not (Test-Path -LiteralPath $okShare) -and -not (Test-Path -LiteralPath $failedShare)) { Start-Sleep -Milliseconds 500 }\n  if (Test-Path -LiteralPath $failedShare) { $helperFailure = (Get-Content -LiteralPath $failedShare -Raw -ErrorAction SilentlyContinue).Trim(); if (-not $helperFailure) { $helperFailure = 'unknown helper error' }; throw ('Target deployment helper reported failure: ' + $helperFailure) }\n  if (-not (Test-Path -LiteralPath $okShare)) { throw 'Timed out waiting for the target deployment helper.' }\n")
 		body.WriteString("  Write-Output 'The target completed the verified deployment helper.'\n")
-		body.WriteString("} catch { Write-Error ('Windows deployment failed during method execution.'); exit 1 } finally {\n")
+		fmt.Fprintf(&body, "  Write-Output '%s'\n", psQuote(deploymentSuccessMarker(record.ID)))
+		body.WriteString("} catch { Write-Error ('Windows deployment failed during method execution: ' + $_.Exception.Message); exit 1 } finally {\n")
 		if record.Method == "scheduled-task" {
 			body.WriteString("  if ($taskName) { & schtasks.exe /Delete /S $target /TN $taskName /F 2>$null | Out-Null }\n")
 		}
@@ -282,14 +352,20 @@ func buildWindowsDeploymentScript(record control.DeploymentRecord, installPath s
 		serviceName = "Undertow-" + shortID
 		fmt.Fprintf(&body, "  $serviceName = '%s'\n", psQuote(serviceName))
 		if !directShare {
+			sharePath, shareErr := windowsAdminSharePath(record.Target, installPath)
+			if shareErr != nil {
+				return nil, "", "", shareErr
+			}
 			fmt.Fprintf(&body, "  $helper = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('%s'))\n", encodedDownload)
-			body.WriteString("  if ($destination -notmatch '^([A-Za-z]):\\\\(.+)$') { throw 'Invalid service destination.' }\n  $sharePath = '\\\\' + $target + '\\' + $Matches[1] + '$\\' + $Matches[2]\n  $shareDirectory = [IO.Path]::GetDirectoryName($sharePath)\n  New-Item -ItemType Directory -Path $shareDirectory -Force | Out-Null\n  $temporary = Join-Path $env:TEMP ('undertow-' + [Guid]::NewGuid().ToString('N') + '.exe')\n  try {\n    & ([ScriptBlock]::Create($helper)) -Destination $temporary\n    Copy-Item -LiteralPath $temporary -Destination $sharePath -Force\n  } finally { Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue }\n")
+			fmt.Fprintf(&body, "  $sharePath = '%s'\n", psQuote(sharePath))
+			body.WriteString("  $shareDirectory = [IO.Path]::GetDirectoryName($sharePath)\n  New-Item -ItemType Directory -Path $shareDirectory -Force | Out-Null\n  $temporary = Join-Path $env:TEMP ([Guid]::NewGuid().ToString('N') + '.exe')\n  try {\n    & ([ScriptBlock]::Create($helper)) -Destination $temporary\n    Copy-Item -LiteralPath $temporary -Destination $sharePath -Force\n  } finally { Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue }\n")
 		}
-		body.WriteString("  & sc.exe ('\\\\' + $target) create $serviceName 'binPath=' ('\"' + $destination + '\"') 'start=' auto 'obj=' LocalSystem | Out-Null\n  if ($LASTEXITCODE -ne 0) { throw 'Service Control creation failed.' }\n  & sc.exe ('\\\\' + $target) start $serviceName | Out-Null\n  if ($LASTEXITCODE -ne 0) { throw 'Service Control start failed.' }\n  Write-Output 'Service Control installed and started the verified agent service.'\n")
+		body.WriteString("  $serviceOutput = (& sc.exe ('\\\\' + $target) create $serviceName 'binPath=' ('\"' + $destination + '\"') 'start=' auto 'obj=' LocalSystem 2>&1 | Out-String).Trim()\n  if ($LASTEXITCODE -ne 0) { throw ('Service Control creation failed: ' + $serviceOutput) }\n  $serviceOutput = (& sc.exe ('\\\\' + $target) start $serviceName 2>&1 | Out-String).Trim()\n  if ($LASTEXITCODE -ne 0) { throw ('Service Control start failed: ' + $serviceOutput) }\n  Write-Output 'Service Control installed and started the verified agent service.'\n")
 	default:
 		return nil, "", "", errors.New("unsupported Windows deployment method")
 	}
-	body.WriteString("} catch { Write-Error 'Windows deployment failed during method execution.'; exit 1 }\n")
+	fmt.Fprintf(&body, "  Write-Output '%s'\n", psQuote(deploymentSuccessMarker(record.ID)))
+	body.WriteString("} catch { Write-Error ('Windows deployment failed during method execution: ' + $_.Exception.Message); exit 1 }\n")
 	return []byte(body.String()), serviceName, taskName, nil
 }
 
@@ -299,5 +375,5 @@ func stagedWindowsHelper(helper, okPath, failedPath string) string {
 	if len(parts) == 2 && strings.HasPrefix(parts[0], "param(") {
 		body = parts[1]
 	}
-	return fmt.Sprintf("param([string]$Destination)\ntry {\n  [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($Destination)) | Out-Null\n%s\n  Set-Content -LiteralPath '%s' -Value 'ok' -Encoding ASCII -Force\n} catch { Set-Content -LiteralPath '%s' -Value 'failed' -Encoding ASCII -Force; exit 1 } finally { Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue }\n", body, psQuote(okPath), psQuote(failedPath))
+	return fmt.Sprintf("param([string]$Destination)\ntry {\n  [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($Destination)) | Out-Null\n%s\n  Set-Content -LiteralPath '%s' -Value 'ok' -Encoding ASCII -Force\n} catch { Set-Content -LiteralPath '%s' -Value ('failed: ' + $_.Exception.Message) -Encoding UTF8 -Force; exit 1 } finally { Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue }\n", body, psQuote(okPath), psQuote(failedPath))
 }

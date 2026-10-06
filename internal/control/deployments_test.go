@@ -24,8 +24,12 @@ func (s deploymentExecutorStub) Preflight(_ context.Context, _ DeploymentRecord,
 	return DeploymentExecutionPlan{DeliveryType: "direct-share", DeliveryID: "source", InstallPath: `C:\ProgramData\Undertow\agent.exe`}, nil
 }
 
-func (deploymentExecutorStub) Start(_ context.Context, _ DeploymentRecord, plan DeploymentExecutionPlan, _ *mux.Mux, report func(DeploymentProgress) error) error {
-	return report(DeploymentProgress{State: "waiting", Progress: "Method Job accepted", JobID: "job-one", InstallPath: plan.InstallPath, ServiceName: "Undertow-test"})
+func (deploymentExecutorStub) Start(_ context.Context, _ DeploymentRecord, plan DeploymentExecutionPlan, _ *mux.Mux, existingJobID string, report func(DeploymentProgress) error) error {
+	jobID := existingJobID
+	if jobID == "" {
+		jobID = "job-one"
+	}
+	return report(DeploymentProgress{State: "waiting", Progress: "Method Job accepted", JobID: jobID, InstallPath: plan.InstallPath, ServiceName: "Undertow-test"})
 }
 
 func deploymentTestManager(t *testing.T) (*Manager, *OperationsStore, string) {
@@ -190,6 +194,72 @@ func TestDispatchingDeploymentRecoversAsFailed(t *testing.T) {
 	got, err := reopened.Deployment(record.ID)
 	if err != nil || got.State != "failed" || got.Error == "" {
 		t.Fatalf("recovered dispatch: %+v %v", got, err)
+	}
+}
+
+func TestSleepingDeploymentQueuesUntilCheckIn(t *testing.T) {
+	m, store, _ := deploymentTestManager(t)
+	defer store.Close()
+	delete(m.agents, "source")
+	m.offlineAgents["source"] = AgentInfo{ID: "source", OS: "windows", ConnectionState: "sleeping", SleepSupported: true, Sleep: SleepPolicy{IntervalSeconds: 15}, SleepLostAfter: time.Now().Add(time.Minute)}
+	m.SetDeploymentMethodExecutor(deploymentExecutorStub{})
+	record, err := m.createDeployment(context.Background(), createDeploymentRequest{SourceAgentID: "source", Target: "ws06", ArtifactID: "build-one", Method: "winrm", Context: "current-user"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.prepareDeployment(record.ID); err != nil {
+		t.Fatal("prepare sleeping source: ", err)
+	}
+	if err := m.startDeployment(context.Background(), record.ID, DeploymentStartRequest{Delivery: "direct-share"}); err != nil {
+		t.Fatal("queue sleeping source: ", err)
+	}
+	got, err := store.Deployment(record.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	queued, err := store.LoadQueuedJobs()
+	request, present := queued[got.JobID]
+	if err != nil || len(queued) != 1 || !present || request.Kind != "deployment" {
+		t.Fatalf("queued deployment: %+v err=%v", queued, err)
+	}
+	if got.State != "dispatching" || got.JobID == "" || !strings.Contains(got.Progress, "next check-in") {
+		t.Fatalf("queued record: %+v err=%v", got, err)
+	}
+}
+
+func TestQueuedDeploymentSurvivesDispatchRecovery(t *testing.T) {
+	m, store, path := deploymentTestManager(t)
+	delete(m.agents, "source")
+	m.offlineAgents["source"] = AgentInfo{ID: "source", OS: "windows", ConnectionState: "sleeping", SleepSupported: true, Sleep: SleepPolicy{IntervalSeconds: 15}, SleepLostAfter: time.Now().Add(time.Minute)}
+	m.SetDeploymentMethodExecutor(deploymentExecutorStub{})
+	record, err := m.createDeployment(context.Background(), createDeploymentRequest{SourceAgentID: "source", Target: "ws07", ArtifactID: "build-one", Method: "winrm", Context: "current-user"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.prepareDeployment(record.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.startDeployment(context.Background(), record.ID, DeploymentStartRequest{Delivery: "direct-share"}); err != nil {
+		t.Fatal(err)
+	}
+	queuedRecord, err := store.Deployment(record.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := OpenOperationsStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	if err := reopened.RecoverDispatchingDeployments(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := reopened.Deployment(record.ID)
+	if err != nil || got.State != "dispatching" || got.JobID != queuedRecord.JobID {
+		t.Fatalf("queued recovery: %+v err=%v", got, err)
 	}
 }
 

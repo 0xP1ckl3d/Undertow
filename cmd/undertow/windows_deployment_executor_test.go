@@ -81,19 +81,29 @@ func TestWindowsDeploymentPreflightRevalidatesArtifactAndSelectedHost(t *testing
 }
 
 func TestWindowsDeploymentInstallPathAndShare(t *testing.T) {
-	record := control.DeploymentRecord{ID: "deployment-one"}
-	path, err := normalizeWindowsInstallPath(record, "", "worker.exe")
-	if err != nil || path != `C:\ProgramData\Undertow\Deployments\deployment-one\worker.exe` {
+	path, err := normalizeWindowsInstallPath("")
+	if err != nil || !strings.HasPrefix(path, `C:\Windows\Temp\`) || !windowsInstallPath.MatchString(path) {
 		t.Fatalf("default path=%q err=%v", path, err)
 	}
+	second, err := normalizeWindowsInstallPath("")
+	if err != nil || second == path {
+		t.Fatalf("second default path=%q first=%q err=%v", second, path, err)
+	}
+	if strings.Contains(path, "deployment-one") || strings.Contains(path, "worker") {
+		t.Fatalf("default path exposes predictable deployment data: %q", path)
+	}
 	share, err := windowsAdminSharePath("ws01", path)
-	if err != nil || share != `\\ws01\C$\ProgramData\Undertow\Deployments\deployment-one\worker.exe` {
+	if err != nil || !strings.HasPrefix(share, `\\ws01\ADMIN$\Temp\`) {
 		t.Fatalf("share path=%q err=%v", share, err)
 	}
-	for _, invalid := range []string{`relative.exe`, `C:\temp\..\worker.exe`, `C:\temp\worker.dll`, `C:\bad?name\worker.exe`} {
-		if _, err := normalizeWindowsInstallPath(record, invalid, "worker.exe"); err == nil {
+	for _, invalid := range []string{`relative.exe`, `C:\temp\..\worker.exe`, `C:\temp\worker.dll`, `C:\bad?name\worker.exe`, `C:\bad:name\worker.exe`} {
+		if _, err := normalizeWindowsInstallPath(invalid); err == nil {
 			t.Fatalf("accepted invalid install path %q", invalid)
 		}
+	}
+	override, err := windowsAdminSharePath("ws01", `D:\Apps\agent.exe`)
+	if err != nil || override != `\\ws01\D$\Apps\agent.exe` {
+		t.Fatalf("override share path=%q err=%v", override, err)
 	}
 }
 
@@ -135,6 +145,43 @@ func TestWindowsDeploymentHostedHelperDoesNotPersistSecretsInRecordShape(t *test
 	}
 	if strings.Contains(record.DeliveryID, hosted.RetrievalPath) || strings.Contains(record.InstallPath, hosted.RetrievalPath) {
 		t.Fatal("deployment record contains retrieval capability")
+	}
+}
+
+func TestWindowsDeploymentHostedServiceUsesAdminShareAndTaskUsesFlatName(t *testing.T) {
+	hosted := hostedArtifactInfo{Artifact: agentprofile.Artifact{Filename: "agent.exe", SHA256: strings.Repeat("a", 64)}, Retrieval: "https://relay.example:8443/" + strings.Repeat("b", 48), RetrievalPath: "/" + strings.Repeat("b", 48)}
+	service := control.DeploymentRecord{ID: "0123456789abcdef", Target: "ws01", Method: "service-control", Context: "local-system"}
+	script, _, _, err := buildWindowsDeploymentScript(service, `C:\Windows\Temp\0123456789abcdef0123456789abcdef.exe`, hosted, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value := string(script)
+	if !strings.Contains(value, `\\ws01\ADMIN$\Temp\0123456789abcdef0123456789abcdef.exe`) || strings.Contains(value, `\\ws01\C$\Windows\Temp`) {
+		t.Fatalf("hosted service did not use ADMIN$: %s", value)
+	}
+
+	task := control.DeploymentRecord{ID: "0123456789abcdef", Target: "ws01", Method: "scheduled-task", Context: "local-system"}
+	_, _, taskName, err := buildWindowsDeploymentScript(task, `C:\Windows\Temp\0123456789abcdef0123456789abcdef.exe`, hosted, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(taskName, `\`) || taskName != "Undertow-Deploy-0123456789ab" {
+		t.Fatalf("task name=%q", taskName)
+	}
+}
+
+func TestCompletedDeploymentRequiresMethodOutput(t *testing.T) {
+	empty := completedDeploymentProgress("deployment-one", control.JobInfo{ID: "job-empty", State: "completed"})
+	if empty.State != "failed" || !strings.Contains(empty.Failure, "final success marker") {
+		t.Fatalf("empty result: %+v", empty)
+	}
+	incidental := completedDeploymentProgress("deployment-one", control.JobInfo{ID: "job-incidental", State: "completed", Output: "WMI started process 42."})
+	if incidental.State != "failed" {
+		t.Fatalf("incidental output passed: %+v", incidental)
+	}
+	success := completedDeploymentProgress("deployment-one", control.JobInfo{ID: "job-success", State: "completed", Output: "WMI started process 42.\n" + deploymentSuccessMarker("deployment-one")})
+	if success.State != "waiting" || success.JobID != "job-success" || success.Failure != "" {
+		t.Fatalf("successful result: %+v", success)
 	}
 }
 

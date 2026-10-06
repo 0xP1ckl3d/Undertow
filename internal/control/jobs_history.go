@@ -83,7 +83,18 @@ func (m *Manager) RestoreJobHistory() error {
 			info.Ended = &now
 		}
 		var request *queuedJobRequest
-		if info.State == "dispatching" {
+		if info.State == "dispatching" && info.DeploymentID != "" {
+			if value, ok := pending[info.ID]; ok {
+				// A deployment Job can be in dispatching only because the
+				// source check-in was being attached. Keep it queueable across
+				// restart; no target action has been proven to start yet.
+				info.State = "queued"
+				request = &value
+			} else {
+				now := time.Now().UTC()
+				info.State, info.Ended, info.OutputError = "interrupted", &now, "Server restarted during dispatch; execution may have started. Review before retrying."
+			}
+		} else if info.State == "dispatching" {
 			now := time.Now().UTC()
 			info.State, info.Ended, info.OutputError = "interrupted", &now, "Server restarted during dispatch; execution may have started. Review before retrying."
 			if err := store.DeleteQueuedJob(info.ID); err != nil {

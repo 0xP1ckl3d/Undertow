@@ -141,6 +141,18 @@ func (s *OperationsStore) WaitingDeployments(artifactID string) ([]DeploymentRec
 	return result, rows.Err()
 }
 
+func (s *OperationsStore) QueuedJobExists(id string) (bool, error) {
+	var one int
+	err := s.db.QueryRow(`SELECT 1 FROM queued_job_requests WHERE id=? LIMIT 1`, id).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // A server restart cannot establish whether an in-flight start reached the
 // endpoint. Preserve the record and require operator review before retrying.
 func (s *OperationsStore) RecoverDispatchingDeployments() error {
@@ -151,6 +163,15 @@ func (s *OperationsStore) RecoverDispatchingDeployments() error {
 	for _, item := range items {
 		if item.State != "dispatching" {
 			continue
+		}
+		if item.JobID != "" {
+			queued, err := s.QueuedJobExists(item.JobID)
+			if err != nil {
+				return err
+			}
+			if queued {
+				continue
+			}
 		}
 		_, err := s.ChangeDeployment(item.ID, func(record *DeploymentRecord) error {
 			if record.State != "dispatching" {
