@@ -23,7 +23,7 @@ undertow[TALON]> job output 1
 
 ## Shipped modules
 
-The repository includes **45 compiled modules** with help sidecars. Start or reattach a console from this checkout so it scans `modules/`, type `modules` to confirm what loaded, then `agents` and `use NUMBER` to select the target. The examples below are commands to type **inside the selected-agent console**. Run `help COMMAND` before a command to see its local help; the module file is sent to the agent when you invoke it.
+The repository includes **46 compiled modules** with help sidecars. Start or reattach a console from this checkout so it scans `modules/`, type `modules` to confirm what loaded, then `agents` and `use NUMBER` to select the target. The examples below are commands to type **inside the selected-agent console**. Run `help COMMAND` before a command to see its local help; the module file is sent to the agent when you invoke it.
 
 ### WASM host assessment (Windows or Linux agents)
 
@@ -54,7 +54,7 @@ For `wasm-artifact-discovery`, add an **agent-side** root such as `wasm-artifact
 
 ### BOFs (Windows AMD64 agents)
 
-The 34 packaged BOFs come from the linked open source projects. The console loads each `.x64.o` with a typed argument sidecar. Run `help bof-NAME` for the exact argument types. Commands below run **inside a selected-agent console**; uppercase values are placeholders. Several return credentials or change Kerberos ticket state. The [BOF compatibility guide](bof-compatibility.md) explains inspection and adding your own objects.
+The 35 packaged BOFs come from the linked open source projects. The console loads each `.x64.o` with a typed argument sidecar. Run `help bof-NAME` for the exact argument types. Commands below run **inside a selected-agent console**; uppercase values are placeholders. Several return credentials or change Kerberos ticket state. The [BOF compatibility guide](bof-compatibility.md) explains inspection and adding your own objects.
 
 **[Adrenaline](https://github.com/atomiczsec/Adrenaline)**
 
@@ -67,6 +67,14 @@ The 34 packaged BOFs come from the linked open source projects. The console load
 | `bof-window-list` | List visible windows; `/pid` adds process information. | `bof-window-list /pid` |
 
 Adrenaline credits [NoteThief](https://github.com/trainr3kt/NoteThief) as the basis for `notepad-grab`.
+
+**[Cookie-Monster-BOF](https://github.com/KingOfTheNOPs/cookie-monster)** (KingOfTheNOPs, GPL-3.0)
+
+| Command | Purpose | Basic use |
+| --- | --- | --- |
+| `bof-cookie-monster-bof` | Collect browser cookie or login files and encryption key material from Chrome, Edge, or Firefox. | `bof-cookie-monster-bof 0 1 0 0 0 0 0 0 0 "" 0 0 0 ""` (Edge) |
+
+This object reads a **fixed 14-field Beacon argument buffer**, not the friendly switches accepted by the upstream `cookie-monster.cna` wrapper. The sidecar lists the fields in order: eight browser/mode flags, PID, Local State path, three output selection flags, and an optional agent-side copy directory. Use `0` for an unused flag or PID and `""` for an unused path. For Chrome cookies only, use `bof-cookie-monster-bof 1 0 0 0 0 0 0 0 0 "" 0 1 0 ""`; for Firefox, use `bof-cookie-monster-bof 0 0 0 1 0 0 0 0 0 "" 0 0 0 ""`. The empty final path selects the BOF's file callback, so completed files appear through Undertow's file artifact handling. The upstream [source, usage, and license](https://github.com/KingOfTheNOPs/cookie-monster) belong to KingOfTheNOPs; see its README for browser-specific behavior and decryption tooling.
 
 **[BOFKatz](https://github.com/KrakenEU/BOFKatz)**
 

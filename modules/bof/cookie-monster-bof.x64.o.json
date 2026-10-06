@@ -1,0 +1,23 @@
+{
+  "name": "cookie-monster-bof",
+  "description": "Collect Chromium or Firefox browser data and encryption key material from the selected Windows host.",
+  "usage": "bof-cookie-monster-bof <chrome> <edge> <system> <firefox> <chrome-cookie-pid-mode> <chrome-login-pid-mode> <edge-cookie-pid-mode> <edge-login-pid-mode> <pid> <local-state-path> <key-only> <cookie-only> <login-data-only> <copy-directory>",
+  "help": "This compiled BOF expects the 14 fixed, positional values packed by the upstream cookie-monster.cna wrapper; upstream switches such as --edge are not BOF arguments. Use 0/1 for mode and option flags, 0 for an unused PID, and quoted empty strings for unused paths. Exactly one browser or PID mode should be selected. Edge example: bof-cookie-monster-bof 0 1 0 0 0 0 0 0 0 \"\" 0 0 0 \"\". Chrome cookies only: bof-cookie-monster-bof 1 0 0 0 0 0 0 0 0 \"\" 0 1 0 \"\". Firefox: bof-cookie-monster-bof 0 0 0 1 0 0 0 0 0 \"\" 0 0 0 \"\". The final path is an optional agent-side copy directory; empty uses the BOF file callback. Output may include browser credentials and file artifacts. See docs/module-bank.md and https://github.com/KingOfTheNOPs/cookie-monster for upstream options and credits.",
+  "entrypoint": "go",
+  "arguments": [
+    { "name": "chrome", "type": "int" },
+    { "name": "edge", "type": "int" },
+    { "name": "system", "type": "int" },
+    { "name": "firefox", "type": "int" },
+    { "name": "chrome-cookie-pid-mode", "type": "int" },
+    { "name": "chrome-login-pid-mode", "type": "int" },
+    { "name": "edge-cookie-pid-mode", "type": "int" },
+    { "name": "edge-login-pid-mode", "type": "int" },
+    { "name": "pid", "type": "int" },
+    { "name": "local-state-path", "type": "string" },
+    { "name": "key-only", "type": "int" },
+    { "name": "cookie-only", "type": "int" },
+    { "name": "login-data-only", "type": "int" },
+    { "name": "copy-directory", "type": "string" }
+  ]
+}
