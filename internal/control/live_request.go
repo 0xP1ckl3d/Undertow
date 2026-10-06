@@ -1,0 +1,89 @@
+package control
+
+import (
+	"context"
+	"errors"
+	"time"
+
+	"undertow/internal/mux"
+)
+
+// openAgentForOperator keeps an explicitly requested live operation pending
+// across an intentional sleep. The pending request prevents the next check-in
+// from immediately sleeping again. Closing the requesting stream cancels it.
+func (m *Manager) openAgentForOperator(ctx context.Context, requesterDone <-chan struct{}, agentID, destination string) (*mux.Stream, error) {
+	m.mu.Lock()
+	state := m.agents[agentID]
+	retained := m.offlineAgents[agentID]
+	sleeping := state == nil && retained.ConnectionState == "sleeping" && time.Now().Before(retained.SleepLostAfter)
+	if state == nil && !sleeping {
+		m.mu.Unlock()
+		return nil, errors.New("agent has missed its check-ins or is disconnected")
+	}
+	if m.pendingLive == nil {
+		m.pendingLive = make(map[string]int)
+	}
+	m.pendingLive[agentID]++
+	m.mu.Unlock()
+	defer func() {
+		m.mu.Lock()
+		m.pendingLive[agentID]--
+		if m.pendingLive[agentID] == 0 {
+			delete(m.pendingLive, agentID)
+		}
+		m.mu.Unlock()
+	}()
+	waitCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stopWatcher := make(chan struct{})
+	go func() {
+		select {
+		case <-requesterDone:
+			cancel()
+		case <-stopWatcher:
+		}
+	}()
+	defer close(stopWatcher)
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if err := waitCtx.Err(); err != nil {
+			return nil, err
+		}
+		m.mu.RLock()
+		state = m.agents[agentID]
+		retained = m.offlineAgents[agentID]
+		m.mu.RUnlock()
+		if state == nil && (retained.ConnectionState != "sleeping" || !time.Now().Before(retained.SleepLostAfter)) {
+			return nil, errors.New("agent missed its expected check-ins")
+		}
+		if state != nil {
+			state.mux.Unquiesce()
+			if !state.mux.IsSleepCommitted() {
+				openCtx, stop := context.WithTimeout(waitCtx, 15*time.Second)
+				stream, err := state.mux.Open(openCtx, destination)
+				stop()
+				if err == nil {
+					return stream, nil
+				}
+				if waitCtx.Err() != nil {
+					return nil, waitCtx.Err()
+				}
+				// Retry only if this check-in ended or committed to sleep while
+				// the request was opening. A healthy session's error is real.
+				if !state.mux.IsSleepCommitted() {
+					select {
+					case <-state.mux.Done():
+					default:
+						return nil, err
+					}
+				}
+			}
+		}
+		select {
+		case <-waitCtx.Done():
+			return nil, waitCtx.Err()
+		case <-ticker.C:
+		}
+	}
+}

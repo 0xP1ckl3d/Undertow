@@ -57,7 +57,7 @@ func runConsoleRelayCommand(ctx context.Context, output io.Writer, call consoleC
 		}
 		fmt.Fprintf(output, "Relay listeners (%d):\n", len(selected))
 		for _, relay := range selected {
-			fmt.Fprintf(output, "  %s\n", relay.Bind)
+			fmt.Fprintf(output, "  %s (%s)\n", relay.Bind, relay.State)
 		}
 		return nil
 	case "start":
@@ -76,7 +76,11 @@ func runConsoleRelayCommand(ctx context.Context, output io.Writer, call consoleC
 		if err := json.Unmarshal(data, &relay); err != nil {
 			return err
 		}
-		fmt.Fprintf(output, "Relay listening on %s for child agents.\n", relay.Bind)
+		if relay.State == "pending" {
+			fmt.Fprintf(output, "Relay %s queued for the next agent check-in.\n", relay.Bind)
+		} else {
+			fmt.Fprintf(output, "Relay listening on %s for child agents.\n", relay.Bind)
+		}
 		return nil
 	case "stop":
 		if len(args) > 4 {

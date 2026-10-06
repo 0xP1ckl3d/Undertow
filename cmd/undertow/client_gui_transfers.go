@@ -130,7 +130,7 @@ func (g *guiServer) streamGUITransfer(w http.ResponseWriter, r *http.Request, op
 		_, err := g.client.call(control.WithActionClaims(updateCtx, claims), http.MethodPut, "/v1/transfers/"+record.ID, map[string]any{"state": state, "bytes": bytes, "total": total, "sha256": hash, "error": reason})
 		return err
 	}
-	emit("started", map[string]string{"id": record.ID})
+	emit("started", map[string]string{"id": record.ID, "state": record.State})
 	progress := func(p pivot.TransferProgress) {
 		if p.Total > maxGUITransferSize || p.Bytes > maxGUITransferSize {
 			cancel()

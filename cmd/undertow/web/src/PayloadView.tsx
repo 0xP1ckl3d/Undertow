@@ -40,7 +40,7 @@ function downloadText(text:string,filename:string) {
 function reachableAddress(publicHost?:string,connectedAddress?:string){
   return publicHost||hostOnly(connectedAddress||'');
 }
-export function PayloadView({revision,serverAddress,serverInfo,publicHost,clientTransport,relayTarget,agents,relays}:{revision?:string;serverAddress?:string;serverInfo?:Status['server'];publicHost?:string;clientTransport?:string;relayTarget?:{agentID:string;bind:string}|null;agents:Agent[];relays:{agent_id:string;bind:string}[]}) {
+export function PayloadView({revision,serverAddress,serverInfo,publicHost,clientTransport,relayTarget,agents,relays}:{revision?:string;serverAddress?:string;serverInfo?:Status['server'];publicHost?:string;clientTransport?:string;relayTarget?:{agentID:string;bind:string}|null;agents:Agent[];relays:{agent_id:string;bind:string;state?:string}[]}) {
   const [tab,setTab]=useState<'profiles'|'build'|'artifacts'|'retrieval'>('profiles');
   const [profiles,setProfiles]=useState<Profile[]>([]);
   const [artifacts,setArtifacts]=useState<Artifact[]>([]);

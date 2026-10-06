@@ -116,8 +116,13 @@ func runConsoleAgentDistribution(ctx context.Context, out io.Writer, call consol
 	}
 	path := "/v1/agents/" + url.PathEscape(id)
 	if args[1] == "shutdown" {
-		if _, err := call(ctx, http.MethodPost, path+"/shutdown", nil); err != nil {
+		data, err := call(ctx, http.MethodPost, path+"/shutdown", nil)
+		if err != nil {
 			return err
+		}
+		if id := queuedLifecycleID(data); id != "" {
+			fmt.Fprintf(out, "Shutdown queued for %s at next check-in as job %s.\n", consoleAgentName(a), id)
+			return nil
 		}
 		fmt.Fprintf(out, "Shutdown acknowledged by %s (agent ID %s).\n", consoleAgentName(a), a.ID)
 		return nil
@@ -152,6 +157,14 @@ func runConsoleAgentDistribution(ctx context.Context, out io.Writer, call consol
 		fmt.Fprintln(out)
 	}
 	return nil
+}
+
+func queuedLifecycleID(data []byte) string {
+	var job control.JobInfo
+	if err := json.Unmarshal(data, &job); err != nil || job.State != "queued" {
+		return ""
+	}
+	return job.ID
 }
 
 func emptyDefault(value, fallback string) string {

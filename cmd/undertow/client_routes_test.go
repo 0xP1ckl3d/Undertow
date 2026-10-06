@@ -217,6 +217,53 @@ func TestClientSavedRouteCanBeDisabledAndReenabled(t *testing.T) {
 	}
 }
 
+func TestSleepingAgentRouteIsSavedPendingThenInstalledOnCallback(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "routes.json")
+	device := &recordingRouteDevice{}
+	connected := false
+	client := &liveClientConsole{device: device, sessionID: 7, routeFile: path, serverIP: netip.MustParseAddr("203.0.113.10"), tunnelPrefix: netip.MustParsePrefix("172.16.253.0/24"), active: make(map[string]bool), global: make(map[string]bool)}
+	client.request = func(_ context.Context, method, requestPath string, _ any) ([]byte, error) {
+		switch {
+		case method == http.MethodPost && requestPath == "/v1/clients/7/routes":
+			return json.Marshal(map[string]bool{"connected": connected})
+		case method == http.MethodDelete && strings.HasPrefix(requestPath, "/v1/clients/7/routes?"):
+			return nil, nil
+		default:
+			return nil, fmt.Errorf("unexpected request %s %s", method, requestPath)
+		}
+	}
+	const prefix = "10.44.0.0/16"
+	if _, err := client.AcceptClientRoute(context.Background(), prefix, "sleeping-agent", false); err != nil {
+		t.Fatal(err)
+	}
+	if client.active[prefix] || len(device.added) != 0 {
+		t.Fatalf("pending route was installed before callback: active=%v device=%+v", client.active, device)
+	}
+	if saved, err := loadClientRoutes(path); err != nil || len(saved) != 1 || saved[0].AgentID != "sleeping-agent" {
+		t.Fatalf("pending route was not retained: %+v, %v", saved, err)
+	}
+	connected = true
+	if err := client.activateRoute(context.Background(), client.routes[0]); err != nil {
+		t.Fatal(err)
+	}
+	if !client.active[prefix] || !reflect.DeepEqual(device.added, []string{prefix}) {
+		t.Fatalf("route did not install after callback: active=%v device=%+v", client.active, device)
+	}
+	connected = false
+	if err := client.activateRoute(context.Background(), client.routes[0]); err != nil {
+		t.Fatal(err)
+	}
+	if client.active[prefix] || !reflect.DeepEqual(device.deleted, []string{prefix}) {
+		t.Fatalf("route remained installed while sleeping: active=%v device=%+v", client.active, device)
+	}
+	if err := client.SetClientRouteEnabled(context.Background(), prefix, "sleeping-agent", false); err != nil {
+		t.Fatal(err)
+	}
+	if saved, err := loadClientRoutes(path); err != nil || len(saved) != 1 || !saved[0].Disabled {
+		t.Fatalf("pending route could not be disabled: %+v, %v", saved, err)
+	}
+}
+
 func TestClientReassignsRouteFromDisconnectedAgent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "client-routes.json")
 	old := control.AcceptedRoute{Prefix: "10.10.10.0/24", AgentID: "old-agent"}
@@ -292,7 +339,7 @@ func TestClientReassignmentFailureKeepsOldRoute(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := &liveClientConsole{
-		sessionID: 7, routeFile: path, serverIP: netip.MustParseAddr("203.0.113.10"), tunnelPrefix: netip.MustParsePrefix("172.16.253.0/24"),
+		device: &recordingRouteDevice{}, sessionID: 7, routeFile: path, serverIP: netip.MustParseAddr("203.0.113.10"), tunnelPrefix: netip.MustParsePrefix("172.16.253.0/24"),
 		routes: []control.AcceptedRoute{old}, active: map[string]bool{old.Prefix: true},
 	}
 	client.request = func(_ context.Context, method, path string, _ any) ([]byte, error) {

@@ -47,8 +47,9 @@ func TestScreenshotCapturesAllScreensAndOneSelectedScreen(t *testing.T) {
 	if len(requests) != 1 || requests[0].RemotePath != "2" {
 		t.Fatalf("selected capture: %+v", requests)
 	}
-	if err := runConsoleScreenshot(context.Background(), &output, caller, transfer, "agent-one", []string{"3", "--output", outputDir}); err == nil {
-		t.Fatal("missing screen accepted")
+	requests = nil
+	if err := runConsoleScreenshot(context.Background(), &output, caller, transfer, "agent-one", []string{"3", "--output", outputDir}); err != nil || len(requests) != 1 || requests[0].RemotePath != "3" {
+		t.Fatalf("explicit screen request was not sent for agent validation: %+v %v", requests, err)
 	}
 	output.Reset()
 	if err := runConsoleScreens(context.Background(), &output, caller, "agent-one"); err != nil || !strings.Contains(output.String(), "DISPLAY2  1280x1024  Editor") {

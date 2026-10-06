@@ -52,6 +52,7 @@ func OpenOperationsStore(path string) (*OperationsStore, error) {
 		"CREATE INDEX IF NOT EXISTS audit_at ON audit(at DESC)",
 		`CREATE TABLE IF NOT EXISTS job_history (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, owner_client_id TEXT NOT NULL, kind TEXT NOT NULL, state TEXT NOT NULL, started TEXT NOT NULL, ended TEXT, output_bytes INTEGER NOT NULL, output_path TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS job_records (id TEXT PRIMARY KEY, info_json BLOB NOT NULL, owner_key TEXT NOT NULL, output_path TEXT NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS queued_job_requests (id TEXT PRIMARY KEY, request_json BLOB NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS host_results (agent_id TEXT NOT NULL, operation TEXT NOT NULL, session_id TEXT NOT NULL, at TEXT NOT NULL, result_json BLOB NOT NULL, PRIMARY KEY(agent_id,operation))`,
 		`CREATE TABLE IF NOT EXISTS screenshots (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, screen INTEGER NOT NULL, at TEXT NOT NULL, size INTEGER NOT NULL, sha256 TEXT NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL, client_id TEXT NOT NULL, client_session_id TEXT NOT NULL, operator_id TEXT NOT NULL, display_name TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS server_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
@@ -69,7 +70,7 @@ func OpenOperationsStore(path string) (*OperationsStore, error) {
 		`CREATE TABLE IF NOT EXISTS transfers (id TEXT PRIMARY KEY, record_json BLOB NOT NULL, client_session_id TEXT NOT NULL, started TEXT NOT NULL)`,
 		"CREATE INDEX IF NOT EXISTS transfers_started ON transfers(started DESC)",
 		"CREATE INDEX IF NOT EXISTS screenshots_agent_at ON screenshots(agent_id, at DESC)",
-		"PRAGMA user_version=12",
+		"PRAGMA user_version=13",
 	} {
 		if _, err := db.Exec(statement); err != nil {
 			db.Close()
@@ -105,7 +106,67 @@ func (s *OperationsStore) DeleteJob(id string) error {
 	if s == nil {
 		return errors.New("operations store is not configured")
 	}
-	_, err := s.db.Exec(`DELETE FROM job_records WHERE id=?`, id)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM queued_job_requests WHERE id=?`, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM job_records WHERE id=?`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *OperationsStore) SaveQueuedJob(info JobInfo, ownerKey string, request queuedJobRequest) error {
+	data, err := json.Marshal(info)
+	if err != nil {
+		return err
+	}
+	requestData, err := json.Marshal(request)
+	if err != nil {
+		return err
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`INSERT INTO job_records(id,info_json,owner_key,output_path) VALUES(?,?,?,?)`, info.ID, data, ownerKey, ""); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO queued_job_requests(id,request_json) VALUES(?,?)`, info.ID, requestData); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *OperationsStore) LoadQueuedJobs() (map[string]queuedJobRequest, error) {
+	rows, err := s.db.Query(`SELECT id,request_json FROM queued_job_requests`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]queuedJobRequest)
+	for rows.Next() {
+		var id string
+		var data []byte
+		if err := rows.Scan(&id, &data); err != nil {
+			return nil, err
+		}
+		var request queuedJobRequest
+		if err := json.Unmarshal(data, &request); err != nil {
+			return nil, err
+		}
+		out[id] = request
+	}
+	return out, rows.Err()
+}
+
+func (s *OperationsStore) DeleteQueuedJob(id string) error {
+	_, err := s.db.Exec(`DELETE FROM queued_job_requests WHERE id=?`, id)
 	return err
 }
 

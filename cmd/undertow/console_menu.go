@@ -58,7 +58,7 @@ func printConsoleOverview(output io.Writer, vpnClient, selected, serverAttached 
 	}
 	m.title(role, location)
 	m.section("NAVIGATION")
-	m.row("agents", "List connected agents")
+	m.row("agents", "List connected and sleeping agents")
 	m.row("use NUMBER|ID|HOSTNAME", "Enter an agent's menu")
 	if selected {
 		m.row("show", "Inspect this agent")

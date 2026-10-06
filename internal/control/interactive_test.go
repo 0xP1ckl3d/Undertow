@@ -228,7 +228,7 @@ func TestVPNClientInteractiveRelay(t *testing.T) {
 			manager.ServeInteractiveRelay(ctx, stream)
 		}
 	})
-	if _, err := OpenClientInteractive(ctx, clientVPN, "missing-agent", pivot.InteractiveRequest{}); err == nil || !strings.Contains(err.Error(), "agent is not connected") {
+	if _, err := OpenClientInteractive(ctx, clientVPN, "missing-agent", pivot.InteractiveRequest{}); err == nil || !strings.Contains(err.Error(), "disconnected") {
 		t.Fatalf("missing agent error=%v", err)
 	}
 	exe, err := os.Executable()

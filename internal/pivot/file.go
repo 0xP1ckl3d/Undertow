@@ -127,7 +127,9 @@ func TransferFileProgress(parent context.Context, session *mux.Mux, agentID, ope
 	if agentID == "" || !validTransferPath(remotePath) || !validTransferPath(localPath) || operation != "upload" && operation != "download" && operation != "screenshot" {
 		return result, errors.New("use upload, download, or screenshot with a selected agent")
 	}
-	ctx, cancel := context.WithTimeout(parent, 30*time.Minute)
+	// A submitted transfer may wait for a long check-in interval before its
+	// agent stream opens. The caller's context owns cancellation throughout.
+	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	var source *os.File
 	var size int64

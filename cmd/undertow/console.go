@@ -365,7 +365,7 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 			}
 			applyAgents(records)
 			lastApplied = time.Now()
-			agents := connectedConsoleAgents(records)
+			agents := selectableConsoleAgents(records)
 			if args[0] == "agents" || len(args) == 1 {
 				printConsoleAgents(output, agents)
 				continue
@@ -559,7 +559,7 @@ func consoleAgents(ctx context.Context, call consoleCaller) ([]control.AgentInfo
 	if err != nil {
 		return nil, err
 	}
-	return connectedConsoleAgents(agents), nil
+	return selectableConsoleAgents(agents), nil
 }
 
 func consoleAgentRecords(ctx context.Context, call consoleCaller) ([]control.AgentInfo, error) {
@@ -582,14 +582,14 @@ func consoleAgentRecords(ctx context.Context, call consoleCaller) ([]control.Age
 	return status.Agents, nil
 }
 
-func connectedConsoleAgents(records []control.AgentInfo) []control.AgentInfo {
-	connected := make([]control.AgentInfo, 0, len(records))
+func selectableConsoleAgents(records []control.AgentInfo) []control.AgentInfo {
+	selectable := make([]control.AgentInfo, 0, len(records))
 	for _, agent := range records {
-		if !agent.Offline {
-			connected = append(connected, agent)
+		if !agent.Offline || agent.ConnectionState == "sleeping" {
+			selectable = append(selectable, agent)
 		}
 	}
-	return connected
+	return selectable
 }
 
 func consoleAgentTransition(previous control.AgentInfo, seen bool, current control.AgentInfo) string {
@@ -623,9 +623,9 @@ func consoleAgentName(agent control.AgentInfo) string {
 }
 
 func printConsoleAgents(output io.Writer, agents []control.AgentInfo) {
-	fmt.Fprintf(output, "Connected agents (%d):\n", len(agents))
+	fmt.Fprintf(output, "Agents available for commands (%d):\n", len(agents))
 	if len(agents) > 0 {
-		fmt.Fprintln(output, "  No.  Agent name            Agent ID                          Virtual IP      Carrier    Path")
+		fmt.Fprintln(output, "  No.  Agent name            Agent ID                          Virtual IP      Carrier    State       Path")
 	}
 	for i, agent := range agents {
 		path := "direct"
@@ -636,7 +636,11 @@ func printConsoleAgents(output io.Writer, agents []control.AgentInfo) {
 		if agent.Profile != "" {
 			profile = " profile=" + agent.Profile
 		}
-		fmt.Fprintf(output, "  %-4d %-20s  %-32s  %-15s %s  %s  routes=%d jobs=%d%s\n", i+1, consoleAgentName(agent), agent.ID, agent.VirtualIP, agent.Transport, path, len(agent.AdvertisedRoutes), agent.ActiveJobs, profile)
+		state := "connected"
+		if agent.ConnectionState == "sleeping" {
+			state = "sleeping"
+		}
+		fmt.Fprintf(output, "  %-4d %-20s  %-32s  %-15s %-10s %-10s %s  routes=%d jobs=%d%s\n", i+1, consoleAgentName(agent), agent.ID, agent.VirtualIP, agent.Transport, state, path, len(agent.AdvertisedRoutes), agent.ActiveJobs, profile)
 	}
 	if len(agents) > 0 {
 		fmt.Fprintln(output, "Use an agent with: use NUMBER")
@@ -724,8 +728,13 @@ func runConsoleCommand(ctx context.Context, output io.Writer, call consoleCaller
 		if err != nil {
 			return err
 		}
-		if _, err := call(ctx, http.MethodPost, "/v1/sessions/"+url.PathEscape(a.ID)+"/kill", nil); err != nil {
+		data, err := call(ctx, http.MethodPost, "/v1/sessions/"+url.PathEscape(a.ID)+"/kill", nil)
+		if err != nil {
 			return err
+		}
+		if id := queuedLifecycleID(data); id != "" {
+			fmt.Fprintf(output, "Session kill for %s queued for its next check-in as job %s.\n", consoleAgentName(a), id)
+			return nil
 		}
 		fmt.Fprintf(output, "Session for %s closed; the agent may reconnect.\n", consoleAgentName(a))
 		return nil
@@ -912,6 +921,10 @@ Quote arguments containing spaces. Commands run only when submitted.
 		if err := json.Unmarshal(data, &result); err != nil {
 			return err
 		}
+		if result.QueuedJobID != "" {
+			fmt.Fprintf(output, "Command queued for next check-in as job %s. Use job show/output to inspect it.\n", result.QueuedJobID)
+			return nil
+		}
 		fmt.Fprint(output, result.Stdout)
 		fmt.Fprint(output, result.Stderr)
 		if result.Error != "" {
@@ -930,6 +943,10 @@ Quote arguments containing spaces. Commands run only when submitted.
 		var result pivot.ExecResult
 		if err := json.Unmarshal(data, &result); err != nil {
 			return err
+		}
+		if result.QueuedJobID != "" {
+			fmt.Fprintf(output, "Host command queued for next check-in as job %s. Use job show/output to inspect it.\n", result.QueuedJobID)
+			return nil
 		}
 		fmt.Fprint(output, result.Stdout)
 		fmt.Fprint(output, result.Stderr)
@@ -1006,7 +1023,7 @@ Quote arguments containing spaces. Commands run only when submitted.
 				if len(args) == 3 && forward.AgentID != args[2] {
 					continue
 				}
-				fmt.Fprintf(output, "%s on %s -> client %s\n", forward.Bind, forward.AgentID, forward.Target)
+				fmt.Fprintf(output, "%s on %s -> client %s (%s)\n", forward.Bind, forward.AgentID, forward.Target, forward.State)
 			}
 			return nil
 		}
@@ -1019,7 +1036,11 @@ Quote arguments containing spaces. Commands run only when submitted.
 			if err := json.Unmarshal(data, &forward); err != nil {
 				return err
 			}
-			fmt.Fprintf(output, "Agent %s listening on %s -> client %s\n", forward.AgentID, forward.Bind, forward.Target)
+			if forward.State == "pending" {
+				fmt.Fprintf(output, "Agent %s forward %s -> client %s queued for next check-in\n", forward.AgentID, forward.Bind, forward.Target)
+			} else {
+				fmt.Fprintf(output, "Agent %s listening on %s -> client %s\n", forward.AgentID, forward.Bind, forward.Target)
+			}
 			return nil
 		}
 		if len(args) == 4 && args[1] == "del" {

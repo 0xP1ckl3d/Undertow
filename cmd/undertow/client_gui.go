@@ -568,6 +568,9 @@ func (g *guiServer) terminal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer session.Close()
+	if err := conn.Write(ctx, websocket.MessageText, mustGUIJSON(map[string]string{"type": "ready"})); err != nil {
+		return
+	}
 	go func() {
 		defer cancel()
 		for {

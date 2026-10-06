@@ -256,15 +256,26 @@ func (m *Manager) sleepBlockReasonLocked(id string, stream *mux.Mux) string {
 			return "a connected child agent depends on this relay path"
 		}
 	}
-	if len(m.relays[id]) != 0 || len(m.restoringRelays[id]) != 0 {
-		return "a relay listener is active"
+	if len(m.relays[id]) != 0 || len(m.restoringRelays[id]) != 0 || len(m.desiredRelays[id]) != 0 {
+		return "a relay listener is configured"
 	}
 	for _, forward := range m.forwards {
 		if forward.AgentID == id {
 			return "an active forward depends on this agent"
 		}
 	}
+	for _, forward := range m.pendingForwards {
+		if forward.AgentID == id {
+			return "a queued forward is awaiting its listener"
+		}
+	}
+	if m.pendingLive[id] > 0 {
+		return "an operator stream is waiting to start"
+	}
 	for _, job := range m.jobs {
+		if job.info.AgentID == id && (job.info.State == "queued" || job.info.State == "dispatching") {
+			return "queued job is awaiting dispatch"
+		}
 		if job.info.AgentID == id && job.info.State == "running" {
 			return "a background job is running"
 		}

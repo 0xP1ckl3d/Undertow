@@ -43,7 +43,7 @@ func TestAgentsCommandAnnouncesNewConnectionImmediately(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := output.String()
-	if strings.Count(text, "Agent connected: WS01") != 1 || !strings.Contains(text, "Connected agents (1)") {
+	if strings.Count(text, "Agent connected: WS01") != 1 || !strings.Contains(text, "Agents available for commands (1)") {
 		t.Fatalf("connection alert did not accompany agents output: %s", text)
 	}
 }

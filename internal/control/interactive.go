@@ -157,12 +157,6 @@ func (m *Manager) ServeInteractiveRelayForClient(ctx context.Context, clientID u
 		pivot.RejectInteractive(client, errors.New("audit unavailable"))
 		return
 	}
-	agent := m.Get(request.AgentID)
-	if agent == nil {
-		finishAudit(http.StatusNotFound)
-		pivot.RejectInteractive(client, errors.New("agent is not connected"))
-		return
-	}
 	destination := pivot.InteractiveDestination
 	if request.Kind == "script" {
 		destination = pivot.ScriptDestination
@@ -177,7 +171,7 @@ func (m *Manager) ServeInteractiveRelayForClient(ctx context.Context, clientID u
 		pivot.RejectInteractive(client, errors.New("unknown task kind"))
 		return
 	}
-	upstream, err := agent.Open(ctx, destination)
+	upstream, err := m.openAgentForOperator(ctx, client.Done(), request.AgentID, destination)
 	if err != nil {
 		finishAudit(http.StatusBadGateway)
 		pivot.RejectInteractive(client, err)
@@ -265,11 +259,6 @@ func bridgeInteractive(ctx context.Context, client *mux.Stream, reader io.Reader
 
 // InteractiveHandler is mounted inside the authenticated local control API.
 func (m *Manager) interactiveHandler(w http.ResponseWriter, r *http.Request) {
-	agent := m.Get(r.PathValue("id"))
-	if agent == nil {
-		http.Error(w, "agent is not connected", http.StatusNotFound)
-		return
-	}
 	destination := pivot.InteractiveDestination
 	if r.URL.Path == "/v1/agents/"+r.PathValue("id")+"/script" {
 		destination = pivot.ScriptDestination
@@ -280,7 +269,7 @@ func (m *Manager) interactiveHandler(w http.ResponseWriter, r *http.Request) {
 	} else if r.URL.Path == "/v1/agents/"+r.PathValue("id")+"/bof" {
 		destination = pivot.BOFDestination
 	}
-	upstream, err := agent.Open(r.Context(), destination)
+	upstream, err := m.openAgentForOperator(r.Context(), r.Context().Done(), r.PathValue("id"), destination)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return

@@ -1,24 +1,27 @@
 import {useEffect, useState} from 'react';
 import {Cable, Power, Radio, RefreshCw, ShieldAlert} from 'lucide-react';
-import {api, type Agent} from './api';
+import {api, type Agent, type Job} from './api';
 
-type Forward={agent_id:string;bind:string;target:string;active?:boolean};
+type Forward={agent_id:string;bind:string;target:string;state?:string};
 type Listener={transport:string;listen:string;network:string;tls_mode?:string;sessions:number;agents:number;clients:number};
 type ClientMode={session_id:string;operator_only:boolean;vpn:boolean;internal:boolean;transport:string};
 const label=(agent:Agent)=>agent.nickname||agent.hostname||agent.id.slice(0,16);
 
 export function AgentLifecycle({agent,onRefresh}:{agent:Agent;onRefresh:()=>Promise<void>}){
-  const [pending,setPending]=useState<'kill'|'shutdown'|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState('');
-  useEffect(()=>{setPending(null);setError('')},[agent.id]);
+  const [pending,setPending]=useState<'kill'|'shutdown'|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
+  useEffect(()=>{setPending(null);setError('');setNotice('')},[agent.id]);
   const perform=async()=>{if(!pending)return;setBusy(true);setError('');try{
-    if(pending==='shutdown')await api(`/agents/${encodeURIComponent(agent.id)}/shutdown`,'POST',{});
-    else await api(`/agents/${encodeURIComponent(agent.id)}/session/kill`,'POST',{});
+    const action=pending;
+    const result=action==='shutdown'
+      ?await api<Job|undefined>(`/agents/${encodeURIComponent(agent.id)}/shutdown`,'POST',{})
+      :await api<Job|undefined>(`/agents/${encodeURIComponent(agent.id)}/session/kill`,'POST',{});
+    setNotice(result?.id?`${action==='shutdown'?'Shutdown':'Session kill'} queued as job ${result.id} for the next check-in.`:`${action==='shutdown'?'Shutdown':'Session kill'} request completed.`);
     setPending(null);await onRefresh();
   }catch(e){setError(String(e))}finally{setBusy(false)}};
-  return <section className="control-card wide"><div className="control-heading"><Power size={17}/><div><h3>Agent lifecycle</h3><p>These actions affect this connected agent only.</p></div></div>
+  return <section className="control-card wide"><div className="control-heading"><Power size={17}/><div><h3>Agent lifecycle</h3><p>Requests for a sleeping agent are saved for its next check-in.</p></div></div>
     <div className="control-actions"><button disabled={!agent.session_id||busy} onClick={()=>setPending('kill')}>Kill current session</button><button className="danger" disabled={busy} onClick={()=>setPending('shutdown')}>Shut down agent</button></div>
     {pending&&<div className="control-confirm" role="alertdialog" aria-label="Confirm agent lifecycle action"><ShieldAlert size={18}/><div><strong>{pending==='kill'?`Close session ${agent.session_id}?`:`Shut down ${label(agent)}?`}</strong><p>{pending==='kill'?'The connection will close. The agent may reconnect using its existing configuration.':'The packaged agent will exit and cannot reconnect until started again.'}</p></div><button className="danger" disabled={busy} onClick={perform}>{busy?'Working…':'Confirm'}</button><button disabled={busy} onClick={()=>setPending(null)}>Cancel</button></div>}
-    {error&&<p className="control-error" role="alert">{error}</p>}
+    {notice&&<p className="control-note" role="status">{notice}</p>}{error&&<p className="control-error" role="alert">{error}</p>}
   </section>
 }
 
@@ -28,10 +31,10 @@ export function ForwardsView({agents,revision}:{agents:Agent[];revision?:string}
   useEffect(()=>{refresh()},[revision]);
   const action=async(fn:()=>Promise<unknown>)=>{setBusy(true);setError('');try{await fn();await refresh()}catch(e){setError(String(e))}finally{setBusy(false)}};
   return <div className="operations-grid"><section className="panel control-panel"><div className="control-heading"><Cable size={18}/><div><h2>Agent TCP forwards</h2><p>Open a listener on the selected agent and forward connections to this client’s target address.</p></div></div>
-    <div className="control-fields"><label>Agent<select value={agent} onChange={e=>setAgent(e.target.value)}><option value="">Select connected agent</option>{agents.map(a=><option key={a.id} value={a.id}>{label(a)} · {a.id.slice(0,8)}</option>)}</select></label><label>Agent bind address<input value={bind} onChange={e=>setBind(e.target.value)} placeholder="127.0.0.1:8080"/></label><label>Client target address<input value={target} onChange={e=>setTarget(e.target.value)} placeholder="127.0.0.1:8000"/></label><button disabled={busy||!agents.some(a=>a.id===agent)||!bind.trim()||!target.trim()} onClick={()=>action(async()=>{await api('/forwards','POST',{agent_id:agent,bind:bind.trim(),target:target.trim()});setBind('');setTarget('')})}>Start forward</button></div>
+    <div className="control-fields"><label>Agent<select value={agent} onChange={e=>setAgent(e.target.value)}><option value="">Select agent</option>{agents.map(a=><option key={a.id} value={a.id}>{label(a)} · {a.id.slice(0,8)}</option>)}</select></label><label>Agent bind address<input value={bind} onChange={e=>setBind(e.target.value)} placeholder="127.0.0.1:8080"/></label><label>Client target address<input value={target} onChange={e=>setTarget(e.target.value)} placeholder="127.0.0.1:8000"/></label><button disabled={busy||!agents.some(a=>a.id===agent)||!bind.trim()||!target.trim()} onClick={()=>action(async()=>{await api('/forwards','POST',{agent_id:agent,bind:bind.trim(),target:target.trim()});setBind('');setTarget('')})}>Start forward</button></div>
     <p className="control-note">Bind and target are interpreted by Undertow’s existing forward service. Review both addresses before starting a listener.</p></section>
-    <section className="panel control-panel"><div className="control-heading"><Radio size={18}/><div><h2>Active forwards</h2><p>Scoped to this client session.</p></div><button className="control-refresh" title="Refresh forwards" onClick={refresh}><RefreshCw size={15}/></button></div>
-      {items.length?items.map(item=><div className="control-list-row" key={item.agent_id+item.bind}><div><strong>{item.bind}</strong><small>{agents.find(a=>a.id===item.agent_id)?.hostname||item.agent_id.slice(0,14)} → {item.target}</small></div><button disabled={busy} onClick={()=>setRemove(item)}>Stop</button></div>):<p className="control-empty">No active forwards for this client.</p>}
+    <section className="panel control-panel"><div className="control-heading"><Radio size={18}/><div><h2>Client forwards</h2><p>Scoped to this client session. Pending listeners start on the agent’s next check-in and then keep its connection open.</p></div><button className="control-refresh" title="Refresh forwards" onClick={refresh}><RefreshCw size={15}/></button></div>
+      {items.length?items.map(item=><div className="control-list-row" key={item.agent_id+item.bind}><div><strong>{item.bind}</strong><small>{agents.find(a=>a.id===item.agent_id)?.hostname||item.agent_id.slice(0,14)} → {item.target} · {item.state==='pending'?'Pending check-in':'Active'}</small></div><button disabled={busy} onClick={()=>setRemove(item)}>{item.state==='pending'?'Cancel':'Stop'}</button></div>):<p className="control-empty">No forwards for this client.</p>}
       {remove&&<div className="control-confirm" role="alertdialog" aria-label="Confirm forward removal"><ShieldAlert size={18}/><div><strong>Stop {remove.bind}?</strong><p>New connections through this forward will no longer be accepted.</p></div><button className="danger" disabled={busy} onClick={()=>action(async()=>{await api(`/forwards?agent_id=${encodeURIComponent(remove.agent_id)}&bind=${encodeURIComponent(remove.bind)}`,'DELETE');setRemove(null)})}>Stop forward</button><button onClick={()=>setRemove(null)}>Cancel</button></div>}
       {error&&<p className="control-error" role="alert">{error}</p>}
     </section></div>

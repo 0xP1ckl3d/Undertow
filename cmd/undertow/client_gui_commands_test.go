@@ -98,8 +98,8 @@ func TestAgentGUIConsoleScreenshotRequiresExplicitCommand(t *testing.T) {
 	client := &liveClientConsole{request: func(_ context.Context, method, path string, body any) ([]byte, error) {
 		calls = append(calls, method+" "+path)
 		switch method + " " + path {
-		case "GET /v1/agents/agent-a/screens":
-			return []byte(`[{"number":1,"name":"primary","width":1920,"height":1080}]`), nil
+		case "POST /v1/agents/agent-a/exec":
+			return []byte(`{"screens":[{"number":1,"name":"primary","width":1920,"height":1080}]}`), nil
 		case "POST /v1/agents/agent-a/screenshots":
 			return []byte(`{"id":"0123456789abcdef0123456789abcdef","agent_id":"agent-a","screen":1,"size":123,"sha256":"hash"}`), nil
 		}
@@ -117,4 +117,16 @@ func TestAgentGUIConsoleScreenshotRequiresExplicitCommand(t *testing.T) {
 	if err != nil || !strings.Contains(shot.Output, "server history") || len(calls) != 2 || calls[1] != "POST /v1/agents/agent-a/screenshots" {
 		t.Fatalf("capture: %+v %v %v", shot, err, calls)
 	}
+}
+
+func TestAgentGUIConsoleKillsByStableAgentID(t *testing.T) {
+	var path string
+	client := &liveClientConsole{request: func(_ context.Context, method, target string, _ any) ([]byte, error) {
+		if method != http.MethodPost { return nil, errors.New("unexpected method") }
+		path = target
+		return nil, nil
+	}}
+	gui := &guiServer{client: client}
+	if _, err := gui.runAgentGUICommand(context.Background(), "agent-a", "session kill"); err != nil { t.Fatal(err) }
+	if path != "/v1/sessions/agent-a/kill" { t.Fatalf("session kill targeted %q, want stable agent ID", path) }
 }

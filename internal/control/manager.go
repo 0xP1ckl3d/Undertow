@@ -214,7 +214,10 @@ type Manager struct {
 	agents             map[string]*agentState
 	clients            map[uint64]*clientState
 	forwards           map[string]*forwardState
+	pendingForwards    map[string]*pendingForward
+	pendingLive        map[string]int
 	jobs               map[string]*jobState
+	jobDispatching     map[string]bool
 	jobOutput          *jobOutputStore
 	routes             *routing.Table
 	device             RouteDevice
@@ -397,7 +400,7 @@ func (m *Manager) SetRelayPayloadAcceptor(accept func(context.Context, string, *
 }
 
 func NewManager(routes *routing.Table, device RouteDevice, virtualNetwork netip.Prefix, proxyIP netip.Addr) *Manager {
-	return &Manager{eventBus: NewEventBroker(), agents: make(map[string]*agentState), offlineAgents: make(map[string]AgentInfo), nicknames: make(map[string]string), archivedAgents: make(map[string]bool), sleepOverrides: make(map[string]SleepPolicy), sleepTimers: make(map[string]*time.Timer), clients: make(map[uint64]*clientState), forwards: make(map[string]*forwardState), jobs: make(map[string]*jobState), relays: make(map[string]map[string]*relayState), desiredRelays: make(map[string]map[string]bool), restoringRelays: make(map[string]map[string]bool), routes: routes, device: device, virtualNetwork: virtualNetwork.Masked(), proxyIP: proxyIP, virtualByAgent: make(map[string]netip.Addr), virtualUsed: make(map[netip.Addr]bool)}
+	return &Manager{eventBus: NewEventBroker(), agents: make(map[string]*agentState), offlineAgents: make(map[string]AgentInfo), nicknames: make(map[string]string), archivedAgents: make(map[string]bool), sleepOverrides: make(map[string]SleepPolicy), sleepTimers: make(map[string]*time.Timer), clients: make(map[uint64]*clientState), forwards: make(map[string]*forwardState), pendingForwards: make(map[string]*pendingForward), pendingLive: make(map[string]int), jobs: make(map[string]*jobState), jobDispatching: make(map[string]bool), relays: make(map[string]map[string]*relayState), desiredRelays: make(map[string]map[string]bool), restoringRelays: make(map[string]map[string]bool), routes: routes, device: device, virtualNetwork: virtualNetwork.Masked(), proxyIP: proxyIP, virtualByAgent: make(map[string]netip.Addr), virtualUsed: make(map[netip.Addr]bool)}
 }
 
 // SetAgentArchived changes visibility of a retained, disconnected agent only.
@@ -496,8 +499,15 @@ func (m *Manager) UnregisterClient(sessionID uint64, streamMux *mux.Mux) {
 		delete(m.clients, sessionID)
 		for id, forward := range m.forwards {
 			if forward.ClientID == sessionID {
-				closed = append(closed, forward.control)
+				if forward.control != nil {
+					closed = append(closed, forward.control)
+				}
 				delete(m.forwards, id)
+			}
+		}
+		for id, forward := range m.pendingForwards {
+			if forward.ClientID == sessionID {
+				delete(m.pendingForwards, id)
 			}
 		}
 	}
@@ -559,21 +569,26 @@ func (m *Manager) SetClientRoute(sessionID uint64, prefix netip.Prefix, agentID 
 		return fmt.Errorf("route %s is owned by connected agent %s; remove it before assigning another agent", prefix, existing.AgentID)
 	}
 	agent := m.agents[agentID]
-	if agent == nil {
-		return errors.New("agent is not connected")
+	var inventory AgentInfo
+	if agent != nil && agent.inventoryReady {
+		inventory = agent.inventory
+	} else if retained, ok := m.offlineAgents[agentID]; ok && retained.ConnectionState == "sleeping" && !retained.SleepLostAfter.IsZero() && time.Now().Before(retained.SleepLostAfter) {
+		inventory = retained
+	} else {
+		return errors.New("agent is unavailable; wait for a check-in or choose another agent")
 	}
-	if !agentPivotAllowed(agent) {
+	if !agentInfoPivotAllowed(inventory) {
 		return errors.New("agent pivot capability is disabled")
 	}
 	advertised := false
-	for _, route := range agent.inventory.AdvertisedRoutes {
+	for _, route := range inventory.AdvertisedRoutes {
 		if route == prefix.String() {
 			advertised = true
 			break
 		}
 	}
 	if !advertised {
-		for _, route := range agent.inventory.Routes {
+		for _, route := range inventory.Routes {
 			if route.Prefix == prefix.String() {
 				advertised = true
 				break
@@ -595,9 +610,6 @@ func (m *Manager) DeleteClientRoute(sessionID uint64, prefix netip.Prefix) error
 		return errors.New("VPN client is not connected")
 	}
 	prefix = prefix.Masked()
-	if _, exists := client.accepted[prefix]; !exists {
-		return errors.New("route is not accepted by this client")
-	}
 	delete(client.accepted, prefix)
 	return nil
 }
@@ -945,6 +957,8 @@ func (m *Manager) UpdateInventory(id string, streamMux *mux.Mux, b []byte) {
 		cancel()
 	}
 	m.restoreRelays(id, streamMux)
+	go m.dispatchQueuedJobs(id, streamMux)
+	go m.activatePendingForwards(id, streamMux)
 }
 
 func (m *Manager) updateNetworkRoutes(id string, streamMux *mux.Mux, update networkRouteUpdate) {
@@ -992,10 +1006,14 @@ func agentPivotAllowed(state *agentState) bool {
 	if state == nil || !state.inventoryReady {
 		return false
 	}
-	if state.inventory.Capabilities == nil {
+	return agentInfoPivotAllowed(state.inventory)
+}
+
+func agentInfoPivotAllowed(info AgentInfo) bool {
+	if info.Capabilities == nil {
 		return true // Older agents did not report capability state.
 	}
-	for _, name := range state.inventory.Capabilities.Allowed {
+	for _, name := range info.Capabilities.Allowed {
 		if name == "pivot" {
 			return true
 		}
@@ -1409,6 +1427,10 @@ func (m *Manager) ShutdownAgent(ctx context.Context, id string) error {
 	if streamMux == nil {
 		return errors.New("agent is not connected")
 	}
+	return m.shutdownAgentOnStream(ctx, id, streamMux)
+}
+
+func (m *Manager) shutdownAgentOnStream(ctx context.Context, id string, streamMux *mux.Mux) error {
 	m.mu.Lock()
 	if state := m.agents[id]; state == nil || state.mux != streamMux || state.inventory.ArtifactID == "" {
 		m.mu.Unlock()
@@ -1807,6 +1829,13 @@ func (m *Manager) handler(token string) http.Handler {
 	muxer.HandleFunc("GET /v1/screenshots/{id}", m.screenshotHandler)
 	muxer.HandleFunc("GET /v1/screenshots/{id}/chunk", m.screenshotChunkHandler)
 	muxer.HandleFunc("POST /v1/agents/{id}/shutdown", func(w http.ResponseWriter, r *http.Request) {
+		if job, queued, err := m.QueueLifecycleIfCheckIn(jobOwner(r.Context()), r.PathValue("id"), "shutdown"); err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		} else if queued {
+			jsonReply(w, http.StatusAccepted, job)
+			return
+		}
 		if err := m.ShutdownAgent(r.Context(), r.PathValue("id")); err != nil {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
@@ -1814,14 +1843,21 @@ func (m *Manager) handler(token string) http.Handler {
 		w.WriteHeader(http.StatusNoContent)
 	})
 	muxer.HandleFunc("POST /v1/agents/{id}/exec", func(w http.ResponseWriter, r *http.Request) {
-		agent := m.Get(r.PathValue("id"))
-		if agent == nil {
-			http.Error(w, "agent is not connected", http.StatusNotFound)
-			return
-		}
 		var request pivot.ExecRequest
 		if err := json.NewDecoder(io.LimitReader(r.Body, 8193)).Decode(&request); err != nil {
 			http.Error(w, "invalid command request", http.StatusBadRequest)
+			return
+		}
+		if job, queued, err := m.QueueExecIfCheckIn(jobOwner(r.Context()), r.PathValue("id"), request); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		} else if queued {
+			jsonReply(w, http.StatusOK, pivot.ExecResult{QueuedJobID: job.ID})
+			return
+		}
+		agent := m.Get(r.PathValue("id"))
+		if agent == nil {
+			http.Error(w, "agent is not connected", http.StatusNotFound)
 			return
 		}
 		result, err := pivot.ExecuteRequest(r.Context(), agent, request)
@@ -1898,7 +1934,10 @@ func (m *Manager) handler(token string) http.Handler {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		w.WriteHeader(http.StatusCreated)
+		m.mu.RLock()
+		connected := m.agents[body.AgentID] != nil
+		m.mu.RUnlock()
+		jsonReply(w, http.StatusCreated, map[string]bool{"connected": connected})
 	})
 	muxer.HandleFunc("DELETE /v1/clients/{id}/routes", func(w http.ResponseWriter, r *http.Request) {
 		id, err := strconv.ParseUint(r.PathValue("id"), 10, 64)
@@ -1984,6 +2023,13 @@ func (m *Manager) handler(token string) http.Handler {
 		w.WriteHeader(http.StatusNoContent)
 	})
 	muxer.HandleFunc("POST /v1/sessions/{id}/kill", func(w http.ResponseWriter, r *http.Request) {
+		if job, queued, err := m.QueueLifecycleIfCheckIn(jobOwner(r.Context()), r.PathValue("id"), "session-kill"); err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		} else if queued {
+			jsonReply(w, http.StatusAccepted, job)
+			return
+		}
 		if err := m.Kill(r.PathValue("id")); err != nil {
 			http.Error(w, err.Error(), 404)
 			return

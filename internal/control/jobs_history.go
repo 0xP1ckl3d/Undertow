@@ -22,6 +22,10 @@ func (m *Manager) RestoreJobHistory() error {
 	if err != nil {
 		return fmt.Errorf("load job index: %w", err)
 	}
+	pending, err := store.LoadQueuedJobs()
+	if err != nil {
+		return fmt.Errorf("load queued job requests: %w", err)
+	}
 	for _, entry := range entries {
 		info := entry.Info
 		if !safeJobPathComponent(info.ID) || !safeJobPathComponent(info.AgentID) {
@@ -66,13 +70,32 @@ func (m *Manager) RestoreJobHistory() error {
 			path = ""
 			info.OutputFile = ""
 			if info.OutputBytes > 0 {
-				info.OutputError = "retained output file is missing"
+				if uint64(len(info.Output)) == info.OutputBytes {
+					preview = []byte(info.Output)
+				} else {
+					info.OutputError = "retained output file is missing"
+				}
 			}
 		}
 		if info.State == "running" {
 			now := time.Now().UTC()
 			info.State = "interrupted"
 			info.Ended = &now
+		}
+		var request *queuedJobRequest
+		if info.State == "dispatching" {
+			now := time.Now().UTC()
+			info.State, info.Ended, info.OutputError = "interrupted", &now, "Server restarted during dispatch; execution may have started. Review before retrying."
+			if err := store.DeleteQueuedJob(info.ID); err != nil {
+				return err
+			}
+		} else if info.State == "queued" {
+			if value, ok := pending[info.ID]; ok {
+				request = &value
+			} else {
+				now := time.Now().UTC()
+				info.State, info.Ended, info.OutputError = "failed", &now, "queued job request is missing"
+			}
 		}
 		var fileBytes uint64
 		retainedFiles := info.Files[:0]
@@ -82,7 +105,10 @@ func (m *Manager) RestoreJobHistory() error {
 			}
 			filePath := filepath.Join(output.root, info.AgentID, info.ID+".files", fmt.Sprintf("%08x-%s", artifact.ID, artifact.Name))
 			stat, err := os.Stat(filePath)
-			if os.IsNotExist(err) { info.OutputError = "one or more retained job files are missing"; continue }
+			if os.IsNotExist(err) {
+				info.OutputError = "one or more retained job files are missing"
+				continue
+			}
 			if err != nil {
 				return fmt.Errorf("restore job file %s: %w", filePath, err)
 			}
@@ -93,7 +119,7 @@ func (m *Manager) RestoreJobHistory() error {
 			retainedFiles = append(retainedFiles, artifact)
 		}
 		info.Files = retainedFiles
-		job := &jobState{info: info, ownerKey: entry.OwnerKey, outputPath: path, diskBytes: diskBytes + fileBytes, fileBytes: fileBytes, output: preview}
+		job := &jobState{info: info, ownerKey: entry.OwnerKey, outputPath: path, diskBytes: diskBytes + fileBytes, fileBytes: fileBytes, output: preview, request: request}
 		m.mu.Lock()
 		m.jobs[info.ID] = job
 		m.mu.Unlock()

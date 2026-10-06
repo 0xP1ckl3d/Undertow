@@ -235,13 +235,23 @@ func (g *guiServer) runAgentGUICommand(ctx context.Context, agentID, line string
 		if len(args) != 1 {
 			return guiCommandResult{}, errors.New("use screens")
 		}
-		data, err := call(http.MethodGet, base+"/screens", nil)
+		data, err := call(http.MethodPost, base+"/exec", pivot.ExecRequest{Builtin: "screens"})
 		if err != nil {
 			return guiCommandResult{}, err
 		}
-		var screens []pivot.ScreenInfo
-		if err := json.Unmarshal(data, &screens); err != nil {
+		var response pivot.ExecResult
+		if err := json.Unmarshal(data, &response); err != nil {
 			return guiCommandResult{}, err
+		}
+		if response.QueuedJobID != "" {
+			return guiCommandResult{Output: "Screen enumeration queued for the next check-in. Job " + response.QueuedJobID + " retains its result.\n"}, nil
+		}
+		if response.Error != "" {
+			return guiCommandResult{}, errors.New(response.Error)
+		}
+		screens := response.Screens
+		if screens == nil {
+			_ = json.Unmarshal([]byte(response.Stdout), &screens)
 		}
 		var out strings.Builder
 		fmt.Fprintf(&out, "Screens (%d):\n", len(screens))
@@ -261,13 +271,23 @@ func (g *guiServer) runAgentGUICommand(ctx context.Context, agentID, line string
 			}
 			numbers = []int{number}
 		} else {
-			data, err := call(http.MethodGet, base+"/screens", nil)
+			data, err := call(http.MethodPost, base+"/exec", pivot.ExecRequest{Builtin: "screens"})
 			if err != nil {
 				return guiCommandResult{}, err
 			}
-			var screens []pivot.ScreenInfo
-			if err := json.Unmarshal(data, &screens); err != nil {
+			var response pivot.ExecResult
+			if err := json.Unmarshal(data, &response); err != nil {
 				return guiCommandResult{}, err
+			}
+			if response.QueuedJobID != "" {
+				return guiCommandResult{Output: "Screen enumeration queued as job " + response.QueuedJobID + ". Run screenshot NUMBER after the result is available.\n"}, nil
+			}
+			if response.Error != "" {
+				return guiCommandResult{}, errors.New(response.Error)
+			}
+			screens := response.Screens
+			if screens == nil {
+				_ = json.Unmarshal([]byte(response.Stdout), &screens)
 			}
 			for _, screen := range screens {
 				numbers = append(numbers, screen.Number)
@@ -282,9 +302,18 @@ func (g *guiServer) runAgentGUICommand(ctx context.Context, agentID, line string
 			if err != nil {
 				return guiCommandResult{Output: out.String()}, err
 			}
-			var item control.ScreenshotInfo
+			var item struct {
+				ID     string `json:"id"`
+				Size   int64  `json:"size"`
+				SHA256 string `json:"sha256"`
+				State  string `json:"state"`
+			}
 			if err := json.Unmarshal(data, &item); err != nil {
 				return guiCommandResult{Output: out.String()}, err
+			}
+			if item.State == "queued" || item.State == "dispatching" {
+				fmt.Fprintf(&out, "Screen %d capture queued for the next check-in as job %s.\n", number, item.ID)
+				continue
 			}
 			fmt.Fprintf(&out, "Screen %d captured to server history: %s (%d bytes, SHA-256 %s)\n", number, item.ID, item.Size, item.SHA256)
 		}
@@ -297,6 +326,9 @@ func (g *guiServer) runAgentGUICommand(ctx context.Context, agentID, line string
 		var result pivot.ExecResult
 		if err := json.Unmarshal(data, &result); err != nil {
 			return guiCommandResult{}, err
+		}
+		if result.QueuedJobID != "" {
+			return guiCommandResult{Output: "Command queued for next check-in as job " + result.QueuedJobID + ". Output will appear in Jobs.\n"}, nil
 		}
 		if result.Error != "" {
 			return guiCommandResult{Output: result.Stdout + result.Stderr}, errors.New(result.Error)
@@ -343,6 +375,9 @@ func (g *guiServer) runAgentGUICommand(ctx context.Context, agentID, line string
 		var result pivot.ExecResult
 		if err := json.Unmarshal(data, &result); err != nil {
 			return guiCommandResult{}, err
+		}
+		if result.QueuedJobID != "" {
+			return guiCommandResult{Output: "Command queued for next check-in as job " + result.QueuedJobID + ". Output will appear in Jobs.\n"}, nil
 		}
 		output := result.Stdout + result.Stderr
 		if result.Error != "" {
@@ -460,9 +495,12 @@ func (g *guiServer) runAgentGUICommand(ctx context.Context, agentID, line string
 			return guiCommandResult{Output: fmt.Sprintf("Idle sleep set to %d seconds, %d%% jitter.\n", seconds, jitter)}, nil
 		}
 		if len(args) == 2 && args[1] == "shutdown" {
-			_, err := call(http.MethodPost, base+"/shutdown", map[string]any{})
+			data, err := call(http.MethodPost, base+"/shutdown", map[string]any{})
 			if err != nil {
 				return guiCommandResult{}, err
+			}
+			if id := queuedLifecycleID(data); id != "" {
+				return guiCommandResult{Output: "Agent shutdown queued for its next check-in as job " + id + ".\n"}, nil
 			}
 			return guiCommandResult{Output: "Agent shutdown requested. The packaged agent will exit.\n"}, nil
 		}
@@ -489,29 +527,12 @@ func (g *guiServer) runAgentGUICommand(ctx context.Context, agentID, line string
 		if len(args) != 2 || args[1] != "kill" {
 			return guiCommandResult{}, errors.New("use session kill")
 		}
-		data, err := call(http.MethodGet, "/v1/status", nil)
+		data, err := call(http.MethodPost, "/v1/sessions/"+url.PathEscape(agentID)+"/kill", map[string]any{})
 		if err != nil {
 			return guiCommandResult{}, err
 		}
-		var status struct {
-			Agents []control.AgentInfo `json:"agents"`
-		}
-		if err := json.Unmarshal(data, &status); err != nil {
-			return guiCommandResult{}, err
-		}
-		var agent control.AgentInfo
-		for _, candidate := range status.Agents {
-			if candidate.ID == agentID {
-				agent = candidate
-				break
-			}
-		}
-		if agent.SessionID == 0 {
-			return guiCommandResult{}, errors.New("agent has no active session")
-		}
-		_, err = call(http.MethodPost, fmt.Sprintf("/v1/sessions/%d/kill", agent.SessionID), map[string]any{})
-		if err != nil {
-			return guiCommandResult{}, err
+		if id := queuedLifecycleID(data); id != "" {
+			return guiCommandResult{Output: "Session kill queued for the next check-in as job " + id + ".\n"}, nil
 		}
 		return guiCommandResult{Output: "Agent session closed. The agent may reconnect.\n"}, nil
 	case "relay":
@@ -595,7 +616,7 @@ func (g *guiServer) runAgentGUIRelay(_ context.Context, call func(string, string
 		var out strings.Builder
 		for _, relay := range relays {
 			if relay.AgentID == agentID {
-				out.WriteString(relay.Bind + "\n")
+				out.WriteString(relay.Bind + " (" + relay.State + ")\n")
 			}
 		}
 		return guiCommandResult{Output: out.String()}, nil
@@ -612,6 +633,9 @@ func (g *guiServer) runAgentGUIRelay(_ context.Context, call func(string, string
 		var relay control.RelayInfo
 		if err := json.Unmarshal(data, &relay); err != nil {
 			return guiCommandResult{}, err
+		}
+		if relay.State == "pending" {
+			return guiCommandResult{Output: "Relay " + relay.Bind + " queued for the next check-in.\n"}, nil
 		}
 		return guiCommandResult{Output: "Relay listening on " + relay.Bind + "\n"}, nil
 	}
@@ -660,7 +684,7 @@ func (g *guiServer) runAgentGUIForward(call func(string, string, any) ([]byte, e
 		var out strings.Builder
 		for _, forward := range forwards {
 			if forward.AgentID == agentID {
-				fmt.Fprintf(&out, "%s -> %s\n", forward.Bind, forward.Target)
+				fmt.Fprintf(&out, "%s -> %s (%s)\n", forward.Bind, forward.Target, forward.State)
 			}
 		}
 		if out.Len() == 0 {
@@ -669,9 +693,16 @@ func (g *guiServer) runAgentGUIForward(call func(string, string, any) ([]byte, e
 		return guiCommandResult{Output: out.String()}, nil
 	}
 	if len(args) == 4 && args[1] == "add" {
-		_, err := call(http.MethodPost, base, map[string]string{"agent_id": agentID, "bind": args[2], "target": args[3]})
+		data, err := call(http.MethodPost, base, map[string]string{"agent_id": agentID, "bind": args[2], "target": args[3]})
 		if err != nil {
 			return guiCommandResult{}, err
+		}
+		var forward control.ForwardInfo
+		if err := json.Unmarshal(data, &forward); err != nil {
+			return guiCommandResult{}, err
+		}
+		if forward.State == "pending" {
+			return guiCommandResult{Output: "Forward queued for the next check-in.\n"}, nil
 		}
 		return guiCommandResult{Output: "Forward added.\n"}, nil
 	}

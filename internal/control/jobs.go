@@ -30,7 +30,10 @@ type JobInfo struct {
 	AgentID         string             `json:"agent_id"`
 	Kind            string             `json:"kind,omitempty"`
 	Language        string             `json:"language,omitempty"`
+	Builtin         string             `json:"builtin,omitempty"`
 	Argv            []string           `json:"argv"`
+	Args            []string           `json:"args,omitempty"`
+	QueuedAt        *time.Time         `json:"queued_at,omitempty"`
 	Started         time.Time          `json:"started"`
 	Ended           *time.Time         `json:"ended,omitempty"`
 	State           string             `json:"state"`
@@ -41,6 +44,8 @@ type JobInfo struct {
 	OutputFile      string             `json:"output_file,omitempty"`
 	OutputError     string             `json:"output_error,omitempty"`
 	Files           []bof.FileArtifact `json:"files,omitempty"`
+	ExecResult      *pivot.ExecResult  `json:"exec_result,omitempty"`
+	ScreenshotID    string             `json:"screenshot_id,omitempty"`
 }
 
 type jobState struct {
@@ -54,11 +59,38 @@ type jobState struct {
 	outputPath string
 	diskBytes  uint64
 	fileBytes  uint64
+	request    *queuedJobRequest
+}
+
+func (m *Manager) QueueExecIfCheckIn(owner uint64, agentID string, request pivot.ExecRequest) (JobInfo, bool, error) {
+	if err := pivot.ValidateExecRequest(request); err != nil {
+		return JobInfo{}, false, err
+	}
+	return m.queueJobIfSleeping(owner, agentID, queuedJobRequest{Kind: "exec", Exec: &request})
+}
+
+func (m *Manager) QueueLifecycleIfCheckIn(owner uint64, agentID, kind string) (JobInfo, bool, error) {
+	if kind != "shutdown" && kind != "session-kill" {
+		return JobInfo{}, false, errors.New("invalid lifecycle action")
+	}
+	m.mu.RLock()
+	info := m.offlineAgents[agentID]
+	if live := m.agents[agentID]; live != nil {
+		info = live.inventory
+	}
+	m.mu.RUnlock()
+	if kind == "shutdown" && info.ArtifactID == "" {
+		return JobInfo{}, false, errors.New("agent shutdown requires a configured agent; use session kill for a manual agent")
+	}
+	return m.queueJobIfSleeping(owner, agentID, queuedJobRequest{Kind: kind})
 }
 
 func (m *Manager) StartJob(ctx context.Context, owner uint64, agentID string, argv []string) (JobInfo, error) {
 	if len(argv) == 0 {
 		return JobInfo{}, errors.New("job start needs a program")
+	}
+	if info, queued, err := m.queueJobIfSleeping(owner, agentID, queuedJobRequest{Kind: "command", Argv: argv}); queued {
+		return info, err
 	}
 	m.mu.RLock()
 	state := m.agents[agentID]
@@ -86,6 +118,9 @@ func (m *Manager) StartScriptJob(ctx context.Context, owner uint64, agentID, lan
 	if len(source) == 0 || len(source) > pivot.ScriptSourceLimit {
 		return JobInfo{}, errors.New("script source exceeds the 1 MiB limit or is empty")
 	}
+	if info, queued, err := m.queueJobIfSleeping(owner, agentID, queuedJobRequest{Kind: "script", Language: language, Source: source}); queued {
+		return info, err
+	}
 	m.mu.RLock()
 	state := m.agents[agentID]
 	count := len(m.jobs)
@@ -111,6 +146,9 @@ func (m *Manager) StartScriptJob(ctx context.Context, owner uint64, agentID, lan
 func (m *Manager) StartWASMJob(ctx context.Context, owner uint64, agentID string, module []byte, args []string, stdin []byte) (JobInfo, error) {
 	if len(module) == 0 || len(module) > pivot.WASMModuleLimit || len(stdin) > pivot.WASMStdinLimit {
 		return JobInfo{}, errors.New("WASM module or stdin exceeds its size limit")
+	}
+	if info, queued, err := m.queueJobIfSleeping(owner, agentID, queuedJobRequest{Kind: "wasm", Argv: args, Source: module, Input: stdin}); queued {
+		return info, err
 	}
 	m.mu.RLock()
 	state := m.agents[agentID]
@@ -140,6 +178,9 @@ func (m *Manager) StartNativeJob(ctx context.Context, owner uint64, agentID stri
 	}
 	if _, err := nativemodule.EncodeArgs(args, data); err != nil {
 		return JobInfo{}, err
+	}
+	if info, queued, err := m.queueJobIfSleeping(owner, agentID, queuedJobRequest{Kind: "native", Argv: args, Source: module, Input: data}); queued {
+		return info, err
 	}
 	m.mu.RLock()
 	state := m.agents[agentID]
@@ -173,6 +214,9 @@ func (m *Manager) StartBOFJob(ctx context.Context, owner uint64, agentID string,
 	}
 	if len(arguments) < 4 || len(arguments) > bof.MaxArguments+4 {
 		return JobInfo{}, errors.New("invalid BOF argument buffer")
+	}
+	if info, queued, err := m.queueJobIfSleeping(owner, agentID, queuedJobRequest{Kind: "bof", Source: object, Arguments: arguments}); queued {
+		return info, err
 	}
 	m.mu.RLock()
 	state := m.agents[agentID]
@@ -257,7 +301,9 @@ func (m *Manager) collectJob(job *jobState) {
 			m.mu.RLock()
 			running := job.info.State == "running"
 			m.mu.RUnlock()
-			if !running { return }
+			if !running {
+				return
+			}
 			if files == nil {
 				m.mu.RLock()
 				store := m.jobOutput
@@ -271,7 +317,9 @@ func (m *Manager) collectJob(job *jobState) {
 				files.OnReserve = func(size uint64) error {
 					m.mu.Lock()
 					defer m.mu.Unlock()
-					if job.info.State != "running" { return errors.New("job is no longer running") }
+					if job.info.State != "running" {
+						return errors.New("job is no longer running")
+					}
 					if job.fileBytes+job.info.OutputBytes > store.perJobLimit || size > store.perJobLimit-job.fileBytes-job.info.OutputBytes || size > store.totalLimit-store.used {
 						return errors.New("server job file storage limit reached")
 					}
@@ -463,6 +511,7 @@ func (m *Manager) finishJob(job *jobState, state string, exitCode *int) {
 			log.Printf("persist job result: %v", err)
 		}
 	}
+	m.PublishEvent("job."+state, info.ID)
 }
 
 func (m *Manager) CancelJob(owner uint64, id string) error {
@@ -472,12 +521,14 @@ func (m *Manager) CancelJob(owner uint64, id string) error {
 		m.mu.Unlock()
 		return errors.New("job not found")
 	}
-	if job.info.State != "running" {
+	if job.info.State != "running" && job.info.State != "queued" && job.info.State != "dispatching" {
 		m.mu.Unlock()
-		return errors.New("job is not running")
+		return errors.New("job is not running or queued")
 	}
+	wasQueued := job.info.State != "running"
 	now := time.Now().UTC()
 	job.info.State, job.info.Ended = "cancelled", &now
+	job.request = nil
 	file := job.outputFile
 	job.outputFile = nil
 	session := job.session
@@ -491,8 +542,17 @@ func (m *Manager) CancelJob(owner uint64, id string) error {
 		if err := store.SaveJob(info, ownerKey, outputPath); err != nil {
 			log.Printf("persist cancelled job: %v", err)
 		}
+		if wasQueued {
+			if err := store.DeleteQueuedJob(id); err != nil {
+				log.Printf("remove cancelled job request: %v", err)
+			}
+		}
 	}
-	return session.Close()
+	m.PublishEvent("job.cancelled", id)
+	if session != nil {
+		return session.Close()
+	}
+	return nil
 }
 
 func (m *Manager) DeleteJob(owner uint64, id string) error {
@@ -502,7 +562,7 @@ func (m *Manager) DeleteJob(owner uint64, id string) error {
 	if job == nil || !m.jobVisibleTo(job, owner) {
 		return errors.New("job not found")
 	}
-	if job.info.State == "running" {
+	if job.info.State == "running" || job.info.State == "queued" || job.info.State == "dispatching" {
 		return errors.New("stop the running job before deleting its output")
 	}
 	if job.outputPath != "" {

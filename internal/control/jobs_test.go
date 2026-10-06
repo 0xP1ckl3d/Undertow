@@ -36,6 +36,178 @@ func TestJobHelperProcess(t *testing.T) {
 	os.Exit(0)
 }
 
+func TestCheckInJobQueuesDurablyAndRunsOnCallback(t *testing.T) {
+	t.Setenv("UNDERTOW_JOB_HELPER", "1")
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+	root := t.TempDir()
+	store, err := OpenOperationsStore(filepath.Join(root, "operations.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	newManager := func() *Manager {
+		manager := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+		if err := manager.ConfigureJobOutput(filepath.Join(root, "output"), 1<<20, 2<<20); err != nil {
+			t.Fatal(err)
+		}
+		if err := manager.SetOperationsStore(store); err != nil {
+			t.Fatal(err)
+		}
+		return manager
+	}
+	manager := newManager()
+	manager.mu.Lock()
+	manager.offlineAgents["checkin-agent"] = AgentInfo{ID: "checkin-agent", ConnectionState: "sleeping", SleepSupported: true, Sleep: SleepPolicy{IntervalSeconds: 15}, SleepLostAfter: time.Now().Add(time.Minute)}
+	manager.mu.Unlock()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := manager.StartJob(ctx, 0, "checkin-agent", []string{exe, "-test.run=TestJobHelperProcess"})
+	if err != nil || job.State != "queued" {
+		t.Fatalf("submit while sleeping: %+v %v", job, err)
+	}
+	manager = newManager()
+	if err := manager.RestoreJobHistory(); err != nil {
+		t.Fatal(err)
+	}
+	if restored, err := manager.Job(0, job.ID, true); err != nil || restored.State != "queued" {
+		t.Fatalf("restore queued job: %+v %v", restored, err)
+	}
+	server, agent := forwardAuditAgent(t, ctx, manager, "checkin-agent", 807, pivot.DefaultCapabilities())
+	defer server.Close()
+	defer agent.Close()
+	finished := waitJob(t, manager, 0, job.ID, func(j JobInfo) bool { return j.State == "completed" })
+	if !strings.Contains(finished.Output, "job finished") {
+		t.Fatalf("callback job output was not retained: %+v", finished)
+	}
+}
+
+func TestHostCommandQueuedDuringSleepRetainsTypedResult(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+	manager := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	store, err := OpenOperationsStore(filepath.Join(t.TempDir(), "operations.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := manager.ConfigureJobOutput(t.TempDir(), 1<<20, 2<<20); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.SetOperationsStore(store); err != nil {
+		t.Fatal(err)
+	}
+	manager.mu.Lock()
+	manager.offlineAgents["host-agent"] = AgentInfo{ID: "host-agent", ConnectionState: "sleeping", SleepSupported: true, Sleep: SleepPolicy{IntervalSeconds: 15}, SleepLostAfter: time.Now().Add(time.Minute)}
+	manager.mu.Unlock()
+	job, queued, err := manager.QueueExecIfCheckIn(0, "host-agent", pivot.ExecRequest{Builtin: "whoami"})
+	if err != nil || !queued || job.State != "queued" {
+		t.Fatalf("queue host operation: %+v %t %v", job, queued, err)
+	}
+	server, agent := forwardAuditAgent(t, ctx, manager, "host-agent", 835, pivot.DefaultCapabilities())
+	defer server.Close()
+	defer agent.Close()
+	finished := waitJob(t, manager, 0, job.ID, func(j JobInfo) bool { return j.State == "completed" })
+	if finished.ExecResult == nil || finished.ExecResult.Stdout == "" {
+		t.Fatalf("typed host result missing: %+v", finished)
+	}
+	results, err := store.HostResults("host-agent")
+	if err != nil || len(results) != 1 || results[0].Operation != "whoami" {
+		t.Fatalf("retained host result: %+v %v", results, err)
+	}
+}
+
+func TestJobSubmittedAfterSleepCommitRemainsQueued(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	m := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	store, err := OpenOperationsStore(filepath.Join(t.TempDir(), "operations.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := m.ConfigureJobOutput(t.TempDir(), 1<<20, 2<<20); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.SetOperationsStore(store); err != nil {
+		t.Fatal(err)
+	}
+	server, agent := forwardAuditAgent(t, ctx, m, "commit-agent", 837, pivot.DefaultCapabilities())
+	defer server.Close()
+	defer agent.Close()
+	m.mu.Lock()
+	m.agents["commit-agent"].inventory.SleepSupported = true
+	m.agents["commit-agent"].inventory.Sleep = SleepPolicy{IntervalSeconds: 15}
+	m.mu.Unlock()
+	if !server.TryQuiesce() || !server.CommitQuiesce() {
+		t.Fatal("test stream did not commit to sleep")
+	}
+	job, err := m.StartJob(ctx, 0, "commit-agent", []string{"echo", "queued"})
+	if err != nil || job.State != "queued" {
+		t.Fatalf("submit after commit: %+v %v", job, err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	current, err := m.Job(0, job.ID, false)
+	if err != nil || current.State != "queued" {
+		t.Fatalf("committed sleep consumed queued job: %+v %v", current, err)
+	}
+}
+
+func TestSessionKillQueuedForCheckInClosesThatSession(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	m := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	store, err := OpenOperationsStore(filepath.Join(t.TempDir(), "operations.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := m.ConfigureJobOutput(t.TempDir(), 1<<20, 2<<20); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.SetOperationsStore(store); err != nil {
+		t.Fatal(err)
+	}
+	m.mu.Lock()
+	m.offlineAgents["kill-checkin"] = AgentInfo{ID: "kill-checkin", ConnectionState: "sleeping", SleepSupported: true, Sleep: SleepPolicy{IntervalSeconds: 15}, SleepLostAfter: time.Now().Add(time.Minute)}
+	m.mu.Unlock()
+	first, queued, err := m.QueueExecIfCheckIn(0, "kill-checkin", pivot.ExecRequest{Builtin: "whoami"})
+	if err != nil || !queued {
+		t.Fatalf("queue first host action: %+v %t %v", first, queued, err)
+	}
+	second, queued, err := m.QueueExecIfCheckIn(0, "kill-checkin", pivot.ExecRequest{Builtin: "pwd"})
+	if err != nil || !queued {
+		t.Fatalf("queue second host action: %+v %t %v", second, queued, err)
+	}
+	job, queued, err := m.QueueLifecycleIfCheckIn(0, "kill-checkin", "session-kill")
+	if err != nil || !queued || job.State != "queued" {
+		t.Fatalf("queue session kill: %+v %t %v", job, queued, err)
+	}
+	if _, _, err := m.QueueLifecycleIfCheckIn(0, "kill-checkin", "session-kill"); err == nil {
+		t.Fatal("duplicate lifecycle action accepted")
+	}
+	server, agent := forwardAuditAgent(t, ctx, m, "kill-checkin", 839, pivot.DefaultCapabilities())
+	defer server.Close()
+	defer agent.Close()
+	finished := waitJob(t, m, 0, job.ID, func(j JobInfo) bool { return j.State == "completed" || j.State == "interrupted" })
+	if finished.State != "completed" {
+		t.Fatalf("queued kill result: %+v", finished)
+	}
+	for _, queuedJob := range []JobInfo{first, second} {
+		completed, err := m.Job(0, queuedJob.ID, true)
+		if err != nil || completed.State != "completed" || completed.ExecResult == nil {
+			t.Fatalf("earlier action was lost before lifecycle action: %+v %v", completed, err)
+		}
+	}
+	select {
+	case <-server.Done():
+	case <-ctx.Done():
+		t.Fatal("queued kill did not close the callback session")
+	}
+}
+
 func TestScriptJobUsesExistingLifecycle(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	defer cancel()

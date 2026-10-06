@@ -66,7 +66,7 @@ func TestVPNClientRelaysFileToAgent(t *testing.T) {
 	if err != nil || !bytes.Equal(actual, content) {
 		t.Fatalf("relayed file content mismatch: %v", err)
 	}
-	if _, err := pivot.TransferFile(ctx, clientVPN, "offline", "download", filepath.Join(dir, "missing"), remote); err == nil || !strings.Contains(err.Error(), "not connected") {
+	if _, err := pivot.TransferFile(ctx, clientVPN, "offline", "download", filepath.Join(dir, "missing"), remote); err == nil || !strings.Contains(err.Error(), "disconnected") {
 		t.Fatalf("expected agent offline error: %v", err)
 	}
 }

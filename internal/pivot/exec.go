@@ -24,12 +24,13 @@ type ExecRequest struct {
 }
 
 type ExecResult struct {
-	Stdout   string       `json:"stdout"`
-	Stderr   string       `json:"stderr"`
-	ExitCode int          `json:"exit_code"`
-	Error    string       `json:"error,omitempty"`
-	Files    *FileListing `json:"files,omitempty"`
-	Screens  []ScreenInfo `json:"screens,omitempty"`
+	Stdout      string       `json:"stdout"`
+	Stderr      string       `json:"stderr"`
+	ExitCode    int          `json:"exit_code"`
+	Error       string       `json:"error,omitempty"`
+	QueuedJobID string       `json:"queued_job_id,omitempty"`
+	Files       *FileListing `json:"files,omitempty"`
+	Screens     []ScreenInfo `json:"screens,omitempty"`
 }
 
 type cappedWriter struct {
@@ -138,6 +139,10 @@ func validateExecRequest(request ExecRequest) error {
 	}
 	return validateBuiltin(request.Builtin, request.Args)
 }
+
+// ValidateExecRequest applies the same limits before a request is retained
+// for a sleeping agent as the agent applies when it receives the request.
+func ValidateExecRequest(request ExecRequest) error { return validateExecRequest(request) }
 
 func serveExec(ctx context.Context, stream *mux.Stream, hostOps bool) {
 	defer stream.Close()

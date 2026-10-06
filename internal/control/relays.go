@@ -17,6 +17,7 @@ import (
 type RelayInfo struct {
 	AgentID string `json:"agent_id"`
 	Bind    string `json:"bind"`
+	State   string `json:"state,omitempty"`
 }
 
 type relayState struct {
@@ -37,7 +38,67 @@ func relayAllowed(agent *agentState) bool {
 }
 
 func (m *Manager) StartRelay(ctx context.Context, agentID, bind string) (RelayInfo, error) {
+	if bind == "" {
+		bind = "0.0.0.0:8443"
+	}
+	if err := pivot.ValidateRelayBind(bind); err != nil {
+		return RelayInfo{}, err
+	}
+	m.mu.Lock()
+	live := m.agents[agentID]
+	retained := m.offlineAgents[agentID]
+	checkin := live != nil && live.inventoryReady && live.inventory.SleepSupported && live.inventory.Sleep.IntervalSeconds > 0
+	sleeping := live == nil && retained.ConnectionState == "sleeping" && !retained.SleepLostAfter.IsZero() && time.Now().Before(retained.SleepLostAfter)
+	if checkin || sleeping {
+		info := retained
+		if checkin {
+			info = live.inventory
+		}
+		if !relayInfoAllowed(info) {
+			m.mu.Unlock()
+			return RelayInfo{}, errors.New("agent relay capability is unavailable or disabled")
+		}
+		if m.desiredRelays[agentID][bind] {
+			m.mu.Unlock()
+			return RelayInfo{}, fmt.Errorf("relay %s is already configured", bind)
+		}
+		if m.operations == nil {
+			m.mu.Unlock()
+			return RelayInfo{}, errors.New("operations store unavailable")
+		}
+		if err := m.operations.SetRelayListener(agentID, bind, true); err != nil {
+			m.mu.Unlock()
+			return RelayInfo{}, err
+		}
+		if m.desiredRelays[agentID] == nil {
+			m.desiredRelays[agentID] = make(map[string]bool)
+		}
+		m.desiredRelays[agentID][bind] = true
+		var stream *mux.Mux
+		if live != nil {
+			stream = live.mux
+		}
+		m.mu.Unlock()
+		m.PublishEvent("relay.pending", agentID)
+		if stream != nil {
+			m.restoreRelays(agentID, stream)
+		}
+		return RelayInfo{AgentID: agentID, Bind: bind, State: "pending"}, nil
+	}
+	m.mu.Unlock()
 	return m.startRelay(ctx, agentID, bind, true)
+}
+
+func relayInfoAllowed(info AgentInfo) bool {
+	if info.Capabilities == nil {
+		return false
+	}
+	for _, name := range info.Capabilities.Allowed {
+		if name == "relay" {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Manager) startRelay(ctx context.Context, agentID, bind string, remember bool) (RelayInfo, error) {
@@ -138,7 +199,7 @@ func (m *Manager) startRelay(ctx context.Context, agentID, bind string, remember
 		m.mu.Unlock()
 		m.PublishEvent("relay.stopped", agentID)
 	}()
-	return RelayInfo{AgentID: agentID, Bind: result.Bind}, nil
+	return RelayInfo{AgentID: agentID, Bind: result.Bind, State: "active"}, nil
 }
 
 func (m *Manager) RelayList(agentID string) []RelayInfo {
@@ -150,7 +211,17 @@ func (m *Manager) RelayList(agentID string) []RelayInfo {
 			continue
 		}
 		for bind := range listeners {
-			out = append(out, RelayInfo{AgentID: id, Bind: bind})
+			out = append(out, RelayInfo{AgentID: id, Bind: bind, State: "active"})
+		}
+	}
+	for id, configured := range m.desiredRelays {
+		if agentID != "" && id != agentID {
+			continue
+		}
+		for bind := range configured {
+			if m.relays[id][bind] == nil {
+				out = append(out, RelayInfo{AgentID: id, Bind: bind, State: "pending"})
+			}
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {

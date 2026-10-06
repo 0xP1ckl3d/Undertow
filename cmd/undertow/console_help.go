@@ -119,7 +119,7 @@ Packaged artifacts in modules/ load automatically at console startup.
 `)
 	case "help", "navigation", "agents", "use", "back", "show", "status":
 		fmt.Fprint(output, `Navigation and inspection:
-  agents                    List connected agents with current numbers.
+  agents                    List connected and sleeping agents with current numbers.
   use NUMBER|ID|HOSTNAME    Select an agent; numbers can change on reconnect.
   show                      Show the selected agent's details.
   back                      Return to the main menu.

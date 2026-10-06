@@ -121,7 +121,7 @@ func BuildTopology(agents []AgentInfo, clients []ClientInfo, routes []routing.Ro
 	}
 	relayNodes := make(map[string]relayNode)
 	for _, relay := range relays {
-		relayNodes["relay:"+relay.AgentID+":"+relay.Bind] = relayNode{relay.AgentID, relay.Bind, true}
+		relayNodes["relay:"+relay.AgentID+":"+relay.Bind] = relayNode{relay.AgentID, relay.Bind, relay.State != "pending"}
 	}
 	networks := make(map[string]bool)
 	addNetwork := func(prefix string) string {

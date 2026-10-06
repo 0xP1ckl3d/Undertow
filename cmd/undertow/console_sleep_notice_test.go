@@ -33,3 +33,18 @@ func TestConsoleAgentTransitionIgnoresExpectedSleepCycle(t *testing.T) {
 		})
 	}
 }
+
+func TestSleepingAgentCanBeSelectedForQueuedConsoleCommands(t *testing.T) {
+	records := []control.AgentInfo{
+		{ID: "connected", Online: true, ConnectionState: "connected"},
+		{ID: "sleeping", Offline: true, ConnectionState: "sleeping"},
+		{ID: "lost", Offline: true, ConnectionState: "disconnected"},
+	}
+	selectable := selectableConsoleAgents(records)
+	if len(selectable) != 2 || selectable[1].ID != "sleeping" {
+		t.Fatalf("console selectable agents = %+v", selectable)
+	}
+	if selected, err := findConsoleAgent(selectable, "sleeping"); err != nil || selected.ID != "sleeping" {
+		t.Fatalf("select sleeping agent: %+v %v", selected, err)
+	}
+}

@@ -106,3 +106,45 @@ func TestVPNClientForwardsTCPThroughSelectedAgent(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+func TestForwardConfiguredDuringSleepStartsOnCallback(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	manager := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	clientMux, clientPeer := forwardAuditClient(t, ctx, manager, 832)
+	defer clientMux.Close()
+	defer clientPeer.Close()
+	manager.mu.Lock()
+	report := pivot.DefaultCapabilities().Report()
+	manager.offlineAgents["sleeping-forward-agent"] = AgentInfo{ID: "sleeping-forward-agent", ConnectionState: "sleeping", SleepLostAfter: time.Now().Add(time.Minute), Capabilities: &report}
+	manager.mu.Unlock()
+	probe, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bind := probe.Addr().String()
+	probe.Close()
+	queued, err := manager.AddClientForward(ctx, 832, "sleeping-forward-agent", bind, "127.0.0.1:9000")
+	if err != nil || queued.State != "pending" {
+		t.Fatalf("submit forward during sleep: %+v %v", queued, err)
+	}
+	if listed := manager.ClientForwards(832); len(listed) != 1 || listed[0].State != "pending" {
+		t.Fatalf("pending forward missing: %+v", listed)
+	}
+	server, agent := forwardAuditAgent(t, ctx, manager, "sleeping-forward-agent", 833, pivot.DefaultCapabilities())
+	defer server.Close()
+	defer agent.Close()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if listed := manager.ClientForwards(832); len(listed) == 1 && listed[0].State == "active" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if listed := manager.ClientForwards(832); len(listed) != 1 || listed[0].State != "active" {
+		t.Fatalf("forward did not activate on callback: %+v", listed)
+	}
+	if err := manager.DeleteClientForward(832, "sleeping-forward-agent", bind); err != nil {
+		t.Fatal(err)
+	}
+}

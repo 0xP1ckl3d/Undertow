@@ -17,7 +17,7 @@ function RoutePicker({agents,agentID,setAgentID,prefix,setPrefix,custom,setCusto
 
 export function RoutesView({status,client}:{status:Status|null;client:LocalClient}) {
   const agents=status?.agents||[];
-  const selectableAgents=agents.filter(agent=>agent.online!==false);
+  const selectableAgents=agents.filter(agent=>agent.online!==false||agent.connection_state==='sleeping');
   const [localRoutes,setLocalRoutes]=useState<LocalRoute[]>([]);
   const [agentID,setAgentID]=useState('');
   const [prefix,setPrefix]=useState('');

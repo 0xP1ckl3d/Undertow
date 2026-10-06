@@ -25,6 +25,9 @@ func fetchScreens(ctx context.Context, call consoleCaller, agentID string) ([]pi
 	if err := json.Unmarshal(data, &result); err != nil {
 		return nil, err
 	}
+	if result.QueuedJobID != "" {
+		return nil, fmt.Errorf("screen list queued for next check-in as job %s; inspect it in Jobs", result.QueuedJobID)
+	}
 	if result.Error != "" {
 		return nil, errors.New(result.Error)
 	}
@@ -40,6 +43,10 @@ func fetchScreens(ctx context.Context, call consoleCaller, agentID string) ([]pi
 func runConsoleScreens(ctx context.Context, output io.Writer, call consoleCaller, agentID string) error {
 	screens, err := fetchScreens(ctx, call, agentID)
 	if err != nil {
+		if strings.HasPrefix(err.Error(), "screen list queued for next check-in") {
+			fmt.Fprintln(output, err.Error())
+			return nil
+		}
 		return err
 	}
 	fmt.Fprintf(output, "Screens (%d):\n", len(screens))
@@ -72,20 +79,16 @@ func runConsoleScreenshot(ctx context.Context, output io.Writer, call consoleCal
 			return errors.New("use screenshot [NUMBER] [--output DIRECTORY]")
 		}
 	}
-	screens, err := fetchScreens(ctx, call, agentID)
-	if err != nil {
-		return err
-	}
+	var screens []pivot.ScreenInfo
 	if number != 0 {
-		found := false
-		for _, screen := range screens {
-			if screen.Number == number {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf("screen %d is unavailable; use screens to list displays", number)
+		// The explicit screen number can be submitted while an agent sleeps.
+		// The agent validates it when the transfer starts at check-in.
+		screens = []pivot.ScreenInfo{{Number: number}}
+	} else {
+		var err error
+		screens, err = fetchScreens(ctx, call, agentID)
+		if err != nil {
+			return err
 		}
 	}
 	if err := prepareClientOutputDirectory(outputDir); err != nil {

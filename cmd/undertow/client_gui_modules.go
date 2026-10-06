@@ -325,8 +325,12 @@ func (g *guiServer) runModule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = g.store.AppendConsoleEntry(r.PathValue("id"), "modules", "command", "module "+r.PathValue("name")+map[bool]string{true: " (background)", false: " (foreground)"}[request.Background])
-	if request.Background {
-		_ = g.store.AppendConsoleEntry(r.PathValue("id"), "modules", "output", "Started job "+job.ID+". Output is retained in Jobs.\n")
+	if session == nil {
+		verb := "Started"
+		if job.State == "queued" {
+			verb = "Queued"
+		}
+		_ = g.store.AppendConsoleEntry(r.PathValue("id"), "modules", "output", verb+" job "+job.ID+". Output is retained in Jobs.\n")
 		guiJSON(w, http.StatusCreated, map[string]any{"job": job})
 		return
 	}
@@ -377,6 +381,9 @@ func (g *guiServer) startModule(ctx context.Context, agentID, name string, args 
 	if agent.ID == "" {
 		return control.JobInfo{}, nil, fmt.Errorf("agent %s is not connected", agentID)
 	}
+	// Check-in agents always submit a retained server job. A foreground stream
+	// cannot safely outlive an HTTP request while the agent is sleeping.
+	deferAsJob := background || agent.ConnectionState == "sleeping" || agent.SleepSupported && agent.Sleep.IntervalSeconds > 0
 	capability := "native"
 	if artifact != nil && artifact.Kind == "wasm" {
 		capability = "wasm"
@@ -418,14 +425,14 @@ func (g *guiServer) startModule(ctx context.Context, agentID, name string, args 
 		}
 		path = base + "/bof/jobs"
 		body = map[string]any{"source": bofEntry.Object, "arguments": packed}
-		if !background {
+		if !deferAsJob {
 			stream, err := control.OpenClientBOF(ctx, session, agentID, bofEntry.Object, packed)
 			return control.JobInfo{}, stream, err
 		}
 	} else if artifact.Kind == "wasm" {
 		path = base + "/wasm/jobs"
 		body = map[string]any{"source": artifact.Data, "stdin": input, "args": args}
-		if !background {
+		if !deferAsJob {
 			stream, err := control.OpenClientWASM(ctx, session, agentID, artifact.Data, args, input)
 			return control.JobInfo{}, stream, err
 		}
@@ -435,7 +442,7 @@ func (g *guiServer) startModule(ctx context.Context, agentID, name string, args 
 		}
 		path = base + "/native/jobs"
 		body = map[string]any{"source": artifact.Data, "data": input, "args": args}
-		if !background {
+		if !deferAsJob {
 			stream, err := control.OpenClientNative(ctx, session, agentID, artifact.Data, args, input)
 			return control.JobInfo{}, stream, err
 		}

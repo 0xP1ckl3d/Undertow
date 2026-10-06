@@ -61,32 +61,13 @@ func (g *guiServer) killAgentSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := control.WithActionClaims(r.Context(), claims)
-	data, err := g.client.call(ctx, http.MethodGet, "/v1/status", nil)
+	data, err := g.client.call(ctx, http.MethodPost, "/v1/sessions/"+url.PathEscape(id)+"/kill", map[string]any{})
 	if err != nil {
 		guiJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
 	}
-	var status struct {
-		Agents []control.AgentInfo `json:"agents"`
-	}
-	if err := json.Unmarshal(data, &status); err != nil {
-		guiJSON(w, http.StatusBadGateway, map[string]string{"error": "invalid server status"})
-		return
-	}
-	var agent control.AgentInfo
-	for _, candidate := range status.Agents {
-		if candidate.ID == id {
-			agent = candidate
-			break
-		}
-	}
-	if agent.SessionID == 0 {
-		guiJSON(w, http.StatusConflict, map[string]string{"error": "agent has no active session"})
-		return
-	}
-	_, err = g.client.call(ctx, http.MethodPost, fmt.Sprintf("/v1/sessions/%d/kill", agent.SessionID), map[string]any{})
-	if err != nil {
-		guiJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+	if len(data) > 0 {
+		guiJSON(w, http.StatusAccepted, json.RawMessage(data))
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

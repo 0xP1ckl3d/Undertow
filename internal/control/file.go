@@ -26,12 +26,7 @@ func (m *Manager) ServeFileRelay(ctx context.Context, client *mux.Stream) {
 		relayFileError(client, reader, err)
 		return
 	}
-	agent := m.Get(request.AgentID)
-	if agent == nil {
-		relayFileError(client, reader, errors.New("agent is not connected"))
-		return
-	}
-	upstream, err := agent.Open(ctx, pivot.FileDestination)
+	upstream, err := m.openAgentForOperator(ctx, client.Done(), request.AgentID, pivot.FileDestination)
 	if err != nil {
 		relayFileError(client, reader, err)
 		return

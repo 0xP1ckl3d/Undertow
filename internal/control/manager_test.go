@@ -214,6 +214,35 @@ func TestAcceptedRoutesStayLocalToVPNClient(t *testing.T) {
 	}
 }
 
+func TestSleepingAgentAcceptsRouteWithoutPretendingItCanCarryTraffic(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	manager := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	clientMux := mux.New(ctx, &idleTransport{done: make(chan struct{})}, true)
+	defer clientMux.Close()
+	var keys security.Keys
+	clientSession, _ := session.New(806, keys, false)
+	manager.RegisterClient(&dns.Peer{Session: clientSession, AgentID: "client-a", Connected: time.Now()}, clientMux, false, "")
+	manager.mu.Lock()
+	manager.offlineAgents["sleeping-agent"] = AgentInfo{ID: "sleeping-agent", ConnectionState: "sleeping", SleepLostAfter: time.Now().Add(time.Minute), AdvertisedRoutes: []string{"10.44.0.0/16"}}
+	manager.mu.Unlock()
+	prefix := netip.MustParsePrefix("10.44.0.0/16")
+	if err := manager.SetClientRoute(806, prefix, "sleeping-agent", false); err != nil {
+		t.Fatal(err)
+	}
+	if got, accepted := manager.ResolveClientEgress(806, netip.MustParseAddr("10.44.1.1")); got != nil || !accepted {
+		t.Fatalf("sleeping route availability was misreported: %v %v", got, accepted)
+	}
+	manager.mu.Lock()
+	lost := manager.offlineAgents["sleeping-agent"]
+	lost.ConnectionState = "disconnected"
+	manager.offlineAgents["sleeping-agent"] = lost
+	manager.mu.Unlock()
+	if err := manager.SetClientRoute(806, netip.MustParsePrefix("10.45.0.0/16"), "sleeping-agent", true); err == nil {
+		t.Fatal("accepted new route through genuinely lost agent")
+	}
+}
+
 func TestClientRouteOwnershipRequiresOldAgentToDisconnect(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

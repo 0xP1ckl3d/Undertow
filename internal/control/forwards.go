@@ -19,6 +19,13 @@ type ForwardInfo struct {
 	Bind    string `json:"bind"`
 	Target  string `json:"target"`
 	ID      string `json:"id"`
+	State   string `json:"state,omitempty"`
+}
+
+type pendingForward struct {
+	ForwardInfo
+	ClientID uint64
+	starting bool
 }
 
 type forwardState struct {
@@ -36,28 +43,72 @@ func (m *Manager) AddClientForward(ctx context.Context, clientID uint64, agentID
 	if err := pivot.ValidateForwardAddress(target, true); err != nil {
 		return ForwardInfo{}, err
 	}
+	m.mu.Lock()
+	client := m.clients[clientID]
+	agent := m.agents[agentID]
+	retained := m.offlineAgents[agentID]
+	checkin := agent != nil && agent.inventoryReady && agent.inventory.SleepSupported && agent.inventory.Sleep.IntervalSeconds > 0
+	sleeping := agent == nil && retained.ConnectionState == "sleeping" && !retained.SleepLostAfter.IsZero() && time.Now().Before(retained.SleepLostAfter)
+	if client == nil || agent == nil && !sleeping {
+		m.mu.Unlock()
+		return ForwardInfo{}, errors.New("client is disconnected or agent has missed its check-ins")
+	}
+	info := retained
+	if agent != nil {
+		info = agent.inventory
+	}
+	if info.Capabilities != nil {
+		allowed := false
+		for _, capability := range info.Capabilities.Allowed {
+			allowed = allowed || capability == "listeners"
+		}
+		if !allowed {
+			m.mu.Unlock()
+			return ForwardInfo{}, errors.New("agent listeners capability is disabled")
+		}
+	}
+	for _, existing := range m.forwards {
+		if existing.AgentID == agentID && existing.Bind == bind {
+			m.mu.Unlock()
+			return ForwardInfo{}, errors.New("agent bind address is already forwarded")
+		}
+	}
+	for _, existing := range m.pendingForwards {
+		if existing.AgentID == agentID && existing.Bind == bind {
+			m.mu.Unlock()
+			return ForwardInfo{}, errors.New("agent bind address is already queued for forwarding")
+		}
+	}
+	if checkin || sleeping {
+		var randomID [16]byte
+		if _, err := rand.Read(randomID[:]); err != nil {
+			m.mu.Unlock()
+			return ForwardInfo{}, err
+		}
+		info := ForwardInfo{AgentID: agentID, Bind: bind, Target: target, ID: hex.EncodeToString(randomID[:]), State: "pending"}
+		m.pendingForwards[info.ID] = &pendingForward{ForwardInfo: info, ClientID: clientID}
+		var stream *mux.Mux
+		if agent != nil {
+			stream = agent.mux
+		}
+		m.mu.Unlock()
+		m.PublishEvent("forward.pending", agentID)
+		if stream != nil {
+			go m.activatePendingForwards(agentID, stream)
+		}
+		return info, nil
+	}
+	m.mu.Unlock()
+	return m.addClientForwardNow(ctx, clientID, agentID, bind, target)
+}
+
+func (m *Manager) addClientForwardNow(ctx context.Context, clientID uint64, agentID, bind, target string) (ForwardInfo, error) {
 	m.mu.RLock()
 	client := m.clients[clientID]
 	agent := m.agents[agentID]
 	if client == nil || agent == nil {
 		m.mu.RUnlock()
 		return ForwardInfo{}, errors.New("client or agent is not connected")
-	}
-	if agent.inventory.Capabilities != nil {
-		allowed := false
-		for _, capability := range agent.inventory.Capabilities.Allowed {
-			allowed = allowed || capability == "listeners"
-		}
-		if !allowed {
-			m.mu.RUnlock()
-			return ForwardInfo{}, errors.New("agent listeners capability is disabled")
-		}
-	}
-	for _, existing := range m.forwards {
-		if existing.AgentID == agentID && existing.Bind == bind {
-			m.mu.RUnlock()
-			return ForwardInfo{}, errors.New("agent bind address is already forwarded")
-		}
 	}
 	clientMux, agentMux := client.mux, agent.mux
 	m.mu.RUnlock()
@@ -93,7 +144,7 @@ func (m *Manager) AddClientForward(ctx context.Context, clientID uint64, agentID
 		_ = stream.Close()
 		return ForwardInfo{}, errors.New("agent returned invalid listener address")
 	}
-	info := ForwardInfo{AgentID: agentID, Bind: result.Bind, Target: target, ID: id}
+	info := ForwardInfo{AgentID: agentID, Bind: result.Bind, Target: target, ID: id, State: "active"}
 	forward := &forwardState{ForwardInfo: info, ClientID: clientID, agentMux: agentMux, clientMux: clientMux, control: stream}
 	m.mu.Lock()
 	if m.clients[clientID] == nil || m.clients[clientID].mux != clientMux || m.agents[agentID] == nil || m.agents[agentID].mux != agentMux {
@@ -123,6 +174,11 @@ func (m *Manager) ClientForwards(clientID uint64) []ForwardInfo {
 			forwards = append(forwards, forward.ForwardInfo)
 		}
 	}
+	for _, forward := range m.pendingForwards {
+		if forward.ClientID == clientID {
+			forwards = append(forwards, forward.ForwardInfo)
+		}
+	}
 	sort.Slice(forwards, func(i, j int) bool {
 		if forwards[i].AgentID != forwards[j].AgentID {
 			return forwards[i].AgentID < forwards[j].AgentID
@@ -141,12 +197,25 @@ func (m *Manager) AgentForwards(agentID string) []ForwardInfo {
 			out = append(out, forward.ForwardInfo)
 		}
 	}
+	for _, forward := range m.pendingForwards {
+		if forward.AgentID == agentID {
+			out = append(out, forward.ForwardInfo)
+		}
+	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Bind < out[j].Bind })
 	return out
 }
 
 func (m *Manager) DeleteClientForward(clientID uint64, agentID, bind string) error {
 	m.mu.Lock()
+	for id, forward := range m.pendingForwards {
+		if forward.ClientID == clientID && forward.AgentID == agentID && forward.Bind == bind {
+			delete(m.pendingForwards, id)
+			m.mu.Unlock()
+			m.PublishEvent("forward.cancelled", agentID)
+			return nil
+		}
+	}
 	var stream *mux.Stream
 	for id, forward := range m.forwards {
 		if forward.ClientID == clientID && forward.AgentID == agentID && forward.Bind == bind {
@@ -160,6 +229,41 @@ func (m *Manager) DeleteClientForward(clientID uint64, agentID, bind string) err
 		return errors.New("forward not found")
 	}
 	return stream.Close()
+}
+
+func (m *Manager) activatePendingForwards(agentID string, stream *mux.Mux) {
+	m.mu.Lock()
+	var pending []*pendingForward
+	for _, forward := range m.pendingForwards {
+		if forward.AgentID == agentID && !forward.starting {
+			forward.starting = true
+			pending = append(pending, forward)
+		}
+	}
+	m.mu.Unlock()
+	for _, forward := range pending {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		info, err := m.addClientForwardNow(ctx, forward.ClientID, forward.AgentID, forward.Bind, forward.Target)
+		cancel()
+		m.mu.Lock()
+		if current := m.pendingForwards[forward.ID]; current == forward {
+			if err == nil {
+				delete(m.pendingForwards, forward.ID)
+			} else {
+				forward.starting = false
+			}
+		} else if err == nil {
+			m.mu.Unlock()
+			_ = m.DeleteClientForward(forward.ClientID, info.AgentID, info.Bind)
+			continue
+		}
+		m.mu.Unlock()
+		if err == nil {
+			m.PublishEvent("forward.started", agentID)
+		} else {
+			m.PublishEvent("forward.pending", agentID)
+		}
+	}
 }
 
 func (m *Manager) serveAgentForwards(agentID string, agentMux *mux.Mux) {

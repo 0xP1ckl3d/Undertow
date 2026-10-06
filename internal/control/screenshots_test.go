@@ -2,13 +2,58 @@ package control
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"undertow/internal/routing"
 )
+
+func TestScreenshotCanBeSubmittedDuringIntentionalSleep(t *testing.T) {
+	store, err := OpenOperationsStore(filepath.Join(t.TempDir(), "operations.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	m := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	if err := m.ConfigureJobOutput(t.TempDir(), 1<<20, 2<<20); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.SetOperationsStore(store); err != nil {
+		t.Fatal(err)
+	}
+	m.mu.Lock()
+	m.offlineAgents["sleeping-screen"] = AgentInfo{ID: "sleeping-screen", ConnectionState: "sleeping", SleepLostAfter: time.Now().Add(time.Minute)}
+	m.mu.Unlock()
+	ctx := context.WithValue(context.Background(), actionContextKey{}, actionContext{ClientID: "client-a", ClientSessionID: 42, ActionClaims: ActionClaims{OperatorID: "talon", DisplayName: "Talon"}})
+	request := httptest.NewRequest(http.MethodPost, "/v1/agents/sleeping-screen/screenshots", bytes.NewBufferString(`{"screen":1}`)).WithContext(ctx)
+	request.SetPathValue("id", "sleeping-screen")
+	response := httptest.NewRecorder()
+	m.captureScreenshotHandler(response, request)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("capture submission: %d %s", response.Code, response.Body.String())
+	}
+	var job JobInfo
+	if err := json.Unmarshal(response.Body.Bytes(), &job); err != nil {
+		t.Fatal(err)
+	}
+	if job.Kind != "screenshot" || job.State != "queued" {
+		t.Fatalf("capture job: %+v", job)
+	}
+	queued, err := store.LoadQueuedJobs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if queued[job.ID].Actor.ClientSessionID != 42 || queued[job.ID].Actor.OperatorID != "talon" {
+		t.Fatalf("queued attribution lost: %+v", queued[job.ID].Actor)
+	}
+}
 
 func TestScreenshotCatalogAndChunkRetrieval(t *testing.T) {
 	store, err := OpenOperationsStore(filepath.Join(t.TempDir(), "operations.db"))

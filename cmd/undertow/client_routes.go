@@ -125,6 +125,11 @@ func (c *liveClientConsole) restoreLoop(session *mux.Mux) {
 			c.routeMu.Unlock()
 			return
 		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := c.reconcileRouteAvailability(ctx); err != nil {
+			log.Printf("accepted route availability pending: %v", err)
+		}
+		cancel()
 		for _, route := range c.routes {
 			if route.Disabled {
 				continue
@@ -140,9 +145,11 @@ func (c *liveClientConsole) restoreLoop(session *mux.Mux) {
 					log.Printf("accepted route %s via %s pending: %v", route.Prefix, route.AgentID, err)
 					lastErrors[route.Prefix] = err.Error()
 				}
-			} else {
+			} else if c.active[route.Prefix] {
 				delete(lastErrors, route.Prefix)
 				log.Printf("accepted route active: %s via %s", route.Prefix, route.AgentID)
+			} else {
+				delete(lastErrors, route.Prefix)
 			}
 		}
 		if !c.vpn {
@@ -163,6 +170,36 @@ func (c *liveClientConsole) restoreLoop(session *mux.Mux) {
 		case <-ticker.C:
 		}
 	}
+}
+
+// A saved acceptance stays on the server while its agent sleeps, but the OS
+// route must not claim traffic until the path can actually carry packets.
+// The caller holds routeMu.
+func (c *liveClientConsole) reconcileRouteAvailability(ctx context.Context) error {
+	data, err := c.call(ctx, http.MethodGet, "/v1/status", nil)
+	if err != nil {
+		return err
+	}
+	var status struct {
+		Agents []control.AgentInfo `json:"agents"`
+	}
+	if err := json.Unmarshal(data, &status); err != nil {
+		return err
+	}
+	online := make(map[string]bool, len(status.Agents))
+	for _, agent := range status.Agents {
+		online[agent.ID] = agent.Online
+	}
+	for _, route := range c.routes {
+		if !c.active[route.Prefix] || online[route.AgentID] {
+			continue
+		}
+		if err := c.device.DelRoute(route.Prefix); err != nil {
+			return fmt.Errorf("remove unavailable route %s: %w", route.Prefix, err)
+		}
+		delete(c.active, route.Prefix)
+	}
+	return nil
 }
 
 // The caller holds routeMu. Internal-only mode mirrors active server routes
@@ -253,8 +290,31 @@ func (c *liveClientConsole) activateRoute(ctx context.Context, route control.Acc
 		return errors.New("route is invalid or overlaps the server, carrier endpoint, or client tunnel network")
 	}
 	path := fmt.Sprintf("/v1/clients/%d/routes", id)
-	if _, err := c.call(ctx, http.MethodPost, path, route); err != nil {
+	response, err := c.call(ctx, http.MethodPost, path, route)
+	if err != nil {
 		return err
+	}
+	connected := true // Compatibility with servers predating the route state reply.
+	if len(response) != 0 {
+		var state struct {
+			Connected *bool `json:"connected"`
+		}
+		if err := json.Unmarshal(response, &state); err != nil || state.Connected == nil {
+			return errors.New("server returned an invalid route state")
+		}
+		connected = *state.Connected
+	}
+	if !connected {
+		if c.active[route.Prefix] {
+			if err := device.DelRoute(route.Prefix); err != nil {
+				return fmt.Errorf("remove unavailable local route: %w", err)
+			}
+			delete(c.active, route.Prefix)
+		}
+		return nil // Accepted now; install on the next connected callback.
+	}
+	if c.active[route.Prefix] {
+		return nil
 	}
 	if !c.global[route.Prefix] {
 		if err := device.AddRoute(route.Prefix); err != nil {
@@ -269,8 +329,8 @@ func (c *liveClientConsole) activateRoute(ctx context.Context, route control.Acc
 }
 
 // AcceptClientRoute is shared by the terminal and local GUI. It validates the
-// route, binds server acceptance to this client session, installs the OS route,
-// and persists the local choice as one operation.
+// route, binds server acceptance to this client session, installs the OS route
+// when the agent is connected, and persists the local choice as one operation.
 func (c *liveClientConsole) AcceptClientRoute(ctx context.Context, prefix, agentID string, manual bool) (bool, error) {
 	c.routeMu.Lock()
 	defer c.routeMu.Unlock()
@@ -520,20 +580,11 @@ func (c *liveClientConsole) replaceAcceptedRoute(ctx context.Context, index int,
 		return fmt.Errorf("save client route: %w", err)
 	}
 	var err error
-	if c.active[previous.Prefix] {
-		c.mu.RLock()
-		id := c.sessionID
-		c.mu.RUnlock()
-		if id == 0 {
-			err = errors.New("VPN client is not connected")
-		} else {
-			path := fmt.Sprintf("/v1/clients/%d/routes", id)
-			_, err = c.call(ctx, http.MethodPost, path, replacement)
-		}
-	} else {
-		err = c.activateRoute(ctx, replacement)
-	}
+	err = c.activateRoute(ctx, replacement)
 	if err != nil {
+		if c.active[previous.Prefix] {
+			_ = c.activateRoute(ctx, previous)
+		}
 		if rollbackErr := saveClientRoutes(c.routeFile, c.routes); rollbackErr != nil {
 			return fmt.Errorf("reassign route: %w (restore saved route: %v)", err, rollbackErr)
 		}
@@ -545,9 +596,6 @@ func (c *liveClientConsole) replaceAcceptedRoute(ctx context.Context, index int,
 
 // The caller holds routeMu.
 func (c *liveClientConsole) removeActiveRoute(ctx context.Context, route control.AcceptedRoute) error {
-	if !c.active[route.Prefix] {
-		return nil
-	}
 	c.mu.RLock()
 	id, device := c.sessionID, c.device
 	c.mu.RUnlock()
@@ -557,7 +605,7 @@ func (c *liveClientConsole) removeActiveRoute(ctx context.Context, route control
 			return err
 		}
 	}
-	if device != nil {
+	if device != nil && c.active[route.Prefix] {
 		if err := device.DelRoute(route.Prefix); err != nil {
 			if id != 0 {
 				path := fmt.Sprintf("/v1/clients/%d/routes", id)

@@ -238,7 +238,7 @@ func TestConfiguredRelayRestoresOnParentCheckin(t *testing.T) {
 	go pivot.ServeAgentWithCapabilities(ctx, agentMux, pivot.DefaultCapabilities())
 	manager.UpdateInventory("parent", serverMux, []byte(`{"hostname":"WS01","capabilities":{"allowed":["relay"]}}`))
 	deadline := time.Now().Add(5 * time.Second)
-	for len(manager.RelayList("parent")) == 0 && time.Now().Before(deadline) {
+	for (len(manager.RelayList("parent")) == 0 || manager.RelayList("parent")[0].State != "active") && time.Now().Before(deadline) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	relays := manager.RelayList("parent")
@@ -264,6 +264,53 @@ func TestConfiguredRelayRestoresOnParentCheckin(t *testing.T) {
 		t.Fatal(err)
 	}
 	manager.Unregister("parent", serverMux)
+}
+
+func TestRelayConfiguredDuringSleepRestoresOnCallback(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	store, err := OpenOperationsStore(filepath.Join(t.TempDir(), "operations.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	manager := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	if err := manager.SetOperationsStore(store); err != nil {
+		t.Fatal(err)
+	}
+	report := pivot.DefaultCapabilities().Report()
+	manager.mu.Lock()
+	manager.offlineAgents["sleeping-relay-agent"] = AgentInfo{ID: "sleeping-relay-agent", ConnectionState: "sleeping", SleepLostAfter: time.Now().Add(time.Minute), Capabilities: &report}
+	manager.mu.Unlock()
+	probe, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bind := probe.Addr().String()
+	probe.Close()
+	queued, err := manager.StartRelay(ctx, "sleeping-relay-agent", bind)
+	if err != nil || queued.State != "pending" {
+		t.Fatalf("submit relay during sleep: %+v %v", queued, err)
+	}
+	if listed := manager.RelayList("sleeping-relay-agent"); len(listed) != 1 || listed[0].State != "pending" {
+		t.Fatalf("pending relay missing: %+v", listed)
+	}
+	server, agent := forwardAuditAgent(t, ctx, manager, "sleeping-relay-agent", 834, pivot.DefaultCapabilities())
+	defer server.Close()
+	defer agent.Close()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if listed := manager.RelayList("sleeping-relay-agent"); len(listed) == 1 && listed[0].State == "active" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if listed := manager.RelayList("sleeping-relay-agent"); len(listed) != 1 || listed[0].State != "active" {
+		t.Fatalf("relay did not activate on callback: %+v", listed)
+	}
+	if err := manager.StopRelay("sleeping-relay-agent", bind); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestTopologyCarriesEachClientsRoutingModes(t *testing.T) {

@@ -1,10 +1,12 @@
 package control
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"image/png"
 	"io"
 	"log"
@@ -79,55 +81,63 @@ func (m *Manager) captureScreenshotHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	agentID := r.PathValue("id")
+	if job, queued, err := m.queueJobIfSleeping(jobOwner(r.Context()), agentID, queuedJobRequest{Kind: "screenshot", Screen: request.Screen, Actor: boundActionFromContext(r.Context())}); queued {
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		jsonReply(w, http.StatusAccepted, job)
+		return
+	}
+	entry, err := m.captureScreenshot(r.Context(), agentID, request.Screen, boundActionFromContext(r.Context()))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	jsonReply(w, http.StatusCreated, entry)
+}
+
+func (m *Manager) captureScreenshot(ctx context.Context, agentID string, screen int, actor actionContext) (ScreenshotInfo, error) {
 	agent := m.Get(agentID)
 	if agent == nil {
-		http.Error(w, "agent is not connected", http.StatusNotFound)
-		return
+		return ScreenshotInfo{}, errors.New("agent is not connected")
 	}
 	m.mu.RLock()
 	store := m.operations
 	m.mu.RUnlock()
 	if store == nil {
-		http.Error(w, "screenshot store unavailable", http.StatusServiceUnavailable)
-		return
+		return ScreenshotInfo{}, errors.New("screenshot store unavailable")
 	}
 	if err := os.MkdirAll(store.screenshotsDir, 0700); err != nil {
-		http.Error(w, "screenshot store unavailable", http.StatusInternalServerError)
-		return
+		return ScreenshotInfo{}, fmt.Errorf("screenshot store unavailable: %w", err)
 	}
 	var random [16]byte
 	if _, err := rand.Read(random[:]); err != nil {
-		http.Error(w, "screenshot ID unavailable", http.StatusInternalServerError)
-		return
+		return ScreenshotInfo{}, err
 	}
 	id := hex.EncodeToString(random[:])
 	path := store.screenshotPath(id)
-	transfer, err := pivot.TransferFile(r.Context(), agent, agentID, "screenshot", path, strconv.Itoa(request.Screen))
+	transfer, err := pivot.TransferFile(ctx, agent, agentID, "screenshot", path, strconv.Itoa(screen))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
-		return
+		return ScreenshotInfo{}, err
 	}
 	file, err := os.Open(path)
 	if err != nil {
-		http.Error(w, "captured image unavailable", http.StatusInternalServerError)
-		return
+		return ScreenshotInfo{}, errors.New("captured image unavailable")
 	}
 	config, decodeErr := png.DecodeConfig(file)
 	closeErr := file.Close()
 	if decodeErr != nil || closeErr != nil || config.Width < 1 || config.Height < 1 || transfer.Size < 8 {
 		_ = os.Remove(path)
-		http.Error(w, "agent returned an invalid PNG", http.StatusBadGateway)
-		return
+		return ScreenshotInfo{}, errors.New("agent returned an invalid PNG")
 	}
-	actor := boundActionFromContext(r.Context())
-	entry := ScreenshotInfo{ID: id, AgentID: agentID, Screen: request.Screen, At: time.Now().UTC(), Size: transfer.Size, SHA256: transfer.SHA256, Width: config.Width, Height: config.Height, ClientID: actor.ClientID, ClientSessionID: actor.ClientSessionID, OperatorID: actor.OperatorID, DisplayName: actor.DisplayName}
+	entry := ScreenshotInfo{ID: id, AgentID: agentID, Screen: screen, At: time.Now().UTC(), Size: transfer.Size, SHA256: transfer.SHA256, Width: config.Width, Height: config.Height, ClientID: actor.ClientID, ClientSessionID: actor.ClientSessionID, OperatorID: actor.OperatorID, DisplayName: actor.DisplayName}
 	if err := store.SaveScreenshot(entry); err != nil {
 		_ = os.Remove(path)
-		http.Error(w, "could not retain screenshot metadata", http.StatusInternalServerError)
-		return
+		return ScreenshotInfo{}, fmt.Errorf("could not retain screenshot metadata: %w", err)
 	}
 	m.PublishEvent("screenshot.created", agentID)
-	jsonReply(w, http.StatusCreated, entry)
+	return entry, nil
 }
 
 func (m *Manager) screenshotsHandler(w http.ResponseWriter, r *http.Request) {

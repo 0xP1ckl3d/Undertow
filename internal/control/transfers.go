@@ -95,7 +95,7 @@ func (s *OperationsStore) RecoverTransfers() error {
 		return err
 	}
 	for _, record := range records {
-		if record.State != "running" {
+		if record.State != "running" && record.State != "pending" {
 			continue
 		}
 		record.State, record.Error, record.Ended = "interrupted", "server restarted before transfer completed", time.Now().UTC()
@@ -118,7 +118,7 @@ func (m *Manager) interruptTransfers(sessionID uint64) {
 		return
 	}
 	for _, record := range records {
-		if record.ClientSessionID != sessionID || record.State != "running" {
+		if record.ClientSessionID != sessionID || record.State != "running" && record.State != "pending" {
 			continue
 		}
 		record.State, record.Error, record.Ended = "interrupted", "client session disconnected", time.Now().UTC()
@@ -155,13 +155,15 @@ func (m *Manager) registerTransferHandlers(muxer *http.ServeMux) {
 			http.Error(w, "invalid transfer metadata", http.StatusBadRequest)
 			return
 		}
-		if m.Get(input.AgentID) == nil {
-			http.Error(w, "agent is not connected", http.StatusNotFound)
-			return
-		}
 		m.mu.RLock()
 		store := m.operations
+		live := m.agents[input.AgentID]
+		retained := m.offlineAgents[input.AgentID]
 		m.mu.RUnlock()
+		if live == nil && (retained.ConnectionState != "sleeping" || !time.Now().Before(retained.SleepLostAfter)) {
+			http.Error(w, "agent missed its check-ins or is disconnected", http.StatusNotFound)
+			return
+		}
 		if store == nil {
 			http.Error(w, "transfer history unavailable", http.StatusServiceUnavailable)
 			return
@@ -172,7 +174,11 @@ func (m *Manager) registerTransferHandlers(muxer *http.ServeMux) {
 			return
 		}
 		actor := boundActionFromContext(r.Context())
-		record := TransferRecord{ID: hex.EncodeToString(random[:]), AgentID: input.AgentID, ClientID: actor.ClientID, ClientSessionID: actor.ClientSessionID, OperatorID: actor.OperatorID, DisplayName: actor.DisplayName, Operation: input.Operation, RemotePath: input.RemotePath, State: "running", Total: input.Total, Started: time.Now().UTC()}
+		state := "running"
+		if live == nil || live.inventory.SleepSupported && live.inventory.Sleep.IntervalSeconds > 0 {
+			state = "pending"
+		}
+		record := TransferRecord{ID: hex.EncodeToString(random[:]), AgentID: input.AgentID, ClientID: actor.ClientID, ClientSessionID: actor.ClientSessionID, OperatorID: actor.OperatorID, DisplayName: actor.DisplayName, Operation: input.Operation, RemotePath: input.RemotePath, State: state, Total: input.Total, Started: time.Now().UTC()}
 		if err := store.saveTransfer(record); err != nil {
 			http.Error(w, "transfer history unavailable", http.StatusInternalServerError)
 			return
@@ -219,7 +225,7 @@ func (m *Manager) registerTransferHandlers(muxer *http.ServeMux) {
 			return
 		}
 		actor := boundActionFromContext(r.Context())
-		if record.ClientSessionID == 0 || actor.ClientSessionID != record.ClientSessionID || record.State != "running" || input.Bytes < record.Bytes || input.Total > 0 && record.Total > 0 && input.Total != record.Total {
+		if record.ClientSessionID == 0 || actor.ClientSessionID != record.ClientSessionID || record.State != "running" && record.State != "pending" || input.Bytes < record.Bytes || input.Total > 0 && record.Total > 0 && input.Total != record.Total {
 			http.Error(w, "transfer update is not allowed", http.StatusForbidden)
 			return
 		}
