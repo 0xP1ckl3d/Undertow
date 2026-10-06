@@ -48,7 +48,7 @@ func TestGUIConsoleHistoryPersistsAcrossClientRestart(t *testing.T) {
 
 func TestAgentGUIHelpUsesTerminalMenuAndBoundCommands(t *testing.T) {
 	help := (&guiServer{}).agentGUIHelp()
-	for _, want := range []string{"GUI CLIENT / AGENT COMMANDS", "◆ AGENT SESSION", "◆ HOST", "◆ MODULE BANK", "route accept CIDR", "load module|wasm|bof"} {
+	for _, want := range []string{"GUI CLIENT / AGENT COMMANDS", "◆ AGENT SESSION", "◆ HOST", "◆ MODULE BANK", "route accept CIDR", "load module|wasm|assembly|bof"} {
 		if !strings.Contains(help, want) {
 			t.Errorf("help missing %q", want)
 		}

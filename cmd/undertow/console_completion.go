@@ -122,7 +122,7 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 			commands = append(commands, loadedNames...)
 		}
 		if selected {
-			commands = append(commands, "show", "back", "relay", "route", "jobs", "job", "exec", "shell", "run-script", "run-wasm", "run-native", "run-bof", "pwd", "ls", "stat", "mkdir", "rm", "whoami", "ps", "privileges", "env", "interfaces", "dns", "route-table", "screens", "load", "unload", "bofs", "modules")
+			commands = append(commands, "show", "back", "relay", "route", "jobs", "job", "exec", "shell", "run-script", "run-wasm", "run-native", "run-assembly", "run-bof", "pwd", "ls", "stat", "mkdir", "rm", "whoami", "ps", "privileges", "env", "interfaces", "dns", "route-table", "screens", "load", "unload", "bofs", "modules")
 		}
 		if vpn {
 			commands = append(commands, "background", "internal", "vpn", "operators", "team")
@@ -184,9 +184,9 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 		}
 	case "load":
 		if len(before) == 1 {
-			return wordCompletions([]string{"bof", "module", "wasm"}, partial)
+			return wordCompletions([]string{"bof", "module", "wasm", "assembly"}, partial)
 		}
-		if len(before) == 2 && (before[1] == "bof" || before[1] == "module" || before[1] == "wasm") {
+		if len(before) == 2 && (before[1] == "bof" || before[1] == "module" || before[1] == "wasm" || before[1] == "assembly") {
 			return localPathCompletions(partial, quote, false)
 		}
 		if before[1] == "bof" && strings.HasPrefix(partial, "--") {
@@ -194,12 +194,12 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 		}
 	case "unload":
 		if len(before) == 1 {
-			return wordCompletions([]string{"bof", "module", "wasm"}, partial)
+			return wordCompletions([]string{"bof", "module", "wasm", "assembly"}, partial)
 		}
 		if len(before) == 2 && before[1] == "bof" {
 			return wordCompletions(registry.names(), partial)
 		}
-		if len(before) == 2 && (before[1] == "module" || before[1] == "wasm") {
+		if len(before) == 2 && (before[1] == "module" || before[1] == "wasm" || before[1] == "assembly") {
 			var names []string
 			for _, name := range artifacts.names() {
 				if artifacts.get(name).Kind == before[1] {
@@ -236,7 +236,7 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 			}
 			topics = append(topics, loadedNames...)
 			if selected {
-				topics = append(topics, "shell", "exec", "run-script", "run-wasm", "run-native", "run-bof", "jobs", "host")
+				topics = append(topics, "shell", "exec", "run-script", "run-wasm", "run-native", "run-assembly", "run-bof", "jobs", "host")
 			}
 			if vpn {
 				topics = append(topics, "internal", "vpn")
@@ -277,7 +277,7 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 		if len(args) == 1 && (args[0] == "bash" || args[0] == "powershell") || len(args) == 2 && args[0] == "--background" && (args[1] == "bash" || args[1] == "powershell") {
 			return localPathCompletions(partial, quote, false)
 		}
-	case "run-wasm", "run-native", "run-bof":
+	case "run-wasm", "run-native", "run-assembly", "run-bof":
 		args := before[1:]
 		if !selected {
 			if len(args) == 0 {
@@ -291,6 +291,9 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 			}
 			if before[0] == "run-native" {
 				return wordCompletions([]string{"--background", "--data"}, partial)
+			}
+			if before[0] == "run-assembly" {
+				return wordCompletions([]string{"--background"}, partial)
 			}
 			return wordCompletions([]string{"--background", "--stdin"}, partial)
 		}

@@ -204,6 +204,34 @@ func (m *Manager) StartNativeJob(ctx context.Context, owner uint64, agentID stri
 	return m.registerJob(owner, agentID, state.mux, session, JobInfo{AgentID: agentID, Kind: "native", Argv: append([]string(nil), args...)})
 }
 
+func (m *Manager) StartAssemblyJob(ctx context.Context, owner uint64, agentID string, source []byte, args []string) (JobInfo, error) {
+	if err := pivot.ValidateAssembly(source, args); err != nil {
+		return JobInfo{}, err
+	}
+	if info, queued, err := m.queueJobIfSleeping(owner, agentID, queuedJobRequest{Kind: "assembly", Argv: args, Source: source}); queued {
+		return info, err
+	}
+	m.mu.RLock()
+	state, count := m.agents[agentID], len(m.jobs)
+	m.mu.RUnlock()
+	if state == nil {
+		return JobInfo{}, errors.New("agent is not connected")
+	}
+	if count >= 512 {
+		return JobInfo{}, errors.New("job limit reached")
+	}
+	if err := m.jobOutputReady(); err != nil {
+		return JobInfo{}, err
+	}
+	startCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	session, err := pivot.OpenAssembly(startCtx, state.mux, source, args)
+	if err != nil {
+		return JobInfo{}, err
+	}
+	return m.registerJob(owner, agentID, state.mux, session, JobInfo{AgentID: agentID, Kind: "assembly", Argv: append([]string(nil), args...)})
+}
+
 func (m *Manager) StartBOFJob(ctx context.Context, owner uint64, agentID string, object, arguments []byte) (JobInfo, error) {
 	compat, err := bof.Parse(object)
 	if err != nil {
@@ -706,6 +734,22 @@ func (m *Manager) jobHTTPHandlers(muxer *http.ServeMux) {
 			return
 		}
 		job, err := m.StartNativeJob(r.Context(), jobOwner(r.Context()), r.PathValue("id"), request.Source, request.Args, request.Data)
+		if err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		jsonReply(w, http.StatusCreated, job)
+	})
+	muxer.HandleFunc("POST /v1/agents/{id}/assembly/jobs", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Source []byte   `json:"source"`
+			Args   []string `json:"args,omitempty"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 12<<20)).Decode(&request); err != nil {
+			http.Error(w, "invalid assembly job request", 400)
+			return
+		}
+		job, err := m.StartAssemblyJob(r.Context(), jobOwner(r.Context()), r.PathValue("id"), request.Source, request.Args)
 		if err != nil {
 			http.Error(w, err.Error(), 400)
 			return

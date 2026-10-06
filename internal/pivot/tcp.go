@@ -116,6 +116,14 @@ func ServeAgentWithLifecycle(ctx context.Context, m *mux.Mux, caps Capabilities,
 			go serveNative(ctx, s)
 			continue
 		}
+		if s.Destination() == AssemblyDestination {
+			if !caps.Native {
+				s.Fail(errors.New("agent native execution is disabled"))
+				continue
+			}
+			go serveAssembly(ctx, s)
+			continue
+		}
 		if s.Destination() == BOFDestination {
 			if !caps.Native {
 				s.Fail(errors.New("agent native execution is disabled"))

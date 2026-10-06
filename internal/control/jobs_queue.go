@@ -210,6 +210,8 @@ func (m *Manager) dispatchQueuedJob(agentID string, stream *mux.Mux, job *jobSta
 		session, err = pivot.OpenWASM(ctx, stream, request.Source, request.Argv, request.Input)
 	case "native":
 		session, err = pivot.OpenNative(ctx, stream, request.Source, request.Argv, request.Input)
+	case "assembly":
+		session, err = pivot.OpenAssembly(ctx, stream, request.Source, request.Argv)
 	case "bof":
 		session, err = pivot.OpenBOF(ctx, stream, request.Source, request.Arguments)
 	default:

@@ -97,7 +97,8 @@ For deployment binaries, use payload and type help payload for the workflow.
   load bof FILE [NAME] [--format FORMAT]
   load module FILE [NAME]
   load wasm FILE [NAME]
-  unload bof|module|wasm NAME
+  load assembly FILE [NAME]
+  unload bof|module|wasm|assembly NAME
   bofs
   modules
 Load validates the object and an optional FILE.o.json or FILE.json sidecar.
@@ -217,6 +218,13 @@ MODULE_FILE is a .module container built with tools/nativepack. --data passes
 opaque binary bytes; ARGS are UTF-8. At the main menu, put AGENT_ID after
 run-native. The agent must allow the native capability.
 `)
+	case "run-assembly", "assembly":
+		fmt.Fprint(output, `Run a .NET Framework 4.x assembly on a Windows amd64 agent:
+  run-assembly [--background] ASSEMBLY.exe|dll [ARGS]
+The assembly is loaded from bytes in a short-lived Windows PowerShell 5.1
+worker. Its Main() or Main(string[] args) output streams to this console.
+At the main menu, put AGENT_ID after run-assembly.
+`)
 	case "run-bof", "bof":
 		fmt.Fprint(output, `Run a Windows AMD64 BOF object on the selected agent:
   run-bof [--background] [--format FORMAT] [--manifest FILE] OBJECT.o [--format FORMAT] [ARGS]
@@ -240,7 +248,7 @@ The agent must allow the native capability. See docs/bof-compatibility.md.
   job stop NUMBER|ID        Alias for job cancel.
 jobs show|output|save|file|delete|cancel|stop NUMBER|ID also work. Job IDs remain valid if list
 numbers change. At the main menu, jobs AGENT_ID filters the list.
-run-script, run-wasm, run-native and run-bof also accept --background.
+run-script, run-wasm, run-native, run-assembly and run-bof also accept --background.
 Default client output: outputs/jobs/AGENT_ID/.
 `)
 	case "screens", "screenshot":

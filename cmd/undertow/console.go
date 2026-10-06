@@ -31,6 +31,7 @@ type consoleFeatures struct {
 	script         scriptOpener
 	wasm           wasmOpener
 	native         nativeOpener
+	assembly       assemblyOpener
 	bof            bofOpener
 	transfer       clientTransferAction
 	serverLogPath  string
@@ -74,10 +75,13 @@ func consoleCommandWithOptions(options operatorOptions, lifecycle consoleFeature
 	native := func(ctx context.Context, agentID string, module []byte, args []string, data []byte) (*pivot.InteractiveSession, error) {
 		return openControlNative(ctx, options, agentID, module, args, data)
 	}
+	assembly := func(ctx context.Context, agentID string, source []byte, args []string) (*pivot.InteractiveSession, error) {
+		return openControlAssembly(ctx, options, agentID, source, args)
+	}
 	bofOpen := func(ctx context.Context, agentID string, object, arguments []byte) (*pivot.InteractiveSession, error) {
 		return openControlBOF(ctx, options, agentID, object, arguments)
 	}
-	lifecycle.open, lifecycle.script, lifecycle.wasm, lifecycle.native, lifecycle.bof = opener, script, wasm, native, bofOpen
+	lifecycle.open, lifecycle.script, lifecycle.wasm, lifecycle.native, lifecycle.assembly, lifecycle.bof = opener, script, wasm, native, assembly, bofOpen
 	return runConsole(ctx, os.Stdin, os.Stdout, caller, nil, nil, nil, nil, lifecycle)
 }
 
@@ -405,7 +409,7 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 			continue
 		}
 		if entry := loadedArtifacts.get(args[0]); entry != nil {
-			if err := runLoadedArtifact(ctx, output, editor, call, serverConsole.native, serverConsole.wasm, entry, selectedID, selectedLabel, args[1:]); err != nil {
+			if err := runLoadedArtifact(ctx, output, editor, call, serverConsole.native, serverConsole.wasm, serverConsole.assembly, entry, selectedID, selectedLabel, args[1:]); err != nil {
 				fmt.Fprintln(output, "error:", err)
 			}
 			continue
@@ -438,6 +442,8 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 				args = append([]string{"run-wasm", selectedID}, args[1:]...)
 			case "run-native":
 				args = append([]string{"run-native", selectedID}, args[1:]...)
+			case "run-assembly":
+				args = append([]string{"run-assembly", selectedID}, args[1:]...)
 			case "run-bof":
 				args = append([]string{"run-bof", selectedID}, args[1:]...)
 			case "pwd", "ls", "stat", "mkdir", "rm", "whoami", "ps", "privileges", "env", "interfaces", "dns", "route-table":
@@ -515,6 +521,16 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 				open = features[0].native
 			}
 			if err := runConsoleNative(ctx, output, editor, call, open, args); err != nil {
+				fmt.Fprintln(output, "error:", err)
+			}
+			continue
+		}
+		if args[0] == "run-assembly" {
+			var open assemblyOpener
+			if len(features) != 0 {
+				open = features[0].assembly
+			}
+			if err := runConsoleAssembly(ctx, output, editor, call, open, args); err != nil {
 				fmt.Fprintln(output, "error:", err)
 			}
 			continue
@@ -798,6 +814,7 @@ func runConsoleCommand(ctx context.Context, output io.Writer, call consoleCaller
   run-script AGENT_ID [--background] bash|powershell LOCAL_FILE
   run-wasm AGENT_ID [--background] [--stdin FILE] MODULE [ARGS]
   run-native AGENT_ID [--background] [--data FILE] MODULE [ARGS]
+  run-assembly AGENT_ID [--background] ASSEMBLY.exe|dll [ARGS]
   run-bof AGENT_ID [--background] [--format FORMAT] OBJECT.o [ARGS]
   job start AGENT_ID PROGRAM ... Start a background task
   jobs; job show|output|cancel ID Inspect or stop tasks
@@ -824,6 +841,7 @@ Quote arguments containing spaces.
   run-script AGENT_ID [--background] bash|powershell LOCAL_FILE
   run-wasm AGENT_ID [--background] [--stdin FILE] MODULE [ARGS]
   run-native AGENT_ID [--background] [--data FILE] MODULE [ARGS]
+  run-assembly AGENT_ID [--background] ASSEMBLY.exe|dll [ARGS]
   run-bof AGENT_ID [--background] [--format FORMAT] OBJECT.o [ARGS]
   job start AGENT_ID PROGRAM ... Start a background task
   jobs; job show|output|cancel ID Inspect or stop tasks

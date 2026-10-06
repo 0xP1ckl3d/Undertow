@@ -101,6 +101,7 @@ func printConsoleOverview(output io.Writer, vpnClient, selected, serverAttached 
 		m.row("run-script [OPTIONS] FILE", "Run a local script on this agent")
 		m.row("run-wasm [OPTIONS] MODULE", "Run a local WASM module")
 		m.row("run-native [OPTIONS] MODULE", "Run a Windows native module")
+		m.row("run-assembly [OPTIONS] FILE", "Run a .NET Framework assembly")
 		m.row("run-bof [OPTIONS] OBJECT.o", "Run a Windows AMD64 BOF")
 		m.row("job start PROGRAM [ARGS]", "Start a background task")
 		m.row("jobs", "List this agent's numbered tasks")
@@ -116,7 +117,8 @@ func printConsoleOverview(output io.Writer, vpnClient, selected, serverAttached 
 		m.row("load bof FILE [NAME]", "Register a local BOF command")
 		m.row("load module FILE [NAME]", "Register a native module command")
 		m.row("load wasm FILE [NAME]", "Register a WASM command")
-		m.row("unload bof|module|wasm NAME", "Remove a loaded command")
+		m.row("load assembly FILE [NAME]", "Register a .NET assembly command")
+		m.row("unload bof|module|wasm|assembly NAME", "Remove a loaded command")
 		m.row("bofs", "List loaded BOF commands")
 		m.row("modules", "List loaded BOF, native and WASM commands")
 
@@ -215,10 +217,12 @@ func printConsoleOverview(output io.Writer, vpnClient, selected, serverAttached 
 		}
 	}
 	if selected && opt.loadedArtifacts != nil {
-		for _, kind := range []string{"module", "wasm"} {
+		for _, kind := range []string{"module", "wasm", "assembly"} {
 			title := "Loaded Native Modules"
 			if kind == "wasm" {
 				title = "Loaded WASM Modules"
+			} else if kind == "assembly" {
+				title = "Loaded .NET Assemblies"
 			}
 			printed := false
 			for _, name := range opt.loadedArtifacts.names() {

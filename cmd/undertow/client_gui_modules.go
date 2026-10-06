@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 
+	"undertow/internal/assembly"
 	"undertow/internal/bof"
 	"undertow/internal/control"
 	"undertow/internal/nativemodule"
@@ -82,11 +83,11 @@ func (b *guiModuleBank) loadPath(kind, path, name, format string) error {
 	case "bof":
 		_, err := b.bofs.load(path, name, format, format != "", b.artifacts)
 		return err
-	case "module", "wasm":
+	case "module", "wasm", "assembly":
 		_, err := b.artifacts.load(kind, path, name, b.bofs)
 		return err
 	default:
-		return errors.New("module type must be bof, module, or wasm")
+		return errors.New("module type must be bof, module, wasm, or assembly")
 	}
 }
 
@@ -184,7 +185,7 @@ func (g *guiServer) importModule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	extension := strings.ToLower(filepath.Ext(filename))
-	if map[string]string{"bof": ".o", "module": ".module", "wasm": ".wasm"}[kind] != extension {
+	if (kind == "assembly" && extension != ".dll" && extension != ".exe") || (kind != "assembly" && map[string]string{"bof": ".o", "module": ".module", "wasm": ".wasm"}[kind] != extension) {
 		http.Error(w, "file extension does not match module type", http.StatusBadRequest)
 		return
 	}
@@ -208,6 +209,8 @@ func (g *guiServer) importModule(w http.ResponseWriter, r *http.Request) {
 	limit := int64(pivot.WASMModuleLimit)
 	if kind == "module" {
 		limit = pivot.NativeModuleLimit
+	} else if kind == "assembly" {
+		limit = assembly.MaxSize
 	} else if kind == "bof" {
 		limit = bof.MaxObjectSize
 	}
@@ -400,7 +403,7 @@ func (g *guiServer) startModule(ctx context.Context, agentID, name string, args 
 			return control.JobInfo{}, nil, fmt.Errorf("%s capability is disabled on this agent", capability)
 		}
 	}
-	if bofEntry != nil || artifact != nil && artifact.Kind == "module" {
+	if bofEntry != nil || artifact != nil && (artifact.Kind == "module" || artifact.Kind == "assembly") {
 		osName, arch := "windows", "amd64"
 		if bofEntry != nil {
 			arch = bofEntry.Compat.Architecture
@@ -434,6 +437,16 @@ func (g *guiServer) startModule(ctx context.Context, agentID, name string, args 
 		body = map[string]any{"source": artifact.Data, "stdin": input, "args": args}
 		if !deferAsJob {
 			stream, err := control.OpenClientWASM(ctx, session, agentID, artifact.Data, args, input)
+			return control.JobInfo{}, stream, err
+		}
+	} else if artifact.Kind == "assembly" {
+		if len(input) != 0 {
+			return control.JobInfo{}, nil, errors.New("assembly modules accept command-line arguments only")
+		}
+		path = base + "/assembly/jobs"
+		body = map[string]any{"source": artifact.Data, "args": args}
+		if !deferAsJob {
+			stream, err := control.OpenClientAssembly(ctx, session, agentID, artifact.Data, args)
 			return control.JobInfo{}, stream, err
 		}
 	} else {

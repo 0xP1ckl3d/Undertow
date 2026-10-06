@@ -32,7 +32,7 @@ The client also serves an optional local [browser operator workspace](docs/gui.m
 | Route your laptop's traffic | `client --internal` for agent networks, `client --vpn` for server Internet egress, or both | [Networking modes](docs/networking-modes.md) |
 | Work on a remote host | Interactive shell, one-shot commands, built-in host operations, file transfer, and background jobs | [Console guide](docs/console.md) |
 | Expose a local service through an agent | Let a remote host reach one or several TCP services running on your client | [Remote port forwarding](docs/remote-port-forwarding.md) |
-| Run specialized tools | Stream scripts, run WASM modules, or run Windows native modules and BOFs through the agent | [Module bank](docs/module-bank.md) |
+| Run specialized tools | Stream scripts, run WASM modules, or run Windows native modules, BOFs, and .NET Framework assemblies through the agent | [Module bank](docs/module-bank.md) |
 | Deploy an unattended agent | Build a Windows or Linux payload, host it over HTTPS, generate a verification script, or download it for your own delivery flow. Each running copy gets its own identity. | [Payload deployment](docs/agent-distribution.md) |
 | Deliver a child payload through its parent agent | Use an existing TCP relay or Windows SMB pipe and the parent's authenticated Undertow session | [Agent-hosted payloads](docs/agent-distribution.md#host-a-payload-through-a-connected-agent) |
 | Reach a network beyond the first agent | Start an explicit relay and connect another independent agent through it | [Topology and relays](docs/topology-and-relays.md) |
@@ -103,7 +103,7 @@ The release scripts produce `undertow` (or `undertow.exe`) and Windows/Linux age
 
 ## Reference
 
-The table above links to task-focused guides. For a complete inventory, use the [feature catalogue](features.md) or [CLI reference](docs/cli-reference.md). The [BOF](docs/bof-compatibility.md), [native module](docs/native-modules.md), and [WASM](docs/wasm-development.md) guides cover extension formats. For internals and measurements, see the [protocol](docs/protocol.md) and [benchmark guide](docs/benchmarks.md).
+The table above links to task-focused guides. For a complete inventory, use the [feature catalogue](features.md) or [CLI reference](docs/cli-reference.md). The [BOF](docs/bof-compatibility.md), [native module](docs/native-modules.md), [WASM](docs/wasm-development.md), and [.NET assembly](docs/assembly-modules.md) guides cover extension formats. For internals and measurements, see the [protocol](docs/protocol.md) and [benchmark guide](docs/benchmarks.md).
 
 Undertow is experimental. The Linux server, Linux VPN client, and Windows agent have been exercised over DNS, HTTPS/WebSocket, and QUIC with TCP, UDP, and ICMP traffic; results are in the [benchmark guide](docs/benchmarks.md). Windows client Wintun installation still needs an elevated live acceptance run. Undertow is [GPL-3.0-only](LICENSE); bundled third-party components retain their own licences.
 

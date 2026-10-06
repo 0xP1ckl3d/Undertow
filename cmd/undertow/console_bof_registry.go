@@ -64,7 +64,7 @@ var builtinConsoleCommands = map[string]bool{
 	"exit": true, "background": true, "stop": true, "logs": true,
 	"route": true, "routes": true, "relay": true, "topology": true,
 	"transports": true, "start": true, "shell": true, "interactive": true,
-	"exec": true, "run-script": true, "run-wasm": true, "run-native": true,
+	"exec": true, "run-script": true, "run-wasm": true, "run-native": true, "run-assembly": true,
 	"run-bof": true, "job": true, "jobs": true, "host": true,
 	"pwd": true, "ls": true, "stat": true, "mkdir": true, "rm": true,
 	"whoami": true, "ps": true, "privileges": true, "env": true,
@@ -75,7 +75,7 @@ var builtinConsoleCommands = map[string]bool{
 	"payload": true, "session": true, "client": true,
 	"profile": true, "artifact": true, "artifacts": true,
 	"bof": true, "script": true, "scripts": true, "wasm": true,
-	"native": true, "hostops": true, "files": true,
+	"native": true, "assembly": true, "hostops": true, "files": true,
 	"navigation": true, "routing": true, "transport": true,
 	"lifecycle": true,
 }

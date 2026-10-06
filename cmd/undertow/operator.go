@@ -58,6 +58,14 @@ func openControlNative(ctx context.Context, options operatorOptions, agentID str
 	return pivot.StartMemorySession(ctx, conn, reader, pivot.MemoryRequest{Args: args, Stdin: data, Size: len(module)}, module)
 }
 
+func openControlAssembly(ctx context.Context, options operatorOptions, agentID string, source []byte, args []string) (*pivot.InteractiveSession, error) {
+	conn, reader, err := openControlSession(ctx, options, agentID, "assembly")
+	if err != nil {
+		return nil, err
+	}
+	return pivot.StartMemorySession(ctx, conn, reader, pivot.MemoryRequest{Args: args, Size: len(source)}, source)
+}
+
 func openControlBOF(ctx context.Context, options operatorOptions, agentID string, object, arguments []byte) (*pivot.InteractiveSession, error) {
 	conn, reader, err := openControlSession(ctx, options, agentID, "bof")
 	if err != nil {

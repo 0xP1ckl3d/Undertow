@@ -94,7 +94,7 @@ If no agent appears, check `status` and `agent events AGENT_ID` in the server co
 | Other VPN modes and carrier choices | [Networking modes](networking-modes.md) and [scenarios](scenarios.md) |
 | Profiles, downloads, hosting, and shutdown | [Payload deployment](agent-distribution.md) |
 | Shells, files, jobs, forwards, and console commands | [Console guide](console.md) |
-| BOF, native, and WASM tools | [Module bank](module-bank.md), [BOF](bof-compatibility.md), [native](native-modules.md), and [WASM](wasm-development.md) guides |
+| BOF, native, WASM, and .NET Framework tools | [Module bank](module-bank.md), [BOF](bof-compatibility.md), [native](native-modules.md), [WASM](wasm-development.md), and [.NET assembly](assembly-modules.md) guides |
 | Deeper agent networks | [Topology and relays](topology-and-relays.md) |
 | Host a child payload on its parent agent's TCP relay | [Agent-hosted payloads](agent-distribution.md#host-a-payload-through-a-connected-agent) |
 | Use a Windows SMB named-pipe child carrier | [SMB named-pipe relays](smb-named-pipe-relays.md) |

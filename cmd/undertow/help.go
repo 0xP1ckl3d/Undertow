@@ -317,7 +317,7 @@ screen. The client console supports 'vpn on|off|status' and
 'internal on|off|status'. Ctrl-] exits a live shell
 without closing the Undertow console. See docs/console.md for the full guide.
 `
-	case "relay", "topology", "transport", "transports", "run-script", "run-wasm", "run-native", "run-bof", "shell", "jobs", "host":
+	case "relay", "topology", "transport", "transports", "run-script", "run-wasm", "run-native", "run-assembly", "run-bof", "shell", "jobs", "host":
 		return printConsoleHelp(w, false, true, false, topic)
 	case "bof":
 		body = `undertow bof inspect FILE.o — inspect BOF compatibility locally

@@ -48,7 +48,7 @@ func (g *guiServer) agentCommandStream(w http.ResponseWriter, r *http.Request) {
 	if len(args) == 0 {
 		return
 	}
-	if args[0] == "run-script" || args[0] == "run-wasm" || args[0] == "run-native" || args[0] == "run-bof" {
+	if args[0] == "run-script" || args[0] == "run-wasm" || args[0] == "run-native" || args[0] == "run-assembly" || args[0] == "run-bof" {
 		claims, err := g.actionClaims()
 		if err != nil {
 			stream.event("error", err.Error())
@@ -213,6 +213,10 @@ func (g *guiServer) runGUIOneShot(ctx context.Context, writer *guiCommandEventWr
 	case "run-native":
 		return runConsoleNative(ctx, writer, nil, call, func(ctx context.Context, id string, source []byte, values []string, input []byte) (*pivot.InteractiveSession, error) {
 			return control.OpenClientNative(ctx, session, id, source, values, input)
+		}, bound)
+	case "run-assembly":
+		return runConsoleAssembly(ctx, writer, nil, call, func(ctx context.Context, id string, source []byte, values []string) (*pivot.InteractiveSession, error) {
+			return control.OpenClientAssembly(ctx, session, id, source, values)
 		}, bound)
 	case "run-bof":
 		return runConsoleBOF(ctx, writer, nil, call, func(ctx context.Context, id string, source, packed []byte) (*pivot.InteractiveSession, error) {

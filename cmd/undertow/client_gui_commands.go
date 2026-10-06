@@ -37,11 +37,11 @@ func (g *guiServer) agentGUIHelp() string {
 	section("AGENT SESSION", [][2]string{{"show", "Inspect this agent"}, {"agent events", "Recent lifecycle events"}, {"agent sleep [SECONDS JITTER]", "View or set idle sleep"}, {"agent shutdown", "Ask this agent to exit"}, {"session kill", "Close this session; agent may reconnect"}, {"shell", "Open the separate live shell panel"}})
 	section("HOST", [][2]string{{"pwd; ls [PATH]; stat PATH", "Browse this agent's files"}, {"mkdir PATH; rm PATH", "Create or remove a path"}, {"whoami; ps; privileges", "Identity, processes and privileges"}, {"env [NAME]", "Environment variables"}, {"interfaces; dns; route-table", "Network configuration"}, {"screens; screenshot [NUMBER]", "List screens or capture explicitly"}})
 	section("FILES AND SERVICES", [][2]string{{"upload LOCAL REMOTE", "Send a client file to this agent"}, {"download REMOTE [LOCAL]", "Save an agent file on this client"}, {"forward add BIND TARGET", "Expose a client service through this agent"}, {"forward list; forward del BIND", "Inspect or close forwards"}, {"relay start [BIND]", "Start a relay listener on this agent"}, {"relay list; relay stop BIND", "Inspect or close relay listeners"}})
-	section("EXECUTION AND JOBS", [][2]string{{"exec PROGRAM [ARGS]", "Run one program when requested"}, {"job start PROGRAM [ARGS]", "Start a background job"}, {"jobs; job show|output ID", "Inspect retained jobs and output"}, {"job cancel|stop|delete ID", "Manage a job"}, {"run-script [OPTIONS] FILE", "Run a client-side script file"}, {"run-wasm|run-native|run-bof ...", "Run a client-side module file"}})
+	section("EXECUTION AND JOBS", [][2]string{{"exec PROGRAM [ARGS]", "Run one program when requested"}, {"job start PROGRAM [ARGS]", "Start a background job"}, {"jobs; job show|output ID", "Inspect retained jobs and output"}, {"job cancel|stop|delete ID", "Manage a job"}, {"run-script [OPTIONS] FILE", "Run a client-side script file"}, {"run-wasm|run-native|run-assembly|run-bof ...", "Run a client-side module file"}})
 	section("CLIENT ROUTING", [][2]string{{"routes", "Show routes for this agent"}, {"route accept CIDR", "Accept an advertised route on this client"}, {"route add CIDR", "Add a custom route on this client"}, {"route del CIDR", "Remove this client's accepted route"}})
-	section("MODULE BANK", [][2]string{{"modules; bofs", "List loaded commands"}, {"help MODULE", "Show a loaded command's full help"}, {"load module|wasm|bof FILE [NAME]", "Register a client module"}, {"unload module|wasm|bof NAME", "Remove a loaded command"}, {"MODULE [ARGS] [--background]", "Run a loaded command on this agent"}})
+	section("MODULE BANK", [][2]string{{"modules; bofs", "List loaded commands"}, {"help MODULE", "Show a loaded command's full help"}, {"load module|wasm|assembly|bof FILE [NAME]", "Register a client module"}, {"unload module|wasm|assembly|bof NAME", "Remove a loaded command"}, {"MODULE [ARGS] [--background]", "Run a loaded command on this agent"}})
 	if g.modules != nil {
-		for _, kind := range []struct{ key, title string }{{"bof", "LOADED BOFS"}, {"module", "LOADED NATIVE MODULES"}, {"wasm", "LOADED WASM MODULES"}} {
+		for _, kind := range []struct{ key, title string }{{"bof", "LOADED BOFS"}, {"module", "LOADED NATIVE MODULES"}, {"wasm", "LOADED WASM MODULES"}, {"assembly", "LOADED .NET ASSEMBLIES"}} {
 			var items [][2]string
 			for _, module := range g.modules.list() {
 				if module.Kind == kind.key {
@@ -80,7 +80,7 @@ func (g *guiServer) loadGUIConsoleModule(args []string) (guiCommandResult, error
 		return guiCommandResult{}, errors.New("client module bank is unavailable")
 	}
 	if len(args) < 3 {
-		return guiCommandResult{}, errors.New("use load module|wasm|bof FILE [NAME] [--format FORMAT]")
+		return guiCommandResult{}, errors.New("use load module|wasm|assembly|bof FILE [NAME] [--format FORMAT]")
 	}
 	g.modules.mu.Lock()
 	defer g.modules.mu.Unlock()
@@ -101,8 +101,8 @@ func (g *guiServer) unloadGUIConsoleModule(args []string) (guiCommandResult, err
 	if g.modules == nil {
 		return guiCommandResult{}, errors.New("client module bank is unavailable")
 	}
-	if len(args) != 3 || args[1] != "bof" && args[1] != "module" && args[1] != "wasm" {
-		return guiCommandResult{}, errors.New("use unload module|wasm|bof NAME")
+	if len(args) != 3 || args[1] != "bof" && args[1] != "module" && args[1] != "wasm" && args[1] != "assembly" {
+		return guiCommandResult{}, errors.New("use unload module|wasm|bof|assembly NAME")
 	}
 	for _, module := range g.modules.list() {
 		if module.Name == args[2] {

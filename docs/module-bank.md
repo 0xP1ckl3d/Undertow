@@ -1,14 +1,14 @@
 # Local module bank
 
-Use the module bank when you have a compiled tool and want to run it by name in the **server or VPN client console**. Undertow loads packaged BOFs, native modules, and WASM modules from `modules/` when that console process starts. These are local, session-scoped commands. Loading reads each artifact into the console process; Undertow sends its bytes to the selected agent only when you run the command.
+Use the module bank when you have a compiled tool and want to run it by name in the **server or VPN client console**. Undertow loads packaged BOFs, native modules, WASM modules, and .NET Framework assemblies from `modules/` when that console process starts. These are local, session-scoped commands. Loading reads each artifact into the console process; Undertow sends its bytes to the selected agent only when you run the command.
 
 | I want to... | Start here |
 | --- | --- |
 | Run a packaged tool | In the console, type `modules`, `help NAME`, `use NUMBER`, then `NAME` as shown below. |
 | Add a tool I already compiled | Put its artifact and optional JSON sidecar on the **console host** under `modules/`, then start or reattach the console. |
-| Build a new tool | Follow the [WASM](wasm-development.md), [native Windows module](native-modules.md), or [BOF](bof-compatibility.md) guide, then add the resulting file here. |
+| Build a new tool | Follow the [WASM](wasm-development.md), [native Windows module](native-modules.md), [BOF](bof-compatibility.md), or [.NET assembly](assembly-modules.md) guide, then add the resulting file here. |
 
-The repository ships runnable files in `modules/bof/`, `modules/native/`, and `modules/wasm/`. To add your own, copy a compatible `.o`, `.module`, or `.wasm` file anywhere below `modules/`, then start or reattach a console. Subdirectories are for organization only; the file extension determines the runtime. You may also set `UNDERTOW_MODULES_DIR` to an absolute directory before starting the console. Without that variable, Undertow looks for `modules/` in the current working directory, beside the Undertow executable, then in its parent directory (the usual `bin/undertow.exe` layout). The artifact stays on the **console host**, not on the agent; no agent redeployment is needed for a new module file.
+The repository ships runnable files in `modules/bof/`, `modules/native/`, and `modules/wasm/`. To add your own, copy a compatible `.o`, `.module`, or `.wasm` file anywhere below `modules/`, or a managed `.exe`/`.dll` under `modules/assembly/`, then start or reattach a console. Other `.exe` and `.dll` files under `modules/` are ignored. You may also set `UNDERTOW_MODULES_DIR` to an absolute directory before starting the console. Without that variable, Undertow looks for `modules/` in the current working directory, beside the Undertow executable, then in its parent directory (the usual `bin/undertow.exe` layout). The artifact stays on the **console host**, not on the agent; no agent redeployment is needed for a new module file.
 
 ```text
 undertow> modules
@@ -159,8 +159,8 @@ Native and WASM command arguments are passed as UTF-8 strings through their exis
 
 For BOFs, use the existing [BOF manifest](bof-compatibility.md) to describe typed arguments. It supports `name`, `description`, `usage`, `help`, `entrypoint`, and an `arguments` array with `name`, `type`, and `required`. Types are `int`, `short`, `string`, `wstring`, and `binary`. A BOF sidecar is the reliable way to make typed arguments work without an operator typing `--format` each run. Without a sidecar or an explicit format, supplied BOF arguments are encoded as ANSI strings. To assign a format just for the current session, run `load bof FILE ALIAS --format zi` and then invoke `ALIAS` normally.
 
-Use `load bof FILE [NAME]`, `load module FILE [NAME]`, or `load wasm FILE [NAME]` to register a file during the current console session. Manually loaded commands use the given alias, or the unprefixed filename stem when no alias is given. `unload bof|module|wasm NAME` removes a command. BOFs still support `run-bof`, native modules `run-native`, and WASM modules `run-wasm` for one-off use.
+Use `load bof FILE [NAME]`, `load module FILE [NAME]`, `load wasm FILE [NAME]`, or `load assembly FILE [NAME]` to register a file during the current console session. Manually loaded commands use the given alias, or the unprefixed filename stem when no alias is given. `unload bof|module|wasm|assembly NAME` removes a command. BOFs still support `run-bof`, native modules `run-native`, WASM modules `run-wasm`, and .NET Framework assemblies `run-assembly` for one-off use.
 
-The three formats remain separate: `.o` is a Windows AMD64 BOF with the conventional Beacon ABI, `.module` is an Undertow native DLL container with `undertow_native_v1`, and `.wasm` is portable WASI with `undertow_host_v1`. See the [BOF](bof-compatibility.md), [native](native-modules.md), and [WASM](wasm-development.md) guides for compiler requirements and runtime limits.
+The four formats remain separate: `.o` is a Windows AMD64 BOF with the conventional Beacon ABI, `.module` is an Undertow native DLL container with `undertow_native_v1`, `.wasm` is portable WASI with `undertow_host_v1`, and `.exe`/`.dll` under `modules/assembly/` is a managed .NET Framework assembly. See the [BOF](bof-compatibility.md), [native](native-modules.md), [WASM](wasm-development.md), and [.NET assembly](assembly-modules.md) guides.
 
 Back to [documentation home](README.md).

@@ -52,6 +52,10 @@ func OpenClientNative(ctx context.Context, client *mux.Mux, agentID string, modu
 	return openClientMemory(ctx, client, agentID, "native", pivot.MemoryRequest{Args: args, Stdin: data, Size: len(module)}, module)
 }
 
+func OpenClientAssembly(ctx context.Context, client *mux.Mux, agentID string, source []byte, args []string) (*pivot.InteractiveSession, error) {
+	return openClientMemory(ctx, client, agentID, "assembly", pivot.MemoryRequest{Args: args, Size: len(source)}, source)
+}
+
 func OpenClientBOF(ctx context.Context, client *mux.Mux, agentID string, object, arguments []byte) (*pivot.InteractiveSession, error) {
 	return openClientMemory(ctx, client, agentID, "bof", pivot.MemoryRequest{Size: len(object), Stdin: arguments}, object)
 }
@@ -85,6 +89,10 @@ func BridgeClientWASM(ctx context.Context, client *mux.Mux, agentID string, loca
 
 func BridgeClientNative(ctx context.Context, client *mux.Mux, agentID string, local net.Conn) error {
 	return bridgeClientInteractive(ctx, client, agentID, "native", local)
+}
+
+func BridgeClientAssembly(ctx context.Context, client *mux.Mux, agentID string, local net.Conn) error {
+	return bridgeClientInteractive(ctx, client, agentID, "assembly", local)
 }
 
 func BridgeClientBOF(ctx context.Context, client *mux.Mux, agentID string, local net.Conn) error {
@@ -164,6 +172,8 @@ func (m *Manager) ServeInteractiveRelayForClient(ctx context.Context, clientID u
 		destination = pivot.WASMDestination
 	} else if request.Kind == "native" {
 		destination = pivot.NativeDestination
+	} else if request.Kind == "assembly" {
+		destination = pivot.AssemblyDestination
 	} else if request.Kind == "bof" {
 		destination = pivot.BOFDestination
 	} else if request.Kind != "" {
@@ -266,6 +276,8 @@ func (m *Manager) interactiveHandler(w http.ResponseWriter, r *http.Request) {
 		destination = pivot.WASMDestination
 	} else if r.URL.Path == "/v1/agents/"+r.PathValue("id")+"/native" {
 		destination = pivot.NativeDestination
+	} else if r.URL.Path == "/v1/agents/"+r.PathValue("id")+"/assembly" {
+		destination = pivot.AssemblyDestination
 	} else if r.URL.Path == "/v1/agents/"+r.PathValue("id")+"/bof" {
 		destination = pivot.BOFDestination
 	}

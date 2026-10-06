@@ -334,7 +334,7 @@ Agent: undertow agent --transport quic --server SERVER_IP:443 --tls-insecure-ski
 
 `run-native` sends a `.module` container to a Windows amd64 agent and invokes its PE32+ DLL entry point through `undertow_native_v1`. The module uses ordinary Windows APIs and import libraries directly; Undertow supplies arguments, output, cancellation and run information. Foreground output and background jobs use the same console frames and job manager as WASM. `--data FILE` passes binary bytes alongside UTF-8 arguments. The independent `native` capability controls execution. The agent validates platform, architecture and ABI metadata, then uses the Windows loader to resolve System32 imports and relocations. See the [native module guide](docs/native-modules.md), [SDK](sdk/native/README.md), and [examples](modules/native/README.md).
 
-The interactive console preloads `.o`, `.module`, and `.wasm` artifacts from its local [`modules/` bank](docs/module-bank.md) as session commands. `load bof|module|wasm FILE [NAME]` adds a command during the session; `help NAME` displays sidecar help and `modules` lists everything loaded. The same command can run on any selected compatible agent.
+The interactive console preloads `.o`, `.module`, and `.wasm` artifacts, plus managed `.exe`/`.dll` files under `modules/assembly/`, from its local [`modules/` bank](docs/module-bank.md) as session commands. `load bof|module|wasm|assembly FILE [NAME]` adds a command during the session; `help NAME` displays sidecar help and `modules` lists everything loaded. The same command can run on any selected compatible agent.
 
 The native examples include [Sift](modules/native/sift/README.md) for controlled sensitive-data scanning and [askpass](modules/native/askpass/README.md) for an interactive Windows credential dialog. Askpass needs a visible user desktop and returns submitted values in module output; handle that output as sensitive data.
 
@@ -345,6 +345,10 @@ Server console: run-native --background modules/native/hello/hello.module --wait
 Server console: jobs
 Server console: job stop 1
 ```
+
+### .NET Framework assemblies
+
+`run-assembly` loads a pure-IL .NET Framework 4.x `.exe` or `.dll` from transferred bytes in a short-lived Windows PowerShell 5.1 worker on a Windows amd64 agent. It accepts Unicode command-line arguments, streams `Console.Out` and `Console.Error`, and uses the normal foreground and background Jobs paths. Assemblies share the `native` capability and two-run limit; cancellation terminates the worker. See the [.NET assembly guide](docs/assembly-modules.md).
 
 ### Beacon Object Files
 

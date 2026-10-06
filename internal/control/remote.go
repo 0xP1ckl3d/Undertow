@@ -300,7 +300,7 @@ func clientRequestAllowed(request *http.Request, clientID uint64) bool {
 		return len(parts) == 5 && parts[3] != "" && !strings.ContainsAny(parts[3], "%\\")
 	}
 	parts := strings.Split(path, "/")
-	if len(parts) == 6 && parts[1] == "v1" && parts[2] == "agents" && parts[3] != "" && (parts[4] == "scripts" || parts[4] == "wasm" || parts[4] == "native" || parts[4] == "bof") && parts[5] == "jobs" && !strings.ContainsAny(parts[3], "%\\") {
+	if len(parts) == 6 && parts[1] == "v1" && parts[2] == "agents" && parts[3] != "" && (parts[4] == "scripts" || parts[4] == "wasm" || parts[4] == "native" || parts[4] == "assembly" || parts[4] == "bof") && parts[5] == "jobs" && !strings.ContainsAny(parts[3], "%\\") {
 		return true
 	}
 	return len(parts) == 5 && parts[1] == "v1" && parts[2] == "agents" && parts[3] != "" && (parts[4] == "exec" || parts[4] == "jobs" || parts[4] == "shutdown") && !strings.ContainsAny(parts[3], "%\\")

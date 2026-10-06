@@ -138,11 +138,12 @@ background
 | `run-script [--background] bash|powershell LOCAL_FILE` | Selected agent | Stream local script source to the interpreter without a script file on the agent; background runs appear in `jobs`. |
 | `run-wasm [--background] [--stdin LOCAL_FILE] MODULE_FILE [ARGS]` | Selected agent | Instantiate a WASI module in agent memory. Output streams live or enters `jobs`. |
 | `run-native [--background] [--data LOCAL_FILE] MODULE_FILE [ARGS]` | Selected Windows amd64 agent | Load a native `.module` DLL with direct Windows API access. Output streams live or enters `jobs`. |
+| `run-assembly [--background] ASSEMBLY.exe|dll [ARGS]` | Selected Windows amd64 agent | Load a .NET Framework 4.x assembly from bytes in an isolated worker. Output streams live or enters `jobs`. |
 | `run-bof [--background] [--format FORMAT] OBJECT.o [ARGS]` | Selected Windows amd64 agent | Load a compatible BOF COFF object with Beacon API imports. Output streams live or enters `jobs`. |
 | `load bof FILE [NAME] [--format FORMAT]` | Any console menu | Register a BOF as a local command for this console session. |
 | `bofs`; `unload bof NAME` | Any console menu | List or remove local BOF commands. |
-| `load module FILE [NAME]`; `load wasm FILE [NAME]` | Any console menu | Register a native or WASM module as a local command. |
-| `modules`; `unload module|wasm NAME` | Any console menu | List all loaded artifacts or remove a native/WASM command. |
+| `load module FILE [NAME]`; `load wasm FILE [NAME]`; `load assembly FILE [NAME]` | Any console menu | Register a native, WASM, or .NET Framework assembly as a local command. |
+| `modules`; `unload module|wasm|assembly NAME` | Any console menu | List all loaded artifacts or remove a loaded command. |
 | `job start PROGRAM [ARGS]` | Selected agent | Start a task that keeps running while you use or detach the console. |
 | `jobs` | Either menu | List numbered tasks; inside an agent, list that agent's tasks. |
 | `jobs NUMBER` | Either menu | Show a task from the last `jobs` list. |
@@ -243,6 +244,8 @@ For a memory-backed script, select an agent and use `run-script bash ./check.sh`
 To run a WASI module, use `run-wasm ./tool.wasm option`, `run-wasm --stdin ./input.txt ./tool.wasm`, or `run-wasm --background ./long-task.wasm` in a selected-agent console. The module is instantiated from memory and receives explicit arguments and optional stdin. It has no preopened WASI filesystem or WASI network sockets, but the public `undertow_host_v1` imports let it read agent-side files and make bounded outbound network requests with the agent process's privileges. Agent limits are 4 MiB for module bytes, 64 KiB for stdin, 16 MiB guest linear memory, 4 MiB combined output, two minutes of execution and two simultaneous runs. The independent `wasm` capability controls both foreground and background runs; denying `hostops` does not disable these WASM imports. Background runs use the same job IDs, ownership, output retention and cancellation as other tasks. See the [WASM developer guide](wasm-development.md) for the host API and its limits.
 
 On a Windows amd64 agent, `run-native ./tool.module option` loads a native Windows DLL module. `run-native --data ./payload.bin ./tool.module` supplies opaque bytes, and `run-native --background ./tool.module` starts a standard job. Use `job stop NUMBER` to request cooperative cancellation. See the [native module guide](native-modules.md).
+
+On a Windows amd64 agent with Windows PowerShell 5.1 and .NET Framework 4.x, `run-assembly ./tool.exe option` runs a managed assembly loaded from transferred bytes. Use `run-assembly --background ./tool.dll` for a retained job, or `load assembly ./tool.exe tool` to register a local command. See the [.NET assembly guide](assembly-modules.md).
 
 To reuse a compatible BOF, inspect it locally with `undertow bof inspect ./tool.o`, then run `run-bof ./tool.o` on a selected Windows amd64 agent. Use `--format` or a sidecar manifest for Beacon arguments. `run-bof --background ./tool.o` uses the same jobs and `native` capability; `job stop NUMBER` terminates its isolated worker. See the [BOF compatibility guide](bof-compatibility.md).
 

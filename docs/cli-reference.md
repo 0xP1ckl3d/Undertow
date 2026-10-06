@@ -4,7 +4,7 @@ Operator authentication is required for every client connection. Bootstrap the f
 
 Use this page for terminal flags, startup options, diagnostics, and scripting. For day-to-day operations, start in the [server or client console](console.md): select an agent, configure routes, manage payloads, and run tools there. The [Getting started](getting-started.md) guide gives the full first-run workflow.
 
-For task-focused detail, see [payload deployment](agent-distribution.md), [networking modes](networking-modes.md), the [module bank](module-bank.md), and the [BOF](bof-compatibility.md), [native](native-modules.md), and [WASM](wasm-development.md) guides.
+For task-focused detail, see [payload deployment](agent-distribution.md), [networking modes](networking-modes.md), the [module bank](module-bank.md), and the [BOF](bof-compatibility.md), [native](native-modules.md), [WASM](wasm-development.md), and [.NET assembly](assembly-modules.md) guides.
 
 Run `undertow help` or `undertow help COMMAND` for terminal help. Linux binary: `./bin/undertow`; Windows binary: `.\bin\undertow.exe`. This page describes the current command line. Paths are relative to the process working directory unless absolute.
 

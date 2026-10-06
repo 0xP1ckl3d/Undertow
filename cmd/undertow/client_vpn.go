@@ -295,6 +295,12 @@ func clientCommand(args []string) error {
 		live.mu.RUnlock()
 		return control.BridgeClientNative(ctx, session, agentID, conn)
 	})
+	setBackgroundAssemblyHandler(func(ctx context.Context, agentID string, conn net.Conn) error {
+		live.mu.RLock()
+		session := live.session
+		live.mu.RUnlock()
+		return control.BridgeClientAssembly(ctx, session, agentID, conn)
+	})
 	setBackgroundBOFHandler(func(ctx context.Context, agentID string, conn net.Conn) error {
 		live.mu.RLock()
 		session := live.session
@@ -329,6 +335,12 @@ func clientCommand(args []string) error {
 			live.mu.RUnlock()
 			return control.OpenClientNative(ctx, session, agentID, module, args, data)
 		}
+		assemblyOpen := func(ctx context.Context, agentID string, source []byte, args []string) (*pivot.InteractiveSession, error) {
+			live.mu.RLock()
+			session := live.session
+			live.mu.RUnlock()
+			return control.OpenClientAssembly(ctx, session, agentID, source, args)
+		}
 		bofOpen := func(ctx context.Context, agentID string, object, arguments []byte) (*pivot.InteractiveSession, error) {
 			live.mu.RLock()
 			session := live.session
@@ -343,7 +355,7 @@ func clientCommand(args []string) error {
 			return live.transferProgress(ctx, encoded, progress)
 		}
 		go func() {
-			if err := runConsole(ctx, os.Stdin, os.Stdout, live.call, live.id, stop, live.routeCommand, live.events, consoleFeatures{open: opener, script: script, wasm: wasm, native: native, bof: bofOpen, transfer: transfer}); err != nil && ctx.Err() == nil {
+			if err := runConsole(ctx, os.Stdin, os.Stdout, live.call, live.id, stop, live.routeCommand, live.events, consoleFeatures{open: opener, script: script, wasm: wasm, native: native, assembly: assemblyOpen, bof: bofOpen, transfer: transfer}); err != nil && ctx.Err() == nil {
 				log.Printf("console: %v", err)
 				live.notify("Console failed: " + err.Error())
 				stop()

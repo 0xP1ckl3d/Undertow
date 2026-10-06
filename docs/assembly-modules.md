@@ -1,0 +1,50 @@
+# .NET Framework assemblies
+
+Undertow supports a fourth module type: a managed Windows .NET Framework 4.x assembly. It complements portable WASM, Undertow native `.module` DLLs, and BOF `.o` objects. The first assembly runtime targets **Windows amd64 agents** and accepts pure-IL AnyCPU or x64 `.exe` and `.dll` PE assemblies. x86-only, mixed-mode, .NET 6+, and single-file .NET applications are outside this subset.
+
+The agent needs 64-bit Windows PowerShell 5.1 and the .NET Framework 4.x CLR. Undertow starts a short-lived PowerShell worker, sends the assembly bytes over stdin, and calls `Assembly.Load(byte[])`. It does not place the assembly or a generated loader script on the agent filesystem. The worker uses the agent's Windows identity and permissions. Dependencies must already be resolvable by the installed CLR; Undertow does not package companion DLLs.
+
+## Entry point and arguments
+
+An `.exe` uses its managed entry point. A `.dll` must have exactly one static method named `Main` across its types. Supported signatures are `Main()` and `Main(string[] args)`, returning `void` or `int`; a `Task` or `Task<int>` result is also awaited. Missing or ambiguous DLL entry points and unsupported signatures produce errors. Arguments are passed as Unicode `string[]` in order. Standard `Console.Out` and `Console.Error` appear in Undertow's output streams. A nonzero integer result becomes the run's exit status.
+
+The worker consumes stdin for assembly transfer, so interactive `Console.ReadLine` input is unavailable. Foreground output streams to the console; background output uses normal Jobs retention and `job output`. `job stop` or a lost session terminates the worker. Assemblies share the agent's `native` capability and two-run native concurrency limit.
+
+## Run or load
+
+```text
+undertow> use 1
+undertow[AGENT]> run-assembly ./tool.exe first "two words"
+undertow[AGENT]> run-assembly --background ./tool.dll audit
+undertow[AGENT]> job output 1
+
+undertow> load assembly ./tool.exe tool
+undertow> help tool
+undertow> use 1
+undertow[AGENT]> tool first "two words"
+undertow[AGENT]> tool --background audit
+```
+
+At the main menu, use `run-assembly AGENT_ID FILE [ARGS]`. `load assembly FILE [NAME]` registers bytes locally for the current console session and transfers them only when invoked. `unload assembly NAME` removes the registration. The GUI Modules page can import an `.exe` or `.dll` as a `.NET Framework` module and run it foreground or background.
+
+Put packaged assemblies below `modules/assembly/` on the **console host** and restart or reattach the console to preload them. `modules/assembly/audit.exe` becomes `assembly-audit`. No assembly files ship in this initial change. An optional `audit.exe.json` or `audit.json` sidecar can set `description`, `usage`, and `help`. Aliases use lowercase letters, digits, and hyphens and cannot shadow built-in commands. See [Local module bank](module-bank.md).
+
+## Build example
+
+On Windows with the .NET Framework compiler:
+
+```powershell
+& "$env:SystemRoot\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo /target:exe /out:hello.exe hello.cs
+```
+
+```csharp
+using System;
+class Hello {
+    static int Main(string[] args) {
+        Console.WriteLine("Hello " + String.Join(" ", args));
+        return 0;
+    }
+}
+```
+
+Copy `hello.exe` to `modules/assembly/hello.exe`, or run it directly. The loader checks PE and CLR headers before transfer; the worker reports CLR load and invocation failures through stderr. A missing PowerShell executable produces a worker startup error; a missing or incompatible CLR produces a loader error.
