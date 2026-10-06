@@ -33,12 +33,15 @@ func bofArguments(path, format, manifestPath string, values []string) ([]byte, e
 		if err != nil {
 			return nil, err
 		}
-		_, manifestFormat, err := bof.ParseManifest(source)
+		manifest, manifestFormat, err := bof.ParseManifest(source)
 		if err != nil {
 			return nil, err
 		}
 		if format == "" {
 			format = manifestFormat
+		}
+		if format == "" && len(values) != 0 && manifest.Arguments == nil {
+			format = strings.Repeat("z", len(values))
 		}
 	}
 	if format == "" && len(values) != 0 {

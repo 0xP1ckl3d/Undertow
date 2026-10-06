@@ -1,0 +1,7 @@
+{
+  "name": "assembly-seatbelt",
+  "description": "GhostPack Seatbelt: Windows host security enumeration tool.",
+  "usage": "assembly-seatbelt [COMMANDS] [OPTIONS]",
+  "help": "Source: https://github.com/GhostPack/Seatbelt\nLicense: 3-clause BSD (the upstream repository also includes Apache-2.0 terms for sandbox-attack-surface-analysis-tools).\nUse the upstream README for command groups and options. This packaged executable has not been live-tested in Undertow.",
+  "source": "https://github.com/GhostPack/Seatbelt"
+}

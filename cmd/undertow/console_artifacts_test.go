@@ -182,7 +182,7 @@ func TestPackagedModuleBank(t *testing.T) {
 	if problems := preloadModuleBank(artifacts, bofs); len(problems) != 0 {
 		t.Fatalf("packaged bank has invalid artifacts: %v", problems)
 	}
-	if len(bofs.names()) != 34 || len(artifacts.names()) < 11 {
+	if len(bofs.names()) != 35 || len(artifacts.names()) < 11 {
 		t.Fatalf("packaged bank: bofs=%v modules=%v", bofs.names(), artifacts.names())
 	}
 	for _, name := range bofs.names() {

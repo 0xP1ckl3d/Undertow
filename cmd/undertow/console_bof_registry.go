@@ -166,7 +166,12 @@ func (r *loadedBOFRegistry) load(path, name, explicitFormat string, hasFormat bo
 		manifest.Arguments = nil
 		manifest.Usage = ""
 	}
-	entry := &loadedBOF{Name: name, Path: absolute, Object: object, Compat: compat, Manifest: manifest, Format: format, SchemaKnown: found || hasFormat}
+	// A sidecar may provide help and usage for a BOF whose patched entrypoint
+	// parses its own command-line switches. In that case the arguments field is
+	// intentionally omitted and values remain free-form ANSI strings. An
+	// explicit empty arguments array still declares a zero-argument BOF.
+	schemaKnown := hasFormat || (found && (manifest.Arguments != nil || format != ""))
+	entry := &loadedBOF{Name: name, Path: absolute, Object: object, Compat: compat, Manifest: manifest, Format: format, SchemaKnown: schemaKnown}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.items[name] != nil {

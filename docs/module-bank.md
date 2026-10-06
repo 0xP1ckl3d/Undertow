@@ -8,7 +8,7 @@ Use the module bank when you have a compiled tool and want to run it by name in 
 | Add a tool I already compiled | Put its artifact and optional JSON sidecar on the **console host** under `modules/`, then start or reattach the console. |
 | Build a new tool | Follow the [WASM](wasm-development.md), [native Windows module](native-modules.md), [BOF](bof-compatibility.md), or [.NET assembly](assembly-modules.md) guide, then add the resulting file here. |
 
-The repository ships runnable files in `modules/bof/`, `modules/native/`, and `modules/wasm/`. To add your own, copy a compatible `.o`, `.module`, or `.wasm` file anywhere below `modules/`, or a managed `.exe`/`.dll` under `modules/assembly/`, then start or reattach a console. Other `.exe` and `.dll` files under `modules/` are ignored. You may also set `UNDERTOW_MODULES_DIR` to an absolute directory before starting the console. Without that variable, Undertow looks for `modules/` in the current working directory, beside the Undertow executable, then in its parent directory (the usual `bin/undertow.exe` layout). The artifact stays on the **console host**, not on the agent; no agent redeployment is needed for a new module file.
+The repository ships runnable files in `modules/assembly/`, `modules/bof/`, `modules/native/`, and `modules/wasm/`. To add your own, copy a compatible `.o`, `.module`, or `.wasm` file anywhere below `modules/`, or a managed `.exe`/`.dll` under `modules/assembly/`, then start or reattach a console. Other `.exe` and `.dll` files under `modules/` are ignored. You may also set `UNDERTOW_MODULES_DIR` to an absolute directory before starting the console. Without that variable, Undertow looks for `modules/` in the current working directory, beside the Undertow executable, then in its parent directory (the usual `bin/undertow.exe` layout). The artifact stays on the **console host**, not on the agent; no agent redeployment is needed for a new module file.
 
 ```text
 undertow> modules
@@ -23,7 +23,7 @@ undertow[TALON]> job output 1
 
 ## Shipped modules
 
-The repository includes **46 compiled modules** with help sidecars. Start or reattach a console from this checkout so it scans `modules/`, type `modules` to confirm what loaded, then `agents` and `use NUMBER` to select the target. The examples below are commands to type **inside the selected-agent console**. Run `help COMMAND` before a command to see its local help; the module file is sent to the agent when you invoke it.
+The repository includes **49 compiled modules** with help sidecars. Start or reattach a console from this checkout so it scans `modules/`, type `modules` to confirm what loaded, then `agents` and `use NUMBER` to select the target. The examples below are commands to type **inside the selected-agent console**. Run `help COMMAND` before a command to see its local help; the module file is sent to the agent when you invoke it.
 
 ### WASM host assessment (Windows or Linux agents)
 
@@ -52,9 +52,19 @@ For `wasm-artifact-discovery`, add an **agent-side** root such as `wasm-artifact
 
 **Long-running Sift scans:** Sift can run for an extended time across large directories, shares, or a domain; its file and host limits are unset by default. Run `module-sift --background local C:\Audit --json` to keep the console available, then use `jobs`, `job output JOB_ID`, and `job stop JOB_ID` to inspect or stop it. Use `help module-sift` or `module-sift --help` for its local, network, and domain scan modes and optional limits. See the [native examples](../modules/native/README.md), [Sift guide](../modules/native/sift/README.md), and [askpass guide](../modules/native/askpass/README.md).
 
+### .NET Framework assemblies (Windows AMD64 agents)
+
+These managed Windows examples are preloaded as `assembly-*` commands. They are standard .NET Framework executables and have not been live-tested in this checkout; inspect their local help before running them. Source links and license notes are recorded in [`modules/assembly/README.md`](../modules/assembly/README.md) and the matching JSON sidecars. The unmanaged `PowerChell.exe` fixture is not packaged because it has no CLR header.
+
+| Console command | What it does | Basic use |
+| --- | --- | --- |
+| `assembly-certify` | GhostPack Certify AD CS enumeration and abuse research tool. | `assembly-certify enum-cas` |
+| `assembly-rubeus` | GhostPack Rubeus Kerberos interaction and auditing tool. | `assembly-rubeus triage` |
+| `assembly-seatbelt` | GhostPack Seatbelt host security enumeration tool. | `assembly-seatbelt -group=system` |
+
 ### BOFs (Windows AMD64 agents)
 
-The 35 packaged BOFs come from the linked open source projects. The console loads each `.x64.o` with a typed argument sidecar. Run `help bof-NAME` for the exact argument types. Commands below run **inside a selected-agent console**; uppercase values are placeholders. Several return credentials or change Kerberos ticket state. The [BOF compatibility guide](bof-compatibility.md) explains inspection and adding your own objects.
+The 35 packaged BOFs come from the linked open source projects. The console loads each `.x64.o` with a typed or free-form argument sidecar. Run `help bof-NAME` for the exact usage. Commands below run **inside a selected-agent console**; uppercase values are placeholders. Several return credentials or change Kerberos ticket state. The [BOF compatibility guide](bof-compatibility.md) explains inspection and adding your own objects.
 
 **[Adrenaline](https://github.com/atomiczsec/Adrenaline)**
 
@@ -72,9 +82,9 @@ Adrenaline credits [NoteThief](https://github.com/trainr3kt/NoteThief) as the ba
 
 | Command | Purpose | Basic use |
 | --- | --- | --- |
-| `bof-cookie-monster-bof` | Collect browser cookie or login files and encryption key material from Chrome, Edge, or Firefox. | `bof-cookie-monster-bof 0 1 0 0 0 0 0 0 0 "" 0 0 0 ""` (Edge) |
+| `bof-cookie-monster-bof` | Collect browser cookie or login files and encryption key material from Chrome, Edge, or Firefox. | `bof-cookie-monster-bof --edge` |
 
-This object reads a **fixed 14-field Beacon argument buffer**, not the friendly switches accepted by the upstream `cookie-monster.cna` wrapper. The sidecar lists the fields in order: eight browser/mode flags, PID, Local State path, three output selection flags, and an optional agent-side copy directory. Use `0` for an unused flag or PID and `""` for an unused path. For Chrome cookies only, use `bof-cookie-monster-bof 1 0 0 0 0 0 0 0 0 "" 0 1 0 ""`; for Firefox, use `bof-cookie-monster-bof 0 0 0 1 0 0 0 0 0 "" 0 0 0 ""`. The empty final path selects the BOF's file callback, so completed files appear through Undertow's file artifact handling. The upstream [source, usage, and license](https://github.com/KingOfTheNOPs/cookie-monster) belong to KingOfTheNOPs; see its README for browser-specific behavior and decryption tooling.
+This patched object accepts the original switches directly: `bof-cookie-monster-bof --edge`, `bof-cookie-monster-bof --chrome --cookie-only`, `bof-cookie-monster-bof --firefox`, or `bof-cookie-monster-bof --system "C:\\Users\\USER\\AppData\\Local\\Google\\Chrome\\User Data\\Local State" 1234`. The PID variants are `--chromeCookiePID PID`, `--chromeLoginDataPID PID`, `--edgeCookiePID PID`, and `--edgeLoginDataPID PID`. `--key-only`, `--cookie-only`, and `--login-data-only` select the output; `--copy-file DIRECTORY` writes retrieved files to that agent-side directory. Without `--copy-file`, completed files use Undertow's file artifact handling. The upstream [source, usage, and GPL-3.0 license](https://github.com/KingOfTheNOPs/cookie-monster) belong to KingOfTheNOPs; its [`decrypt.py`](https://github.com/KingOfTheNOPs/cookie-monster/blob/main/decrypt.py) helper is available for decrypting the collected browser databases. See the upstream README for browser-specific behavior and decryption details.
 
 **[BOFKatz](https://github.com/KrakenEU/BOFKatz)**
 
@@ -165,7 +175,7 @@ For a native module or WASM file, a sidecar may contain `description`, `usage`, 
 
 Native and WASM command arguments are passed as UTF-8 strings through their existing execution paths. Native commands accept `--data FILE`; WASM commands accept `--stdin FILE`. Both accept `--background` before or after command arguments. `--` ends Undertow option parsing for that invocation.
 
-For BOFs, use the existing [BOF manifest](bof-compatibility.md) to describe typed arguments. It supports `name`, `description`, `usage`, `help`, `entrypoint`, and an `arguments` array with `name`, `type`, and `required`. Types are `int`, `short`, `string`, `wstring`, and `binary`. A BOF sidecar is the reliable way to make typed arguments work without an operator typing `--format` each run. Without a sidecar or an explicit format, supplied BOF arguments are encoded as ANSI strings. To assign a format just for the current session, run `load bof FILE ALIAS --format zi` and then invoke `ALIAS` normally.
+For BOFs, use the existing [BOF manifest](bof-compatibility.md) to describe typed arguments or a free-form command that parses its own switches. It supports `name`, `description`, `usage`, `help`, `entrypoint`, and an optional `arguments` array with `name`, `type`, and `required`. Types are `int`, `short`, `string`, `wstring`, and `binary`. A sidecar with an `arguments` array is the reliable way to make typed arguments work without an operator typing `--format` each run. If `arguments` is omitted, supplied values are encoded as ANSI strings so a patched BOF can receive original command-line switches such as `--edge`. To assign a format just for the current session, run `load bof FILE ALIAS --format zi` and then invoke `ALIAS` normally.
 
 Use `load bof FILE [NAME]`, `load module FILE [NAME]`, `load wasm FILE [NAME]`, or `load assembly FILE [NAME]` to register a file during the current console session. Manually loaded commands use the given alias, or the unprefixed filename stem when no alias is given. `unload bof|module|wasm|assembly NAME` removes a command. BOFs still support `run-bof`, native modules `run-native`, WASM modules `run-wasm`, and .NET Framework assemblies `run-assembly` for one-off use.
 

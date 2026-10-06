@@ -42,3 +42,21 @@ func TestBOFConsoleManifestAndInspection(t *testing.T) {
 		t.Fatal("invalid object inspected as valid")
 	}
 }
+
+func TestBOFArgumentsFromFreeFormManifest(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "switch-demo.x64.o")
+	if err := os.WriteFile(path, []byte("object"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path+".json", []byte(`{"entrypoint":"go"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := bofArguments(path, "", "", []string{"--edge"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, _ := bof.EncodeArguments("z", []string{"--edge"}, bof.ReadBinaryFile)
+	if !bytes.Equal(got, want) {
+		t.Fatalf("packet=%x want=%x", got, want)
+	}
+}

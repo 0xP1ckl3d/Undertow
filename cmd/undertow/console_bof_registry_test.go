@@ -198,6 +198,32 @@ func TestLoadedBOFManifestAndArguments(t *testing.T) {
 	}
 }
 
+func TestLoadedBOFManifestWithFreeFormArguments(t *testing.T) {
+	path := copyBOFFixture(t, "hello")
+	manifest := `{"name":"switch-demo","description":"A BOF that parses its own switches","usage":"switch-demo [--edge | --chrome]","help":"Pass the original command-line switches.","entrypoint":"go"}`
+	if err := os.WriteFile(path+".json", []byte(manifest), 0600); err != nil {
+		t.Fatal(err)
+	}
+	entry, err := newLoadedBOFRegistry().load(path, "switch-demo", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.SchemaKnown || entry.Format != "" {
+		t.Fatalf("free-form manifest became typed: %+v", entry)
+	}
+	packet, err := entry.encode([]string{"--edge"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, _ := bof.EncodeArguments("z", []string{"--edge"}, bof.ReadBinaryFile)
+	if !bytes.Equal(packet, want) {
+		t.Fatalf("free-form packet=%x want=%x", packet, want)
+	}
+	if entry.usage() != "switch-demo [--edge | --chrome] [--background]" {
+		t.Fatalf("free-form usage=%q", entry.usage())
+	}
+}
+
 func TestLoadedBOFRejectsUnsupportedObject(t *testing.T) {
 	path := copyBOFFixture(t, "hello")
 	object, err := os.ReadFile(path)

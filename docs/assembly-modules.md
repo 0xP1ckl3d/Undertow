@@ -27,7 +27,7 @@ undertow[AGENT]> tool --background audit
 
 At the main menu, use `run-assembly AGENT_ID FILE [ARGS]`. `load assembly FILE [NAME]` registers bytes locally for the current console session and transfers them only when invoked. `unload assembly NAME` removes the registration. The GUI Modules page can import an `.exe` or `.dll` as a `.NET Framework` module and run it foreground or background.
 
-Put packaged assemblies below `modules/assembly/` on the **console host** and restart or reattach the console to preload them. `modules/assembly/audit.exe` becomes `assembly-audit`. No assembly files ship in this initial change. An optional `audit.exe.json` or `audit.json` sidecar can set `description`, `usage`, and `help`. Aliases use lowercase letters, digits, and hyphens and cannot shadow built-in commands. See [Local module bank](module-bank.md).
+Put packaged assemblies below `modules/assembly/` on the **console host** and restart or reattach the console to preload them. `modules/assembly/audit.exe` becomes `assembly-audit`. The repository includes untested managed reference examples from [GhostPack/Certify](https://github.com/GhostPack/Certify), [GhostPack/Rubeus](https://github.com/GhostPack/Rubeus), and [GhostPack/Seatbelt](https://github.com/GhostPack/Seatbelt); see `modules/assembly/README.md` and each sidecar for attribution and license notes. `PowerChell.exe` is intentionally not packaged here because it is an unmanaged C++ host without a CLR header. An optional `audit.exe.json` or `audit.json` sidecar can set `name`, `description`, `usage`, `help`, and `source`. Aliases use lowercase letters, digits, and hyphens and cannot shadow built-in commands. See [Local module bank](module-bank.md).
 
 ## Build example
 

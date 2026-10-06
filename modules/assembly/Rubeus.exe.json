@@ -1,0 +1,7 @@
+{
+  "name": "assembly-rubeus",
+  "description": "GhostPack Rubeus: Kerberos interaction and auditing tool.",
+  "usage": "assembly-rubeus [COMMAND] [OPTIONS]",
+  "help": "Source: https://github.com/GhostPack/Rubeus\nLicense: 3-clause BSD.\nUse the upstream README for commands and options. This packaged executable has not been live-tested in Undertow.",
+  "source": "https://github.com/GhostPack/Rubeus"
+}

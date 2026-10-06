@@ -1,0 +1,7 @@
+{
+  "name": "assembly-certify",
+  "description": "GhostPack Certify: Active Directory Certificate Services enumeration and abuse research tool.",
+  "usage": "assembly-certify [COMMAND] [OPTIONS]",
+  "help": "Source: https://github.com/GhostPack/Certify\nLicense: 3-clause BSD.\nUse the upstream command reference for commands such as enum-cas, enum-templates, find and request. This packaged executable has not been live-tested in Undertow.",
+  "source": "https://github.com/GhostPack/Certify"
+}
