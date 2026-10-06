@@ -30,6 +30,19 @@ type remoteResponse struct {
 	Body   []byte `json:"body"`
 }
 
+// IsForegroundRequest identifies operations that may wait through a check-in.
+// Their request deadline must cover sleeping time; it does not create a Job.
+func IsForegroundRequest(method, path string) bool {
+	path = strings.SplitN(path, "?", 2)[0]
+	if method == http.MethodPost && strings.HasPrefix(path, "/v1/agents/") {
+		return strings.HasSuffix(path, "/exec") || strings.HasSuffix(path, "/screenshots") || strings.HasSuffix(path, "/shutdown")
+	}
+	if method == http.MethodPost && strings.HasPrefix(path, "/v1/sessions/") {
+		return strings.HasSuffix(path, "/kill")
+	}
+	return method == http.MethodGet && strings.HasPrefix(path, "/v1/agents/") && strings.HasSuffix(path, "/screens")
+}
+
 func truncateClaim(value string, max int) string {
 	value = strings.TrimSpace(value)
 	if len(value) > max {
@@ -44,15 +57,24 @@ func (m *Manager) ServeRemote(ctx context.Context, token string, clientID uint64
 	if err := stream.AcceptOpen(ctx); err != nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(ctx, 50*time.Second)
-	defer cancel()
-	done := make(chan struct{})
-	defer close(done)
+	readCtx, cancelRead := context.WithTimeout(ctx, 50*time.Second)
+	readDone := make(chan struct{})
 	go func() {
 		select {
-		case <-ctx.Done():
-			_ = stream.Close()
-		case <-done:
+		case <-readCtx.Done():
+			select {
+			case <-readDone:
+			default:
+				_ = stream.Close()
+			}
+		case <-readDone:
+		}
+	}()
+	defer cancelRead()
+	readComplete := false
+	defer func() {
+		if !readComplete {
+			close(readDone)
 		}
 	}()
 	var request remoteRequest
@@ -66,10 +88,27 @@ func (m *Manager) ServeRemote(ctx context.Context, token string, clientID uint64
 	if _, err := io.CopyN(io.Discard, stream, 6<<20); err != io.EOF {
 		return
 	}
+	close(readDone)
+	readComplete = true
+	cancelRead()
 	if !strings.HasPrefix(request.Path, "/v1/") || len(request.Path) > 8192 || request.Method != http.MethodGet && request.Method != http.MethodPost && request.Method != http.MethodPut && request.Method != http.MethodDelete {
 		writeRemoteResponse(stream, remoteResponse{Status: http.StatusBadRequest, Body: []byte("invalid API request")})
 		return
 	}
+	operationTimeout := 50 * time.Second
+	if IsForegroundRequest(request.Method, request.Path) {
+		operationTimeout = 40 * time.Hour
+	}
+	operationCtx, cancelOperation := context.WithTimeout(ctx, operationTimeout)
+	defer cancelOperation()
+	go func() {
+		select {
+		case <-stream.Done():
+			cancelOperation()
+		case <-operationCtx.Done():
+			_ = stream.Close()
+		}
+	}()
 	m.mu.RLock()
 	client := m.clients[clientID]
 	clientKey := ""
@@ -93,7 +132,7 @@ func (m *Manager) ServeRemote(ctx context.Context, token string, clientID uint64
 	action.ActionID = truncateClaim(action.ActionID, 128)
 	action.OperatorID = operator.ID
 	action.DisplayName = operator.DisplayName
-	requestContext := context.WithValue(context.WithValue(ctx, jobOwnerKey{}, clientID), actionContextKey{}, action)
+	requestContext := context.WithValue(context.WithValue(operationCtx, jobOwnerKey{}, clientID), actionContextKey{}, action)
 	httpRequest, err := http.NewRequestWithContext(requestContext, request.Method, "http://localhost"+request.Path, bytes.NewReader(request.Body))
 	if err != nil {
 		writeRemoteResponse(stream, remoteResponse{Status: http.StatusBadRequest, Body: []byte("invalid API request")})
@@ -289,7 +328,7 @@ func clientRequestAllowed(request *http.Request, clientID uint64) bool {
 	if request.Method == http.MethodDelete && path == clientPrefix+"/forwards" {
 		return request.URL.Query().Get("agent_id") != "" && request.URL.Query().Get("bind") != ""
 	}
-	if request.Method != http.MethodPost || request.URL.RawQuery != "" {
+	if request.Method != http.MethodPost || request.URL.RawQuery != "" && !(strings.HasSuffix(path, "/exec") && request.URL.RawQuery == "foreground=1") {
 		return false
 	}
 	if path == clientPrefix+"/internal" || path == clientPrefix+"/vpn" || path == clientPrefix+"/routes" || path == clientPrefix+"/forwards" {
@@ -345,7 +384,11 @@ func CallRemote(ctx context.Context, session *mux.Mux, method, path string, body
 		}
 		raw = encoded
 	}
-	ctx, cancel := context.WithTimeout(ctx, 50*time.Second)
+	timeout := 50 * time.Second
+	if IsForegroundRequest(method, path) {
+		timeout = 40 * time.Hour
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	stream, err := session.Open(ctx, pivot.ControlDestination)
 	if err != nil {

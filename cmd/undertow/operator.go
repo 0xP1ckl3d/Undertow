@@ -157,7 +157,11 @@ func callControl(o operatorOptions, method, path string, body any) ([]byte, erro
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	client := &http.Client{Timeout: 10 * time.Second}
+	timeout := 10 * time.Second
+	if control.IsForegroundRequest(method, path) {
+		timeout = 40 * time.Hour
+	}
+	client := &http.Client{Timeout: timeout}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err

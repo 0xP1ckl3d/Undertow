@@ -1,6 +1,6 @@
 import {useEffect, useState} from 'react';
 import {Cable, Power, Radio, RefreshCw, ShieldAlert} from 'lucide-react';
-import {api, type Agent, type Job} from './api';
+import {api, type Agent} from './api';
 
 type Forward={agent_id:string;bind:string;target:string;state?:string};
 type Listener={transport:string;listen:string;network:string;tls_mode?:string;sessions:number;agents:number;clients:number};
@@ -12,16 +12,15 @@ export function AgentLifecycle({agent,onRefresh}:{agent:Agent;onRefresh:()=>Prom
   useEffect(()=>{setPending(null);setError('');setNotice('')},[agent.id]);
   const perform=async()=>{if(!pending)return;setBusy(true);setError('');try{
     const action=pending;
-    const result=action==='shutdown'
-      ?await api<Job|undefined>(`/agents/${encodeURIComponent(agent.id)}/shutdown`,'POST',{})
-      :await api<Job|undefined>(`/agents/${encodeURIComponent(agent.id)}/session/kill`,'POST',{});
-    setNotice(result?.id?`${action==='shutdown'?'Shutdown':'Session kill'} queued as job ${result.id} for the next check-in.`:`${action==='shutdown'?'Shutdown':'Session kill'} request completed.`);
+    if(action==='shutdown')await api(`/agents/${encodeURIComponent(agent.id)}/shutdown`,'POST',{});
+    else await api(`/agents/${encodeURIComponent(agent.id)}/session/kill`,'POST',{});
+    setNotice(`${action==='shutdown'?'Shutdown':'Session kill'} request completed.`);
     setPending(null);await onRefresh();
   }catch(e){setError(String(e))}finally{setBusy(false)}};
-  return <section className="control-card wide"><div className="control-heading"><Power size={17}/><div><h3>Agent lifecycle</h3><p>Requests for a sleeping agent are saved for its next check-in.</p></div></div>
+  return <section className="control-card wide"><div className="control-heading"><Power size={17}/><div><h3>Agent lifecycle</h3><p>A request to a sleeping agent waits for its next check-in.</p></div></div>
     <div className="control-actions"><button disabled={!agent.session_id||busy} onClick={()=>setPending('kill')}>Kill current session</button><button className="danger" disabled={busy} onClick={()=>setPending('shutdown')}>Shut down agent</button></div>
     {pending&&<div className="control-confirm" role="alertdialog" aria-label="Confirm agent lifecycle action"><ShieldAlert size={18}/><div><strong>{pending==='kill'?`Close session ${agent.session_id}?`:`Shut down ${label(agent)}?`}</strong><p>{pending==='kill'?'The connection will close. The agent may reconnect using its existing configuration.':'The packaged agent will exit and cannot reconnect until started again.'}</p></div><button className="danger" disabled={busy} onClick={perform}>{busy?'Working…':'Confirm'}</button><button disabled={busy} onClick={()=>setPending(null)}>Cancel</button></div>}
-    {notice&&<p className="control-note" role="status">{notice}</p>}{error&&<p className="control-error" role="alert">{error}</p>}
+    {busy&&<p className="control-note" role="status">Waiting for the agent to acknowledge this request.</p>}{notice&&<p className="control-note" role="status">{notice}</p>}{error&&<p className="control-error" role="alert">{error}</p>}
   </section>
 }
 

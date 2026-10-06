@@ -42,11 +42,18 @@ type ScreenshotInfo struct {
 }
 
 func (m *Manager) screensHandler(w http.ResponseWriter, r *http.Request) {
-	agent := m.Get(r.PathValue("id"))
-	if agent == nil {
-		http.Error(w, "agent is not connected", http.StatusNotFound)
+	releaseTurn, err := m.foregroundTurn(r.Context(), r.PathValue("id"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusRequestTimeout)
 		return
 	}
+	defer releaseTurn()
+	agent, release, err := m.holdAgentForOperator(r.Context(), r.PathValue("id"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	defer release()
 	// Older agents already report a JSON screen list through this typed host
 	// operation. The browser receives only the validated server contract.
 	result, err := pivot.ExecuteRequest(r.Context(), agent, pivot.ExecRequest{Builtin: "screens"})
@@ -81,14 +88,12 @@ func (m *Manager) captureScreenshotHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	agentID := r.PathValue("id")
-	if job, queued, err := m.queueJobIfSleeping(jobOwner(r.Context()), agentID, queuedJobRequest{Kind: "screenshot", Screen: request.Screen, Actor: boundActionFromContext(r.Context())}); queued {
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		jsonReply(w, http.StatusAccepted, job)
+	releaseTurn, err := m.foregroundTurn(r.Context(), agentID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusRequestTimeout)
 		return
 	}
+	defer releaseTurn()
 	entry, err := m.captureScreenshot(r.Context(), agentID, request.Screen, boundActionFromContext(r.Context()))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
@@ -98,10 +103,11 @@ func (m *Manager) captureScreenshotHandler(w http.ResponseWriter, r *http.Reques
 }
 
 func (m *Manager) captureScreenshot(ctx context.Context, agentID string, screen int, actor actionContext) (ScreenshotInfo, error) {
-	agent := m.Get(agentID)
-	if agent == nil {
-		return ScreenshotInfo{}, errors.New("agent is not connected")
+	agent, release, err := m.holdAgentForOperator(ctx, agentID)
+	if err != nil {
+		return ScreenshotInfo{}, err
 	}
+	defer release()
 	m.mu.RLock()
 	store := m.operations
 	m.mu.RUnlock()

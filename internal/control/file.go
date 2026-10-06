@@ -26,7 +26,22 @@ func (m *Manager) ServeFileRelay(ctx context.Context, client *mux.Stream) {
 		relayFileError(client, reader, err)
 		return
 	}
-	upstream, err := m.openAgentForOperator(ctx, client.Done(), request.AgentID, pivot.FileDestination)
+	requestCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go func() {
+		select {
+		case <-client.Done():
+			cancel()
+		case <-requestCtx.Done():
+		}
+	}()
+	releaseTurn, err := m.foregroundTurn(requestCtx, request.AgentID)
+	if err != nil {
+		relayFileError(client, reader, err)
+		return
+	}
+	defer releaseTurn()
+	upstream, err := m.openAgentForOperator(requestCtx, client.Done(), request.AgentID, pivot.FileDestination)
 	if err != nil {
 		relayFileError(client, reader, err)
 		return

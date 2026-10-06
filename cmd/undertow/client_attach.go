@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"undertow/internal/control"
 	"undertow/internal/pivot"
 )
 
@@ -277,6 +278,8 @@ func callClientConsole(path string, request consoleRPCRequest) (consoleRPCRespon
 	deadline := 30 * time.Second
 	if request.Action == "transfer" {
 		deadline = 30 * time.Minute
+	} else if request.Action == "call" && control.IsForegroundRequest(request.Method, request.Path) {
+		deadline = 40 * time.Hour
 	} else if request.Action == "call" && request.Method == "GET" {
 		deadline = 5 * time.Second
 	}

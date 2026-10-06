@@ -181,6 +181,24 @@ func (m *Manager) ServeInteractiveRelayForClient(ctx context.Context, clientID u
 		pivot.RejectInteractive(client, errors.New("unknown task kind"))
 		return
 	}
+	if request.Kind != "" {
+		turnCtx, cancelTurn := context.WithCancel(ctx)
+		defer cancelTurn()
+		go func() {
+			select {
+			case <-client.Done():
+				cancelTurn()
+			case <-turnCtx.Done():
+			}
+		}()
+		release, turnErr := m.foregroundTurn(turnCtx, request.AgentID)
+		if turnErr != nil {
+			finishAudit(http.StatusRequestTimeout)
+			pivot.RejectInteractive(client, turnErr)
+			return
+		}
+		defer release()
+	}
 	upstream, err := m.openAgentForOperator(ctx, client.Done(), request.AgentID, destination)
 	if err != nil {
 		finishAudit(http.StatusBadGateway)
@@ -280,6 +298,14 @@ func (m *Manager) interactiveHandler(w http.ResponseWriter, r *http.Request) {
 		destination = pivot.AssemblyDestination
 	} else if r.URL.Path == "/v1/agents/"+r.PathValue("id")+"/bof" {
 		destination = pivot.BOFDestination
+	}
+	if destination != pivot.InteractiveDestination {
+		release, turnErr := m.foregroundTurn(r.Context(), r.PathValue("id"))
+		if turnErr != nil {
+			http.Error(w, turnErr.Error(), http.StatusRequestTimeout)
+			return
+		}
+		defer release()
 	}
 	upstream, err := m.openAgentForOperator(r.Context(), r.Context().Done(), r.PathValue("id"), destination)
 	if err != nil {

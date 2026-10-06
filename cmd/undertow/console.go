@@ -24,6 +24,15 @@ import (
 )
 
 type consoleCaller func(context.Context, string, string, any) ([]byte, error)
+
+func isConsoleHostCommand(command string) bool {
+	switch command {
+	case "pwd", "ls", "stat", "mkdir", "rm", "whoami", "ps", "privileges", "env", "interfaces", "dns", "route-table":
+		return true
+	}
+	return false
+}
+
 type clientRouteAction func(context.Context, []string, io.Writer) error
 type clientTransferAction func(context.Context, clientFileRequest, func(pivot.TransferProgress)) (pivot.FileMessage, error)
 type consoleFeatures struct {
@@ -107,6 +116,19 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 	}
 	var jobSelection consoleJobSelection
 	known := make(map[string]control.AgentInfo)
+	type foregroundResult struct {
+		agentID string
+		order   int
+		command string
+		text    string
+		err     error
+	}
+	foregroundResults := make(chan foregroundResult, 128)
+	foregroundIssued := make(map[string]int)
+	foregroundPrinted := make(map[string]int)
+	foregroundReady := make(map[string]map[int]foregroundResult)
+	pendingForeground := 0
+	inputClosed := false
 	type agentRefresh struct {
 		agents  []control.AgentInfo
 		err     error
@@ -235,7 +257,41 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 		select {
 		case <-ctx.Done():
 			return nil
+		case result := <-foregroundResults:
+			if foregroundReady[result.agentID] == nil {
+				foregroundReady[result.agentID] = make(map[int]foregroundResult)
+			}
+			foregroundReady[result.agentID][result.order] = result
+			for {
+				next := foregroundPrinted[result.agentID] + 1
+				ready, ok := foregroundReady[result.agentID][next]
+				if !ok {
+					break
+				}
+				delete(foregroundReady[result.agentID], next)
+				foregroundPrinted[result.agentID] = next
+				pendingForeground--
+				message := fmt.Sprintf("[%s completed]\n%s", ready.command, ready.text)
+				if ready.err != nil {
+					message += "error: " + ready.err.Error() + "\n"
+				}
+				if editor != nil {
+					editor.printAsync(message)
+				} else {
+					fmt.Fprint(output, "\n", message)
+					promptShown = false
+				}
+			}
+			if inputClosed && pendingForeground == 0 {
+				return nil
+			}
+			continue
 		case err := <-scanDone:
+			if editor == nil && pendingForeground > 0 {
+				inputClosed = true
+				scanDone = nil
+				continue
+			}
 			if editor != nil && errors.Is(err, io.EOF) {
 				if vpnClient {
 					fmt.Fprintln(output, "\nConsole detached. VPN continues; reconnect with 'undertow client attach'.")
@@ -469,6 +525,35 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 		ownClientID := uint64(0)
 		if clientID != nil {
 			ownClientID = clientID()
+		}
+		// Check-in agents accept multiple one-shot foreground commands before
+		// their next callback. Results return to this console, never to Jobs.
+		if args[0] == "exec" || isConsoleHostCommand(args[0]) {
+			target := ""
+			if len(args) > 1 {
+				target = args[1]
+			}
+			if agent, ok := known[target]; ok && agent.ConnectionMode == "checkin" && agent.ConnectionState != "disconnected" {
+				queuedArgs := append([]string(nil), args...)
+				queuedLine := line
+				foregroundIssued[target]++
+				order := foregroundIssued[target]
+				pendingForeground++
+				if editor != nil {
+					editor.notice("Waiting for next check-in: " + queuedLine)
+				} else {
+					fmt.Fprintf(output, "Waiting for next check-in: %s\n", queuedLine)
+				}
+				go func() {
+					var result bytes.Buffer
+					err := runConsoleCommand(ctx, &result, call, vpnClient, ownClientID, clientRoutes, queuedArgs)
+					select {
+					case foregroundResults <- foregroundResult{agentID: target, order: order, command: queuedLine, text: result.String(), err: err}:
+					case <-ctx.Done():
+					}
+				}()
+				continue
+			}
 		}
 		if args[0] == "screens" || args[0] == "screenshot" {
 			if len(args) < 2 || args[1] == "" {
@@ -749,8 +834,7 @@ func runConsoleCommand(ctx context.Context, output io.Writer, call consoleCaller
 			return err
 		}
 		if id := queuedLifecycleID(data); id != "" {
-			fmt.Fprintf(output, "Session kill for %s queued for its next check-in as job %s.\n", consoleAgentName(a), id)
-			return nil
+			return errors.New("server returned a background job for a foreground session kill; update the server")
 		}
 		fmt.Fprintf(output, "Session for %s closed; the agent may reconnect.\n", consoleAgentName(a))
 		return nil
@@ -940,8 +1024,7 @@ Quote arguments containing spaces. Commands run only when submitted.
 			return err
 		}
 		if result.QueuedJobID != "" {
-			fmt.Fprintf(output, "Command queued for next check-in as job %s. Use job show/output to inspect it.\n", result.QueuedJobID)
-			return nil
+			return errors.New("server returned a background job for a foreground command; update the server")
 		}
 		fmt.Fprint(output, result.Stdout)
 		fmt.Fprint(output, result.Stderr)
@@ -963,8 +1046,7 @@ Quote arguments containing spaces. Commands run only when submitted.
 			return err
 		}
 		if result.QueuedJobID != "" {
-			fmt.Fprintf(output, "Host command queued for next check-in as job %s. Use job show/output to inspect it.\n", result.QueuedJobID)
-			return nil
+			return errors.New("server returned a background job for a foreground command; update the server")
 		}
 		fmt.Fprint(output, result.Stdout)
 		fmt.Fprint(output, result.Stderr)

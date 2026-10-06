@@ -698,6 +698,54 @@ func TestConsoleSelectedAgentBuiltin(t *testing.T) {
 	}
 }
 
+func TestCheckInConsoleAcceptsMultipleForegroundCommands(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	started := make(chan string, 2)
+	release := make(chan struct{})
+	caller := func(ctx context.Context, method, path string, body any) ([]byte, error) {
+		if method == http.MethodGet && path == "/v1/status" {
+			return json.Marshal(map[string]any{"agents": []control.AgentInfo{{ID: "sleeping-agent", Hostname: "checkin-host", ConnectionMode: "checkin", ConnectionState: "sleeping"}}})
+		}
+		if method != http.MethodPost || path != "/v1/agents/sleeping-agent/exec" {
+			return nil, fmt.Errorf("unexpected %s %s", method, path)
+		}
+		request := body.(pivot.ExecRequest)
+		started <- request.Builtin
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		return json.Marshal(pivot.ExecResult{Stdout: request.Builtin + " complete\n"})
+	}
+	var output bytes.Buffer
+	finished := make(chan error, 1)
+	go func() {
+		finished <- runConsole(ctx, strings.NewReader("use 1\nls\npwd\n"), &output, caller, nil, nil, nil, nil)
+	}()
+	for i := 0; i < 2; i++ {
+		select {
+		case <-started:
+		case <-ctx.Done():
+			t.Fatal("console blocked entry of a second command during sleep")
+		}
+	}
+	close(release)
+	select {
+	case err := <-finished:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal("pending console commands did not complete")
+	}
+	text := output.String()
+	if !strings.Contains(text, "[ls completed]\nls complete") || !strings.Contains(text, "[pwd completed]\npwd complete") || strings.Index(text, "[ls completed]") > strings.Index(text, "[pwd completed]") {
+		t.Fatalf("console results were not returned in submission order: %s", text)
+	}
+}
+
 func TestConsoleSelectedAgentForward(t *testing.T) {
 	var request map[string]string
 	caller := func(_ context.Context, method, path string, body any) ([]byte, error) {

@@ -26,7 +26,7 @@ func fetchScreens(ctx context.Context, call consoleCaller, agentID string) ([]pi
 		return nil, err
 	}
 	if result.QueuedJobID != "" {
-		return nil, fmt.Errorf("screen list queued for next check-in as job %s; inspect it in Jobs", result.QueuedJobID)
+		return nil, errors.New("server returned a background job for a foreground screen list; update the server")
 	}
 	if result.Error != "" {
 		return nil, errors.New(result.Error)
@@ -43,10 +43,6 @@ func fetchScreens(ctx context.Context, call consoleCaller, agentID string) ([]pi
 func runConsoleScreens(ctx context.Context, output io.Writer, call consoleCaller, agentID string) error {
 	screens, err := fetchScreens(ctx, call, agentID)
 	if err != nil {
-		if strings.HasPrefix(err.Error(), "screen list queued for next check-in") {
-			fmt.Fprintln(output, err.Error())
-			return nil
-		}
 		return err
 	}
 	fmt.Fprintf(output, "Screens (%d):\n", len(screens))

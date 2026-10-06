@@ -121,8 +121,7 @@ func runConsoleAgentDistribution(ctx context.Context, out io.Writer, call consol
 			return err
 		}
 		if id := queuedLifecycleID(data); id != "" {
-			fmt.Fprintf(out, "Shutdown queued for %s at next check-in as job %s.\n", consoleAgentName(a), id)
-			return nil
+			return errors.New("server returned a background job for a foreground shutdown; update the server")
 		}
 		fmt.Fprintf(out, "Shutdown acknowledged by %s (agent ID %s).\n", consoleAgentName(a), a.ID)
 		return nil

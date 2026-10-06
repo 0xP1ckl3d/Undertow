@@ -89,6 +89,18 @@ func ExecuteRequest(ctx context.Context, agent *mux.Mux, request ExecRequest) (E
 	if err != nil {
 		return ExecResult{}, err
 	}
+	return ExecuteRequestOnStream(ctx, stream, request)
+}
+
+// ExecuteRequestOnStream runs an already opened foreground agent stream.
+// The caller may wait for a sleeping agent before opening it.
+func ExecuteRequestOnStream(ctx context.Context, stream *mux.Stream, request ExecRequest) (ExecResult, error) {
+	if err := validateExecRequest(request); err != nil {
+		_ = stream.Close()
+		return ExecResult{}, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 40*time.Second)
+	defer cancel()
 	defer stream.Close()
 	done := make(chan struct{})
 	defer close(done)

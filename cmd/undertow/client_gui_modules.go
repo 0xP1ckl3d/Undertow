@@ -322,12 +322,13 @@ func (g *guiServer) runModule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := control.WithActionClaims(r.Context(), claims)
+	_ = g.store.AppendConsoleEntry(r.PathValue("id"), "modules", "command", "module "+r.PathValue("name")+map[bool]string{true: " (background)", false: " (foreground)"}[request.Background])
 	job, session, err := g.startModule(ctx, r.PathValue("id"), r.PathValue("name"), args, request.Input, request.Background)
 	if err != nil {
+		_ = g.store.AppendConsoleEntry(r.PathValue("id"), "modules", "error", err.Error())
 		guiJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
 		return
 	}
-	_ = g.store.AppendConsoleEntry(r.PathValue("id"), "modules", "command", "module "+r.PathValue("name")+map[bool]string{true: " (background)", false: " (foreground)"}[request.Background])
 	if session == nil {
 		verb := "Started"
 		if job.State == "queued" {
@@ -384,9 +385,9 @@ func (g *guiServer) startModule(ctx context.Context, agentID, name string, args 
 	if agent.ID == "" {
 		return control.JobInfo{}, nil, fmt.Errorf("agent %s is not connected", agentID)
 	}
-	// Check-in agents always submit a retained server job. A foreground stream
-	// cannot safely outlive an HTTP request while the agent is sleeping.
-	deferAsJob := background || agent.ConnectionState == "sleeping" || agent.SleepSupported && agent.Sleep.IntervalSeconds > 0
+	// Only an explicit background run creates a server Job. Foreground module
+	// streams wait for the next check-in through the existing interactive relay.
+	deferAsJob := background
 	capability := "native"
 	if artifact != nil && artifact.Kind == "wasm" {
 		capability = "wasm"

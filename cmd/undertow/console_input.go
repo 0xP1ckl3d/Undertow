@@ -73,6 +73,17 @@ func (e *consoleEditor) notice(message string) {
 	e.redraw()
 }
 
+func (e *consoleEditor) printAsync(message string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.clearPrompt()
+	fmt.Fprint(e.output, message)
+	if message == "" || message[len(message)-1] != '\n' {
+		fmt.Fprint(e.output, "\r\n")
+	}
+	e.redraw()
+}
+
 func (e *consoleEditor) clearPrompt() {
 	if !e.drawn {
 		return

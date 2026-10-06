@@ -244,7 +244,7 @@ func (g *guiServer) runAgentGUICommand(ctx context.Context, agentID, line string
 			return guiCommandResult{}, err
 		}
 		if response.QueuedJobID != "" {
-			return guiCommandResult{Output: "Screen enumeration queued for the next check-in. Job " + response.QueuedJobID + " retains its result.\n"}, nil
+			return guiCommandResult{}, errors.New("server returned a background job for a foreground screen list; update the server")
 		}
 		if response.Error != "" {
 			return guiCommandResult{}, errors.New(response.Error)
@@ -280,7 +280,7 @@ func (g *guiServer) runAgentGUICommand(ctx context.Context, agentID, line string
 				return guiCommandResult{}, err
 			}
 			if response.QueuedJobID != "" {
-				return guiCommandResult{Output: "Screen enumeration queued as job " + response.QueuedJobID + ". Run screenshot NUMBER after the result is available.\n"}, nil
+				return guiCommandResult{}, errors.New("server returned a background job for a foreground screen list; update the server")
 			}
 			if response.Error != "" {
 				return guiCommandResult{}, errors.New(response.Error)
@@ -312,8 +312,7 @@ func (g *guiServer) runAgentGUICommand(ctx context.Context, agentID, line string
 				return guiCommandResult{Output: out.String()}, err
 			}
 			if item.State == "queued" || item.State == "dispatching" {
-				fmt.Fprintf(&out, "Screen %d capture queued for the next check-in as job %s.\n", number, item.ID)
-				continue
+				return guiCommandResult{Output: out.String()}, errors.New("server returned a background job for a foreground screenshot; update the server")
 			}
 			fmt.Fprintf(&out, "Screen %d captured to server history: %s (%d bytes, SHA-256 %s)\n", number, item.ID, item.Size, item.SHA256)
 		}
@@ -328,7 +327,7 @@ func (g *guiServer) runAgentGUICommand(ctx context.Context, agentID, line string
 			return guiCommandResult{}, err
 		}
 		if result.QueuedJobID != "" {
-			return guiCommandResult{Output: "Command queued for next check-in as job " + result.QueuedJobID + ". Output will appear in Jobs.\n"}, nil
+			return guiCommandResult{}, errors.New("server returned a background job for a foreground command; update the server")
 		}
 		if result.Error != "" {
 			return guiCommandResult{Output: result.Stdout + result.Stderr}, errors.New(result.Error)
@@ -377,7 +376,7 @@ func (g *guiServer) runAgentGUICommand(ctx context.Context, agentID, line string
 			return guiCommandResult{}, err
 		}
 		if result.QueuedJobID != "" {
-			return guiCommandResult{Output: "Command queued for next check-in as job " + result.QueuedJobID + ". Output will appear in Jobs.\n"}, nil
+			return guiCommandResult{}, errors.New("server returned a background job for a foreground command; update the server")
 		}
 		output := result.Stdout + result.Stderr
 		if result.Error != "" {
