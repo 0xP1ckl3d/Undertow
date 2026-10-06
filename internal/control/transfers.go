@@ -1,6 +1,7 @@
 package control
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
@@ -8,9 +9,13 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"undertow/internal/mux"
+	"undertow/internal/pivot"
 )
 
 // TransferRecord is server-owned metadata. The file bytes continue to use the
@@ -31,6 +36,56 @@ type TransferRecord struct {
 	Error           string    `json:"error,omitempty"`
 	Started         time.Time `json:"started"`
 	Ended           time.Time `json:"ended,omitempty"`
+}
+
+// StreamDeploymentArtifact reuses the authenticated file stream and durable
+// Transfers history for a server-owned deployment upload. The remote path may
+// be a Windows administrative share resolved by the source agent.
+func (m *Manager) StreamDeploymentArtifact(ctx context.Context, agentID string, source *mux.Mux, localPath, remotePath string) (pivot.FileMessage, TransferRecord, error) {
+	var empty pivot.FileMessage
+	if source == nil {
+		return empty, TransferRecord{}, errors.New("source agent is disconnected")
+	}
+	info, err := os.Stat(localPath)
+	if err != nil || !info.Mode().IsRegular() {
+		return empty, TransferRecord{}, errors.New("deployment artifact is unavailable")
+	}
+	m.mu.RLock()
+	store := m.operations
+	m.mu.RUnlock()
+	if store == nil {
+		return empty, TransferRecord{}, errors.New("transfer history unavailable")
+	}
+	var random [16]byte
+	if _, err := rand.Read(random[:]); err != nil {
+		return empty, TransferRecord{}, err
+	}
+	actor := boundActionFromContext(ctx)
+	record := TransferRecord{ID: hex.EncodeToString(random[:]), AgentID: agentID, ClientID: actor.ClientID, ClientSessionID: actor.ClientSessionID, OperatorID: actor.OperatorID, DisplayName: actor.DisplayName, Operation: "upload", RemotePath: remotePath, State: "running", Total: info.Size(), Started: time.Now().UTC()}
+	if err := store.saveTransfer(record); err != nil {
+		return empty, TransferRecord{}, err
+	}
+	m.PublishEvent("transfer.changed", record.ID)
+	result, transferErr := pivot.TransferFileProgress(ctx, source, agentID, "upload", localPath, remotePath, func(progress pivot.TransferProgress) {
+		record.Bytes = progress.Bytes
+		if store.saveTransfer(record) == nil {
+			m.PublishEvent("transfer.changed", record.ID)
+		}
+	})
+	record.Ended = time.Now().UTC()
+	if transferErr != nil {
+		record.State, record.Error = "failed", transferErr.Error()
+		if len(record.Error) > 512 {
+			record.Error = record.Error[:512]
+		}
+	} else {
+		record.State, record.Bytes, record.SHA256 = "completed", result.Size, result.SHA256
+	}
+	if err := store.saveTransfer(record); err != nil {
+		return result, record, err
+	}
+	m.PublishEvent("transfer.changed", record.ID)
+	return result, record, transferErr
 }
 
 func (s *OperationsStore) saveTransfer(record TransferRecord) error {

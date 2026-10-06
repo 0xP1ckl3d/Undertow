@@ -40,9 +40,16 @@ func main() {
 	cfg := embedded.Config
 	cfg.Metadata = embedded.Identity()
 	cfg.Packaged = true
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	if err := agent.Run(ctx, cfg, nil); err != nil {
+	if err := runConfiguredAgent(cfg); err != nil {
 		os.Exit(1)
 	}
+}
+
+func runConfiguredAgent(cfg agent.Config) error {
+	if handled, err := runWindowsService(cfg); handled {
+		return err
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return agent.Run(ctx, cfg, nil)
 }

@@ -38,6 +38,7 @@ func (g *guiServer) agentGUIHelp() string {
 	section("HOST", [][2]string{{"pwd; ls [PATH]; stat PATH", "Browse this agent's files"}, {"mkdir PATH; rm PATH", "Create or remove a path"}, {"whoami; ps; privileges", "Identity, processes and privileges"}, {"env [NAME]", "Environment variables"}, {"interfaces; dns; route-table", "Network configuration"}, {"screens; screenshot [NUMBER]", "List screens or capture explicitly"}})
 	section("FILES AND SERVICES", [][2]string{{"upload LOCAL REMOTE", "Send a client file to this agent"}, {"download REMOTE [LOCAL]", "Save an agent file on this client"}, {"forward add BIND TARGET", "Expose a client service through this agent"}, {"forward list; forward del BIND", "Inspect or close forwards"}, {"relay start [BIND]", "Start a relay listener on this agent"}, {"relay list; relay stop BIND", "Inspect or close relay listeners"}})
 	section("EXECUTION AND JOBS", [][2]string{{"exec PROGRAM [ARGS]", "Run one program when requested"}, {"job start PROGRAM [ARGS]", "Start a background job"}, {"jobs; job show|output ID", "Inspect retained jobs and output"}, {"job cancel|stop|delete ID", "Manage a job"}, {"run-script [OPTIONS] FILE", "Run a client-side script file"}, {"run-wasm|run-native|run-assembly|run-bof ...", "Run a client-side module file"}})
+	section("WINDOWS DEPLOYMENTS", [][2]string{{"deployments", "List deployments from this agent"}, {"deploy create TARGET ARTIFACT METHOD CONTEXT", "Record deployment intent"}, {"deploy show|prepare ID", "Inspect or prepare a deployment"}, {"deploy start ID DELIVERY [PATH]", "Start the linked Windows method Job"}})
 	section("CLIENT ROUTING", [][2]string{{"routes", "Show routes for this agent"}, {"route accept CIDR", "Accept an advertised route on this client"}, {"route add CIDR", "Add a custom route on this client"}, {"route del CIDR", "Remove this client's accepted route"}})
 	section("MODULE BANK", [][2]string{{"modules; bofs", "List loaded commands"}, {"help MODULE", "Show a loaded command's full help"}, {"load module|wasm|assembly|bof FILE [NAME]", "Register a client module"}, {"unload module|wasm|assembly|bof NAME", "Remove a loaded command"}, {"MODULE [ARGS] [--background]", "Run a loaded command on this agent"}})
 	if g.modules != nil {
@@ -180,6 +181,15 @@ func (g *guiServer) runAgentGUICommand(ctx context.Context, agentID, line string
 	call := func(method, path string, body any) ([]byte, error) { return g.client.call(ctx, method, path, body) }
 	base := "/v1/agents/" + url.PathEscape(agentID)
 	switch args[0] {
+	case "deploy", "deployments":
+		var out strings.Builder
+		remoteCall := func(_ context.Context, method, path string, body any) ([]byte, error) {
+			return call(method, path, body)
+		}
+		if err := runConsoleDeployment(ctx, &out, remoteCall, args, agentID); err != nil {
+			return guiCommandResult{}, err
+		}
+		return guiCommandResult{Output: out.String()}, nil
 	case "help", "?":
 		if len(args) == 2 && g.modules != nil {
 			for _, module := range g.modules.list() {

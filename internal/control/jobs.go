@@ -46,6 +46,7 @@ type JobInfo struct {
 	Files           []bof.FileArtifact `json:"files,omitempty"`
 	ExecResult      *pivot.ExecResult  `json:"exec_result,omitempty"`
 	ScreenshotID    string             `json:"screenshot_id,omitempty"`
+	DeploymentID    string             `json:"deployment_id,omitempty"`
 }
 
 type jobState struct {
@@ -115,11 +116,23 @@ func (m *Manager) StartJob(ctx context.Context, owner uint64, agentID string, ar
 }
 
 func (m *Manager) StartScriptJob(ctx context.Context, owner uint64, agentID, language string, source []byte) (JobInfo, error) {
+	return m.startScriptJob(ctx, owner, agentID, language, source, "", true)
+}
+
+// StartDeploymentScriptJob starts immediately so retrieval capabilities in
+// the in-memory script are never retained in the durable sleeping-agent queue.
+func (m *Manager) StartDeploymentScriptJob(ctx context.Context, agentID, deploymentID string, source []byte) (JobInfo, error) {
+	return m.startScriptJob(ctx, 0, agentID, "powershell", source, deploymentID, false)
+}
+
+func (m *Manager) startScriptJob(ctx context.Context, owner uint64, agentID, language string, source []byte, deploymentID string, allowQueue bool) (JobInfo, error) {
 	if len(source) == 0 || len(source) > pivot.ScriptSourceLimit {
 		return JobInfo{}, errors.New("script source exceeds the 1 MiB limit or is empty")
 	}
-	if info, queued, err := m.queueJobIfSleeping(owner, agentID, queuedJobRequest{Kind: "script", Language: language, Source: source}); queued {
-		return info, err
+	if allowQueue {
+		if info, queued, err := m.queueJobIfSleeping(owner, agentID, queuedJobRequest{Kind: "script", Language: language, Source: source}); queued {
+			return info, err
+		}
 	}
 	m.mu.RLock()
 	state := m.agents[agentID]
@@ -140,7 +153,7 @@ func (m *Manager) StartScriptJob(ctx context.Context, owner uint64, agentID, lan
 	if err != nil {
 		return JobInfo{}, err
 	}
-	return m.registerJob(owner, agentID, state.mux, session, JobInfo{AgentID: agentID, Kind: "script", Language: language})
+	return m.registerJob(owner, agentID, state.mux, session, JobInfo{AgentID: agentID, Kind: "script", Language: language, DeploymentID: deploymentID})
 }
 
 func (m *Manager) StartWASMJob(ctx context.Context, owner uint64, agentID string, module []byte, args []string, stdin []byte) (JobInfo, error) {

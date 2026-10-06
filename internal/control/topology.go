@@ -67,6 +67,7 @@ type CarrierState struct {
 type TopologyEdge struct {
 	ID             string          `json:"id"`
 	Kind           string          `json:"kind"`
+	DeploymentID   string          `json:"deployment_id,omitempty"`
 	Source         string          `json:"source"`
 	Target         string          `json:"target"`
 	Label          string          `json:"label,omitempty"`
@@ -82,7 +83,26 @@ type TopologyEdge struct {
 }
 
 func (m *Manager) Topology() Topology {
-	return BuildTopology(m.AgentCatalog(), m.ClientList(), m.routes.List(), m.RelayList(""), m.allForwards(), m.ServerInfo())
+	topology := BuildTopology(m.AgentCatalog(), m.ClientList(), m.routes.List(), m.RelayList(""), m.allForwards(), m.ServerInfo())
+	store, err := m.deploymentStore()
+	if err != nil {
+		return topology
+	}
+	records, err := store.Deployments("")
+	if err != nil {
+		return topology
+	}
+	nodes := make(map[string]bool, len(topology.Nodes))
+	for _, node := range topology.Nodes {
+		nodes[node.ID] = true
+	}
+	for _, record := range records {
+		source, target := "agent:"+record.SourceAgentID, "agent:"+record.ResultAgentID
+		if record.State == "completed" && record.ResultAgentID != "" && nodes[source] && nodes[target] {
+			topology.Edges = append(topology.Edges, TopologyEdge{ID: "deployment:" + record.ID, Kind: "deployment", DeploymentID: record.ID, Source: source, Target: target, Label: record.Method, Active: true})
+		}
+	}
+	return topology
 }
 
 func (m *Manager) allForwards() []forwardState {

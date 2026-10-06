@@ -649,6 +649,12 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 			}
 			continue
 		}
+		if args[0] == "deploy" || args[0] == "deployments" {
+			if err := runConsoleDeployment(ctx, output, call, args, selectedID); err != nil {
+				fmt.Fprintln(output, "error:", err)
+			}
+			continue
+		}
 		if err := runConsoleCommand(ctx, output, call, vpnClient, ownClientID, clientRoutes, args); err != nil {
 			fmt.Fprintln(output, "error:", err)
 		}
@@ -841,6 +847,9 @@ func runConsoleCommand(ctx context.Context, output io.Writer, call consoleCaller
 	}
 	if args[0] == "payload" {
 		return runConsolePayload(ctx, output, call, args)
+	}
+	if args[0] == "deploy" || args[0] == "deployments" {
+		return runConsoleDeployment(ctx, output, call, args, "")
 	}
 	if args[0] == "agent" && (len(args) == 1 || args[1] != "show") {
 		return runConsoleAgentDistribution(ctx, output, call, args)

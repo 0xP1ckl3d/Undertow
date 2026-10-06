@@ -34,6 +34,7 @@ type Artifact struct {
 	ProfileFormatVersion uint32    `json:"profile_format_version"`
 	Hosted               bool      `json:"hosted"`
 	Revoked              bool      `json:"revoked,omitempty"`
+	ServiceCapable       bool      `json:"service_capable,omitempty"`
 }
 
 type persisted struct {
@@ -408,7 +409,7 @@ func (s *Store) Build(name, platform, arch string, requestedFilename ...string) 
 			return Artifact{}, errors.New("invalid artifact filename")
 		}
 	}
-	a := Artifact{ID: id, ProfileID: p.ID, Profile: p.Name, Server: p.Config.Server, Platform: platform, Architecture: arch, Filename: filename, Created: time.Now().UTC(), UndertowVersion: s.version, ProfileFormatVersion: EmbeddedFormatVersion}
+	a := Artifact{ID: id, ProfileID: p.ID, Profile: p.Name, Server: p.Config.Server, Platform: platform, Architecture: arch, Filename: filename, Created: time.Now().UTC(), UndertowVersion: s.version, ProfileFormatVersion: EmbeddedFormatVersion, ServiceCapable: platform == "windows"}
 	secret := make([]byte, 32)
 	if _, err := rand.Read(secret); err != nil {
 		return Artifact{}, err

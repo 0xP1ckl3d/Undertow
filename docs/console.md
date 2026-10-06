@@ -43,6 +43,8 @@ team task cancel TASK_ID
 
 ## Payload deployment
 
+For a guided Windows deployment, select a Windows agent and run `deploy create TARGET ARTIFACT_ID METHOD CONTEXT`, then `deploy prepare ID` and `deploy start ID direct-share|server|agent-host:HOST_ID [INSTALL_PATH]`. Direct-share streams the build through the authenticated source-agent channel to the target administrative share; the other choices use an existing artifact host. Use `deployments`, `deploy show ID`, and the linked Job to inspect progress. See [Windows deployments](windows-deployments.md).
+
 Type `payload` for the four-step profile → build → host → run guide. Both the server console and an authenticated client console can manage profiles and payloads, including downloading built binaries:
 
 ```text

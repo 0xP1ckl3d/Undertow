@@ -76,6 +76,10 @@ func printConsoleOverview(output io.Writer, vpnClient, selected, serverAttached 
 		m.row("operators create|role|disable|enable|reset|revoke", "Manage accounts (Team Leader)")
 	}
 	m.section("PAYLOAD DEPLOYMENT")
+	m.row("deployments [SOURCE_AGENT]", "List Windows deployment records")
+	m.row("deploy start ID DELIVERY [PATH]", "Start a prepared Windows deployment")
+	m.row("deploy create [SOURCE] TARGET ARTIFACT METHOD CONTEXT", "Record a Windows deployment")
+	m.row("deploy show|prepare ID", "Inspect or prepare one deployment")
 	m.row("payload", "Show the profile → build → host → run workflow")
 	m.row("payload profiles", "Find a reusable profile name")
 	m.row("payload build NAME OS ARCH", "Create a binary with new enrollment")

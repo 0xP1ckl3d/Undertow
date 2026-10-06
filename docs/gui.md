@@ -89,6 +89,8 @@ Open **Files**, click **Browse**, then choose a directory or file. A single clic
 
 ## Payloads and relays
 
+**Deployments** coordinates Windows deployment from a selected Windows agent. Choose an existing Windows artifact, a target, a method, and a target execution context; then prepare the record. Start can stream the verified artifact through the source agent to the target administrative share, or use an existing server or relay artifact host. The detail view links the source-agent Job, its retained progress, the install path and method identifier, and any later enrolled agent. See [Windows deployments](windows-deployments.md).
+
 **Payloads** manages reusable profiles and server-built artifacts, including downloads, server HTTPS hosting, and deploy helper generation. For direct DNS, QUIC, and WebSocket profiles, enter only the target-reachable server host or IP; the GUI adds the selected carrier's active server listener port. DNS requires a numeric IPv4 resolver address. New QUIC and WebSocket profiles follow the listener's self-signed TLS mode while still pinning the Undertow server identity. Existing profiles with a mismatched listener port or TLS setting show a correction beside **Build payload**; open and save the profile before building. Relay profiles still require the child-reachable parent address and port or named pipe. The artifact's profile snapshot does not change when a later profile edit is saved.
 
 **Payloads → Profiles** has **Idle sleep interval** and **Sleep jitter** fields. New profiles default to zero interval, preserving persistent sessions. A build embeds the current profile values; editing a profile later affects future builds only. The artifact build summary displays the interval and jitter selected for that build.

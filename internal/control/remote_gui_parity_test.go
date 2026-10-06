@@ -25,6 +25,13 @@ func TestRemoteGUIManagementAllowlistIsScoped(t *testing.T) {
 		{http.MethodPost, "/v1/transfers", true},
 		{http.MethodPut, "/v1/transfers/record-a", true},
 		{http.MethodPut, "/v1/transfers/record-a/other", false},
+		{http.MethodGet, "/v1/deployments", true},
+		{http.MethodGet, "/v1/deployments?source_agent_id=agent-a", true},
+		{http.MethodGet, "/v1/deployments?unexpected=value", false},
+		{http.MethodPost, "/v1/deployments", true},
+		{http.MethodPost, "/v1/deployments/record-a/prepare", true},
+		{http.MethodPost, "/v1/deployments/record-a/link", true},
+		{http.MethodPost, "/v1/deployments/record-a/other", false},
 	}
 	for _, tc := range cases {
 		r := httptest.NewRequest(tc.method, tc.path, nil)

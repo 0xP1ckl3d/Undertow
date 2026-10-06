@@ -69,8 +69,12 @@ func OpenOperationsStore(path string) (*OperationsStore, error) {
 		`CREATE TABLE IF NOT EXISTS relay_listeners (agent_id TEXT NOT NULL, bind TEXT NOT NULL, PRIMARY KEY(agent_id,bind))`,
 		`CREATE TABLE IF NOT EXISTS transfers (id TEXT PRIMARY KEY, record_json BLOB NOT NULL, client_session_id TEXT NOT NULL, started TEXT NOT NULL)`,
 		"CREATE INDEX IF NOT EXISTS transfers_started ON transfers(started DESC)",
+		`CREATE TABLE IF NOT EXISTS deployments (id TEXT PRIMARY KEY, record_json BLOB NOT NULL, state TEXT NOT NULL, source_agent_id TEXT NOT NULL, artifact_id TEXT NOT NULL, target TEXT NOT NULL, result_agent_id TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL)`,
+		"CREATE INDEX IF NOT EXISTS deployments_source_created ON deployments(source_agent_id,created_at DESC)",
+		"CREATE INDEX IF NOT EXISTS deployments_waiting_artifact ON deployments(state,artifact_id)",
+		"CREATE UNIQUE INDEX IF NOT EXISTS deployments_unique_result ON deployments(result_agent_id) WHERE result_agent_id <> ''",
 		"CREATE INDEX IF NOT EXISTS screenshots_agent_at ON screenshots(agent_id, at DESC)",
-		"PRAGMA user_version=13",
+		"PRAGMA user_version=14",
 	} {
 		if _, err := db.Exec(statement); err != nil {
 			db.Close()

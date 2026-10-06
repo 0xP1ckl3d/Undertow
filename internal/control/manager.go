@@ -183,6 +183,7 @@ type agentState struct {
 	inventory      AgentInfo
 	privilege      string
 	inventoryReady bool
+	newIdentity    bool
 	rateAt         time.Time
 	rateRX         uint64
 	rateTX         uint64
@@ -190,47 +191,52 @@ type agentState struct {
 	txRate         float64
 }
 type Manager struct {
-	mu                 sync.RWMutex
-	agentSessions      sync.WaitGroup
-	shuttingDown       bool
-	operations         *OperationsStore
-	offlineAgents      map[string]AgentInfo
-	nicknames          map[string]string
-	archivedAgents     map[string]bool
-	sleepOverrides     map[string]SleepPolicy
-	sleepTimers        map[string]*time.Timer
-	eventBus           *EventBroker
-	workerLogs         *WorkerLogBuffer
-	lifecycleEvents    []LifecycleEvent
-	artifactLookup     func(string) (string, string, bool)
-	agentDistribution  http.Handler
-	server             ServerInfo
-	transports         TransportController
-	relayAccept        func(context.Context, string, string, string, *mux.Stream)
-	relayPayloadAccept func(context.Context, string, *mux.Stream)
-	relays             map[string]map[string]*relayState
-	desiredRelays      map[string]map[string]bool
-	restoringRelays    map[string]map[string]bool
-	agents             map[string]*agentState
-	clients            map[uint64]*clientState
-	forwards           map[string]*forwardState
-	pendingForwards    map[string]*pendingForward
-	pendingLive        map[string]int
-	foregroundTails    map[string]chan struct{}
-	jobs               map[string]*jobState
-	jobDispatching     map[string]bool
-	jobOutput          *jobOutputStore
-	routes             *routing.Table
-	device             RouteDevice
-	selected           string
-	virtualNetwork     netip.Prefix
-	proxyIP            netip.Addr
-	virtualByAgent     map[string]netip.Addr
-	virtualUsed        map[netip.Addr]bool
+	mu                       sync.RWMutex
+	agentSessions            sync.WaitGroup
+	shuttingDown             bool
+	operations               *OperationsStore
+	offlineAgents            map[string]AgentInfo
+	nicknames                map[string]string
+	archivedAgents           map[string]bool
+	sleepOverrides           map[string]SleepPolicy
+	sleepTimers              map[string]*time.Timer
+	eventBus                 *EventBroker
+	workerLogs               *WorkerLogBuffer
+	lifecycleEvents          []LifecycleEvent
+	artifactLookup           func(string) (string, string, bool)
+	deploymentArtifactLookup func(string) (DeploymentArtifact, error)
+	deploymentExecutor       DeploymentMethodExecutor
+	agentDistribution        http.Handler
+	server                   ServerInfo
+	transports               TransportController
+	relayAccept              func(context.Context, string, string, string, *mux.Stream)
+	relayPayloadAccept       func(context.Context, string, *mux.Stream)
+	relays                   map[string]map[string]*relayState
+	desiredRelays            map[string]map[string]bool
+	restoringRelays          map[string]map[string]bool
+	agents                   map[string]*agentState
+	clients                  map[uint64]*clientState
+	forwards                 map[string]*forwardState
+	pendingForwards          map[string]*pendingForward
+	pendingLive              map[string]int
+	foregroundTails          map[string]chan struct{}
+	jobs                     map[string]*jobState
+	jobDispatching           map[string]bool
+	jobOutput                *jobOutputStore
+	routes                   *routing.Table
+	device                   RouteDevice
+	selected                 string
+	virtualNetwork           netip.Prefix
+	proxyIP                  netip.Addr
+	virtualByAgent           map[string]netip.Addr
+	virtualUsed              map[netip.Addr]bool
 }
 
 func (m *Manager) SetOperationsStore(store *OperationsStore) error {
 	if err := store.RecoverTransfers(); err != nil {
+		return err
+	}
+	if err := store.RecoverDispatchingDeployments(); err != nil {
 		return err
 	}
 	previous, err := store.LoadAgentSnapshots()
@@ -752,7 +758,8 @@ func (m *Manager) Register(peer transport.Peer, streamMux *mux.Mux) {
 		timer.Stop()
 		delete(m.sleepTimers, id)
 	}
-	m.agents[id] = &agentState{peer: peer, mux: streamMux, privilege: privilege, inventory: AgentInfo{Via: peer.Snapshot().Via, RelayBind: peer.Snapshot().RelayBind, Depth: depth}}
+	_, knownIdentity := m.offlineAgents[id]
+	m.agents[id] = &agentState{peer: peer, mux: streamMux, privilege: privilege, newIdentity: old == nil && !knownIdentity, inventory: AgentInfo{Via: peer.Snapshot().Via, RelayBind: peer.Snapshot().RelayBind, Depth: depth}}
 	if m.archivedAgents[id] {
 		if m.operations != nil {
 			if err := m.operations.SetAgentArchived(id, false); err != nil {
@@ -905,6 +912,9 @@ func (m *Manager) UpdateInventory(id string, streamMux *mux.Mux, b []byte) {
 			m.recordLifecycleLocked(LifecycleEvent{AgentID: id, Kind: "reconnect_observed", Transport: state.peer.Snapshot().Carrier, SessionID: state.peer.Snapshot().ID, ReconnectAttempts: info.ReconnectAttempts})
 		}
 		state.inventory.Hostname = safeHostname(info.Hostname)
+		state.inventory.ID = id
+		state.inventory.Connected = state.peer.Snapshot().Connected
+		state.inventory.Remote = state.peer.Snapshot().Remote
 		state.inventory.OS = info.OS
 		state.inventory.Arch = info.Arch
 		if info.Privilege == "high" || info.Privilege == "low" {
@@ -949,6 +959,7 @@ func (m *Manager) UpdateInventory(id string, streamMux *mux.Mux, b []byte) {
 	m.mu.Unlock()
 	m.persistAgentSnapshot(id)
 	m.PublishEvent("agent.updated", id)
+	m.correlateDeployment(id)
 	m.mu.RLock()
 	policy, overridden := m.sleepOverrides[id]
 	m.mu.RUnlock()
@@ -1550,6 +1561,7 @@ func (m *Manager) ServeHTTP(ctx context.Context, address, token string) error {
 
 func (m *Manager) handler(token string) http.Handler {
 	muxer := http.NewServeMux()
+	m.deploymentHTTPHandlers(muxer)
 	m.operatorHTTPHandlers(muxer)
 	m.teamHTTPHandlers(muxer)
 	m.registerTransferHandlers(muxer)

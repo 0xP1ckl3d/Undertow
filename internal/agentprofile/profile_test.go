@@ -265,3 +265,32 @@ func TestStoreImmutableArtifactSnapshots(t *testing.T) {
 		t.Fatalf("tampered template was accepted: %v", err)
 	}
 }
+
+func TestNewWindowsArtifactsAdvertiseServiceSupport(t *testing.T) {
+	dir := t.TempDir()
+	templates := filepath.Join(dir, "templates")
+	if err := os.MkdirAll(templates, 0700); err != nil {
+		t.Fatal(err)
+	}
+	name := "undertow-agent-windows-amd64.exe"
+	if err := os.WriteFile(filepath.Join(templates, name), []byte("MZ-template"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteTemplateManifest(templates, "test", []string{name}); err != nil {
+		t.Fatal(err)
+	}
+	store, err := OpenStore(filepath.Join(dir, "store"), templates, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Create("office", testProfile().Config); err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := store.Build("office", "windows", "amd64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !artifact.ServiceCapable {
+		t.Fatal("new Windows artifact lacks service capability metadata")
+	}
+}

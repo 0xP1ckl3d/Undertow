@@ -1,22 +1,72 @@
 package control
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"undertow/internal/mux"
+	"undertow/internal/pivot"
 	"undertow/internal/routing"
 	"undertow/internal/security"
 	"undertow/internal/session"
 	"undertow/internal/transport/dns"
 )
+
+func TestStreamDeploymentArtifactUsesAgentChannelAndRecordsTransfer(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	store, err := OpenOperationsStore(filepath.Join(t.TempDir(), "ops.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	manager := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	if err := manager.SetOperationsStore(store); err != nil {
+		t.Fatal(err)
+	}
+	server, agent := fileTestMuxPair(ctx)
+	defer server.Close()
+	defer agent.Close()
+	go pivot.ServeAgentWithExec(ctx, agent, true)
+	dir := t.TempDir()
+	source, remote := filepath.Join(dir, "artifact.exe"), filepath.Join(dir, "target.exe")
+	content := bytes.Repeat([]byte("undertow-deployment-artifact\x00"), 8192)
+	if err := os.WriteFile(source, content, 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx = context.WithValue(ctx, actionContextKey{}, actionContext{ClientID: "client-a", ClientSessionID: 91, ActionClaims: ActionClaims{OperatorID: "alice", DisplayName: "Alice", Source: "gui"}})
+	result, record, err := manager.StreamDeploymentArtifact(ctx, "agent-a", server, source, remote)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantHash := sha256.Sum256(content)
+	wantSHA := hex.EncodeToString(wantHash[:])
+	actual, err := os.ReadFile(remote)
+	if err != nil || !bytes.Equal(actual, content) {
+		t.Fatalf("streamed artifact mismatch: %v", err)
+	}
+	if result.Size != int64(len(content)) || result.SHA256 != wantSHA {
+		t.Fatalf("result: %+v", result)
+	}
+	if record.State != "completed" || record.SHA256 != wantSHA || record.Bytes != int64(len(content)) || record.AgentID != "agent-a" || record.OperatorID != "alice" || record.ClientSessionID != 91 {
+		t.Fatalf("record: %+v", record)
+	}
+	history, err := store.TransferHistory(10)
+	if err != nil || len(history) != 1 || history[0].ID != record.ID || history[0].State != "completed" {
+		t.Fatalf("history: %+v, %v", history, err)
+	}
+}
 
 func TestTransferRecordBindsUpdatesToClientSession(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

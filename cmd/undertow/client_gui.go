@@ -117,6 +117,21 @@ func (g *guiServer) handler() http.Handler {
 	mux.HandleFunc("GET /api/events", g.events)
 	mux.HandleFunc("GET /api/topology", g.remote(http.MethodGet, func(*http.Request) string { return "/v1/topology" }))
 	mux.HandleFunc("GET /api/history", g.remote(http.MethodGet, func(*http.Request) string { return "/v1/history" }))
+	mux.HandleFunc("GET /api/deployments", g.remote(http.MethodGet, func(r *http.Request) string {
+		if id := r.URL.Query().Get("source_agent_id"); id != "" {
+			return "/v1/deployments?source_agent_id=" + url.QueryEscape(id)
+		}
+		return "/v1/deployments"
+	}))
+	mux.HandleFunc("POST /api/deployments", g.remote(http.MethodPost, func(*http.Request) string { return "/v1/deployments" }))
+	mux.HandleFunc("GET /api/deployments/{id}", g.remote(http.MethodGet, func(r *http.Request) string { return "/v1/deployments/" + url.PathEscape(r.PathValue("id")) }))
+	mux.HandleFunc("POST /api/deployments/{id}/prepare", g.remote(http.MethodPost, func(r *http.Request) string {
+		return "/v1/deployments/" + url.PathEscape(r.PathValue("id")) + "/prepare"
+	}))
+	mux.HandleFunc("POST /api/deployments/{id}/start", g.remote(http.MethodPost, func(r *http.Request) string {
+		return "/v1/deployments/" + url.PathEscape(r.PathValue("id")) + "/start"
+	}))
+	mux.HandleFunc("POST /api/deployments/{id}/link", g.remote(http.MethodPost, func(r *http.Request) string { return "/v1/deployments/" + url.PathEscape(r.PathValue("id")) + "/link" }))
 	mux.HandleFunc("GET /api/operator/me", g.remote(http.MethodGet, func(*http.Request) string { return "/v1/operator/me" }))
 	mux.HandleFunc("GET /api/operators", g.remote(http.MethodGet, func(*http.Request) string { return "/v1/operators" }))
 	mux.HandleFunc("GET /api/team/operators", g.remote(http.MethodGet, func(*http.Request) string { return "/v1/team/operators" }))

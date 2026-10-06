@@ -70,6 +70,7 @@ function GraphDetails({node,edge,localClient,topology,onMouseEnter,onMouseLeave}
     }
   }else if(edge){
     rows.push(['Connection',edge.kind.replaceAll('_',' ')]);
+    if(edge.deployment_id)rows.push(['Deployment',edge.deployment_id]);
     if(edge.label)rows.push(['Carrier / path',edge.label]);
     if(edge.kind==='carrier'&&edge.client_id){
       if(localClient?.session_id&&String(localClient.session_id)===String(edge.session_id))rows.push(['Operator client','This client']);
@@ -119,6 +120,7 @@ type GraphActions = {
   openRelays:()=>void;
   stopRelay:(agentID:string,bind:string)=>void;
   openSettings:()=>void;
+  openDeployment:(id:string)=>void;
 };
 type GraphMenu = {x:number;y:number;nodeID?:string;edgeID?:string};
 
@@ -148,7 +150,7 @@ export function TopologyGraph({topology,onAgent,localClient,actions}:{topology:T
       return {id:n.id,position:layout[n.id]||{x:column*190,y:row*130+80},data:{label:<div className={`graph-device ${n.kind} ${n.kind==='agent'?(n.privilege||'unknown'):''} ${n.kind==='agent'&&n.connection_state==='sleeping'?'sleeping':n.active?'':'offline'} ${n.archived?'archived':''}`} title={n.label}><div className="graph-device-square"><DeviceIcon node={n}/><AgentCheckInClock node={n} serverAt={topology.at} receivedAt={receivedAt}/><span className={'device-state '+(n.kind==='agent'&&n.connection_state==='sleeping'?'sleeping':n.active?'online':'')}/></div><span className="graph-device-name">{n.label}</span><span className="graph-device-subtitle">{n.kind==='agent'&&n.archived?'Archived':n.kind==='agent'&&!n.active&&n.connection_state!=='sleeping'?'Disconnected':n.kind==='agent'?n.os||'Agent':n.kind==='client'?`Operator${n.accepted_count?` · ${n.accepted_count} routes`:''}`:n.kind==='server'?'Server':n.kind==='relay'?(n.active?'Relay · listening':'Relay · inactive'):'Network'}</span>{lostAt(n)&&<span className="graph-device-lost-at">Lost {lostAt(n)}</span>}</div>},style:{padding:0,border:0,background:'transparent',width:110},sourcePosition:Position.Right,targetPosition:Position.Left,draggable:true};
     }));
   },[topology,layout,setNodes]);
-  const edges=useMemo<Edge[]>(()=>topology?.edges.map(e=>{const accepted=!!e.accepted_by?.length;const color=e.kind==='forward'?'#cd85dd':accepted?'#4ecb94':e.kind==='relay_path'?'#e7aa4d':'#bc8c40';return {id:e.id,source:e.source,target:e.target,label:e.kind==='accepted_route'?undefined:e.label,type:'smoothstep',animated:e.kind==='carrier'&&e.active,style:{stroke:color,strokeWidth:accepted?2.8:e.kind==='carrier'?2.2:1.8,opacity:e.active?1:.45,strokeDasharray:e.kind==='forward'||!e.active?'5 4':undefined},labelStyle:{fill:'#c9d0c8',fontSize:10,fontWeight:600},labelBgStyle:{fill:'#111714',fillOpacity:.96,stroke:'#485248',strokeWidth:1},labelBgPadding:[8,5],markerEnd:{type:MarkerType.ArrowClosed,color}}})||[],[topology]);
+  const edges=useMemo<Edge[]>(()=>topology?.edges.map(e=>{const accepted=!!e.accepted_by?.length;const color=e.kind==='deployment'?'#92bdcf':e.kind==='forward'?'#cd85dd':accepted?'#4ecb94':e.kind==='relay_path'?'#e7aa4d':'#bc8c40';return {id:e.id,source:e.source,target:e.target,label:e.kind==='accepted_route'?undefined:e.label,type:'smoothstep',animated:e.kind==='carrier'&&e.active,style:{stroke:color,strokeWidth:accepted?2.8:e.kind==='carrier'?2.2:1.8,opacity:e.active?1:.45,strokeDasharray:e.kind==='deployment'||e.kind==='forward'||!e.active?'5 4':undefined},labelStyle:{fill:'#c9d0c8',fontSize:10,fontWeight:600},labelBgStyle:{fill:'#111714',fillOpacity:.96,stroke:'#485248',strokeWidth:1},labelBgPadding:[8,5],markerEnd:{type:MarkerType.ArrowClosed,color}}})||[],[topology]);
   const selectedNode=topology?.nodes.find(n=>n.id===(pinnedNode||hoverNode));
   const selectedEdge=topology?.edges.find(e=>e.id===(pinnedEdge||hoverEdge));
   const menuNode=topology?.nodes.find(n=>n.id===menu?.nodeID);
@@ -175,7 +177,8 @@ export function TopologyGraph({topology,onAgent,localClient,actions}:{topology:T
   }else if(menuNode?.kind==='server'){
     menuItems.push({label:'Open settings',run:actions.openSettings});
   }else if(menuEdge){
-    if(menuEdge.kind==='accepted_route'){
+    if(menuEdge.kind==='deployment'&&menuEdge.deployment_id)menuItems.push({label:'Open deployment',run:()=>actions.openDeployment(menuEdge.deployment_id!)});
+    else if(menuEdge.kind==='accepted_route'){
       menuItems.push({label:'View routes',run:actions.openRoutes});
       if(localClient?.session_id&&String(menuEdge.session_id)===String(localClient.session_id)){
         const prefix=topology?.nodes.find(n=>n.id===menuEdge.target)?.label;

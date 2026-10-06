@@ -207,6 +207,22 @@ func clientRequestAllowed(request *http.Request, clientID uint64) bool {
 	if request.Method == http.MethodGet && path == "/v1/history" && request.URL.RawQuery == "" {
 		return true
 	}
+	if path == "/v1/deployments" {
+		if request.Method == http.MethodPost {
+			return request.URL.RawQuery == ""
+		}
+		query := request.URL.Query()
+		return request.Method == http.MethodGet && (len(query) == 0 || len(query) == 1 && len(query["source_agent_id"]) == 1 && query.Get("source_agent_id") != "")
+	}
+	if strings.HasPrefix(path, "/v1/deployments/") && request.URL.RawQuery == "" {
+		parts := strings.Split(path, "/")
+		if len(parts) == 4 && parts[3] != "" && !strings.ContainsAny(parts[3], "%\\") {
+			return request.Method == http.MethodGet
+		}
+		if len(parts) == 5 && parts[3] != "" && !strings.ContainsAny(parts[3], "%\\") && request.Method == http.MethodPost {
+			return parts[4] == "prepare" || parts[4] == "start" || parts[4] == "link"
+		}
+	}
 	if path == "/v1/transfers" && request.URL.RawQuery == "" && (request.Method == http.MethodGet || request.Method == http.MethodPost) {
 		return true
 	}

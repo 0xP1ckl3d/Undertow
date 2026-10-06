@@ -80,6 +80,20 @@ If a listener binds 0.0.0.0 or ::, set server= to its reachable address.
 Connected VPN clients can manage profiles and payloads through the authenticated
 control connection. Profile and payload views never show enrollment secrets.
 `)
+	case "deploy", "deployments":
+		fmt.Fprint(output, `Windows deployment records:
+  deployments [SOURCE_AGENT]        List server-retained deployment records.
+  deploy create [SOURCE_AGENT] TARGET ARTIFACT_ID METHOD CONTEXT
+  deploy show ID                     Inspect the request, progress, and result.
+  deploy prepare ID                  Validate the live source and Windows build.
+  deploy start ID direct-share|server|agent-host:HOST_ID [INSTALL_PATH]
+  deploy link ID AGENT_ID            Associate a matching enrolled agent.
+Methods: winrm, wmi, service-control, scheduled-task.
+Contexts: WinRM and WMI use current-user; Service Control uses local-system;
+Scheduled Task supports both. A selected agent supplies SOURCE_AGENT automatically.
+Start streams through the source agent or uses an existing hosted artifact
+endpoint, then creates one linked Job for the selected Windows method.
+`)
 	case "agent":
 		fmt.Fprint(output, `Connected agents:
   agents                         List live agents and their agent IDs.
@@ -231,7 +245,8 @@ At the main menu, put AGENT_ID after run-assembly.
   bof inspect OBJECT.o      Inspect locally from the command line.
 The BOF must export go. Format characters: i=int32, s=int16, z=ANSI string,
 Z=wide string, b=binary (@FILE or base64:DATA). A sidecar OBJECT.o.json can
-provide argument types instead. At the main menu, put AGENT_ID after run-bof.
+provide argument types, or omit arguments when the BOF parses free-form ANSI
+switches itself. At the main menu, put AGENT_ID after run-bof.
 The agent must allow the native capability. See docs/bof-compatibility.md.
 `)
 	case "job", "jobs":
