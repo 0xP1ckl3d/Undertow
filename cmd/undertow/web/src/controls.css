@@ -99,7 +99,7 @@
 .agent-sleep-actions button{border:1px solid #b18b43;background:#a5792b;color:#171409;font-size:10px;font-weight:700;padding:10px 14px;white-space:nowrap}
 .agent-sleep-actions button:hover:not(:disabled){background:#e6af4b}
 .agent-sleep-warning,.agent-sleep-saved{display:block;margin:0 20px 17px;font-size:10px;line-height:1.5}.agent-sleep-warning{color:#ec8c82}.agent-sleep-saved{color:#84d5a0}
-.agent-row.sleeping{background:#201e15}.agent-row .state-indicator.sleeping{background:#eab458;box-shadow:0 0 0 3px #4f3c1d}
+.agent-row .state-indicator.sleeping{background:#eab458;box-shadow:0 0 0 3px #4f3c1d}
 .offline-notice.sleeping{background:#292414;border-color:#755e30;color:#edd5a2}
 .badge.sleeping{border-color:#8d6c2d;color:#f0c774;background:#2a2314}
 @media(max-width:950px){.agent-sleep-facts{grid-template-columns:1fr}.agent-sleep-facts>div+div{border-left:0;border-top:1px solid #2b372d}.agent-sleep-actions{align-items:flex-start;flex-direction:column}}
