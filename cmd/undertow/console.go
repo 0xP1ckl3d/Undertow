@@ -659,6 +659,12 @@ func splitConsoleCommand(line string) ([]string, error) {
 }
 
 func runConsoleCommand(ctx context.Context, output io.Writer, call consoleCaller, vpnClient bool, ownClientID uint64, clientRoutes clientRouteAction, args []string) error {
+	if args[0] == "team" {
+		if !vpnClient {
+			return errors.New("team chat requires a connected operator client console")
+		}
+		return runConsoleTeam(ctx, output, call, args)
+	}
 	if args[0] == "operators" {
 		if !vpnClient {
 			return errors.New("operator accounts require a connected client console")

@@ -56,6 +56,11 @@ func OpenOperationsStore(path string) (*OperationsStore, error) {
 		`CREATE TABLE IF NOT EXISTS screenshots (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, screen INTEGER NOT NULL, at TEXT NOT NULL, size INTEGER NOT NULL, sha256 TEXT NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL, client_id TEXT NOT NULL, client_session_id TEXT NOT NULL, operator_id TEXT NOT NULL, display_name TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS server_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS operator_accounts (id TEXT PRIMARY KEY, display_name TEXT NOT NULL, role TEXT NOT NULL, password_hash BLOB NOT NULL, disabled INTEGER NOT NULL DEFAULT 0, version INTEGER NOT NULL DEFAULT 1)`,
+		`CREATE TABLE IF NOT EXISTS team_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, sent_at TEXT NOT NULL, sender_id TEXT NOT NULL, sender_name TEXT NOT NULL, recipient_id TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL, body TEXT NOT NULL, task_id TEXT NOT NULL DEFAULT '')`,
+		`CREATE INDEX IF NOT EXISTS team_messages_room ON team_messages(recipient_id,id DESC)`,
+		`CREATE INDEX IF NOT EXISTS team_messages_sender ON team_messages(sender_id,id DESC)`,
+		`CREATE TABLE IF NOT EXISTS team_tasks (id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL, creator_id TEXT NOT NULL, creator_name TEXT NOT NULL, assignee_id TEXT NOT NULL, assignee_name TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+		`CREATE INDEX IF NOT EXISTS team_tasks_updated ON team_tasks(updated_at DESC)`,
 		`CREATE TABLE IF NOT EXISTS agent_snapshots (id TEXT PRIMARY KEY, saved_at TEXT NOT NULL, info_json BLOB NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS agent_nicknames (id TEXT PRIMARY KEY, nickname TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS agent_archives (id TEXT PRIMARY KEY, archived_at TEXT NOT NULL)`,
@@ -64,7 +69,7 @@ func OpenOperationsStore(path string) (*OperationsStore, error) {
 		`CREATE TABLE IF NOT EXISTS transfers (id TEXT PRIMARY KEY, record_json BLOB NOT NULL, client_session_id TEXT NOT NULL, started TEXT NOT NULL)`,
 		"CREATE INDEX IF NOT EXISTS transfers_started ON transfers(started DESC)",
 		"CREATE INDEX IF NOT EXISTS screenshots_agent_at ON screenshots(agent_id, at DESC)",
-		"PRAGMA user_version=11",
+		"PRAGMA user_version=12",
 	} {
 		if _, err := db.Exec(statement); err != nil {
 			db.Close()

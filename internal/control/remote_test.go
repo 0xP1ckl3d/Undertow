@@ -252,6 +252,34 @@ func TestVPNClientJobPathsAreScopedToJobAPI(t *testing.T) {
 	}
 }
 
+func TestVPNClientTeamPathsAreExplicitlyScoped(t *testing.T) {
+	for _, test := range []struct {
+		method, path string
+		allowed      bool
+	}{
+		{"GET", "/v1/team/operators", true},
+		{"GET", "/v1/team/messages?peer=alice&after=5", true},
+		{"GET", "/v1/team/messages?before=9", true},
+		{"POST", "/v1/team/messages", true},
+		{"GET", "/v1/team/tasks", true},
+		{"POST", "/v1/team/tasks", true},
+		{"PUT", "/v1/team/tasks/0123456789abcdef01234567", true},
+		{"GET", "/v1/team/messages?after=-1", false},
+		{"GET", "/v1/team/messages?peer=alice&peer=bobby", false},
+		{"GET", "/v1/team/messages?extra=x", false},
+		{"DELETE", "/v1/team/messages", false},
+		{"PUT", "/v1/team/tasks/../operators", false},
+	} {
+		request, err := http.NewRequest(test.method, "http://localhost"+test.path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := clientRequestAllowed(request, 1); got != test.allowed {
+			t.Fatalf("%s %s allowed=%t, want %t", test.method, test.path, got, test.allowed)
+		}
+	}
+}
+
 func TestVPNClientDistributionManagementIsAllowed(t *testing.T) {
 	for _, tc := range []struct{ method, path string }{
 		{http.MethodGet, "/v1/agent-profiles"},

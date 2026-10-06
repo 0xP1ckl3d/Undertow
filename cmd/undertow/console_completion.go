@@ -125,7 +125,7 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 			commands = append(commands, "show", "back", "relay", "route", "jobs", "job", "exec", "shell", "run-script", "run-wasm", "run-native", "run-bof", "pwd", "ls", "stat", "mkdir", "rm", "whoami", "ps", "privileges", "env", "interfaces", "dns", "route-table", "screens", "load", "unload", "bofs", "modules")
 		}
 		if vpn {
-			commands = append(commands, "background", "internal", "vpn", "operators")
+			commands = append(commands, "background", "internal", "vpn", "operators", "team")
 			if selected {
 				commands = append(commands, "forward", "upload", "download", "screenshot")
 			}
@@ -138,6 +138,13 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 		return wordCompletions(commands, partial)
 	}
 	switch before[0] {
+	case "team":
+		if vpn && len(before) == 1 {
+			return wordCompletions([]string{"say", "dm", "roster", "tasks", "task"}, partial)
+		}
+		if vpn && len(before) == 2 && before[1] == "task" {
+			return wordCompletions([]string{"add", "show", "start", "done", "reopen", "cancel"}, partial)
+		}
 	case "operators":
 		if vpn && len(before) == 1 {
 			return wordCompletions([]string{"me", "list", "create", "role", "disable", "enable", "reset", "revoke"}, partial)

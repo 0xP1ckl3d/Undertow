@@ -1528,6 +1528,7 @@ func (m *Manager) ServeHTTP(ctx context.Context, address, token string) error {
 func (m *Manager) handler(token string) http.Handler {
 	muxer := http.NewServeMux()
 	m.operatorHTTPHandlers(muxer)
+	m.teamHTTPHandlers(muxer)
 	m.registerTransferHandlers(muxer)
 	muxer.Handle("/v1/agent-profiles/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		m.mu.RLock()

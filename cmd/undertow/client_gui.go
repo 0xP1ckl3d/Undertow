@@ -119,6 +119,23 @@ func (g *guiServer) handler() http.Handler {
 	mux.HandleFunc("GET /api/history", g.remote(http.MethodGet, func(*http.Request) string { return "/v1/history" }))
 	mux.HandleFunc("GET /api/operator/me", g.remote(http.MethodGet, func(*http.Request) string { return "/v1/operator/me" }))
 	mux.HandleFunc("GET /api/operators", g.remote(http.MethodGet, func(*http.Request) string { return "/v1/operators" }))
+	mux.HandleFunc("GET /api/team/operators", g.remote(http.MethodGet, func(*http.Request) string { return "/v1/team/operators" }))
+	mux.HandleFunc("GET /api/team/messages", g.remote(http.MethodGet, func(r *http.Request) string {
+		query := url.Values{}
+		for _, key := range []string{"peer", "before", "after"} {
+			if value := r.URL.Query().Get(key); value != "" {
+				query.Set(key, value)
+			}
+		}
+		if encoded := query.Encode(); encoded != "" {
+			return "/v1/team/messages?" + encoded
+		}
+		return "/v1/team/messages"
+	}))
+	mux.HandleFunc("POST /api/team/messages", g.remote(http.MethodPost, func(*http.Request) string { return "/v1/team/messages" }))
+	mux.HandleFunc("GET /api/team/tasks", g.remote(http.MethodGet, func(*http.Request) string { return "/v1/team/tasks" }))
+	mux.HandleFunc("POST /api/team/tasks", g.remote(http.MethodPost, func(*http.Request) string { return "/v1/team/tasks" }))
+	mux.HandleFunc("PUT /api/team/tasks/{id}", g.remote(http.MethodPut, func(r *http.Request) string { return "/v1/team/tasks/" + url.PathEscape(r.PathValue("id")) }))
 	mux.HandleFunc("POST /api/operators", g.remote(http.MethodPost, func(*http.Request) string { return "/v1/operators" }))
 	mux.HandleFunc("PUT /api/operators/{id}", g.remote(http.MethodPut, func(r *http.Request) string { return "/v1/operators/" + url.PathEscape(r.PathValue("id")) }))
 	mux.HandleFunc("DELETE /api/operators/{id}", g.remote(http.MethodDelete, func(r *http.Request) string { return "/v1/operators/" + url.PathEscape(r.PathValue("id")) }))

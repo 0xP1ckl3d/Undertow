@@ -1,7 +1,7 @@
 import {Component, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
 import {createRoot} from 'react-dom/client';
 import {Terminal} from '@xterm/xterm';
-import {Boxes, Cable, Clock3, Computer, Download, ListTodo, Network, Radio, RefreshCw, Route as RouteIcon, Settings, SquareTerminal, X} from 'lucide-react';
+import {Boxes, Cable, Clock3, Computer, Download, ListTodo, MessagesSquare, Network, Radio, RefreshCw, Route as RouteIcon, Settings, SquareTerminal, X} from 'lucide-react';
 import {api, connect, csrfToken, type Agent, type Job, type Status, type Topology} from './api';
 import {TopologyGraph} from './TopologyGraph';
 import {HostResults} from './HostResults';
@@ -15,6 +15,7 @@ import {AgentLifecycle, ForwardsView, RoutingModeView, TransportsView} from './O
 import {WorkerLogsView} from './WorkerLogsView';
 import {OperatorSettings, type OperatorAccount} from './OperatorSettings';
 import {TransfersView} from './TransfersView';
+import {TeamView} from './TeamView';
 import '@xyflow/react/dist/style.css';
 import '@xterm/xterm/css/xterm.css';
 import './style.css';
@@ -24,11 +25,11 @@ import './files.css';
 import './controls.css';
 import './agent-payload-hosting.css';
 
-type View = 'topology'|'agents'|'jobs'|'transfers'|'routes'|'relays'|'forwards'|'modules'|'payloads'|'history'|'settings';
+type View = 'topology'|'agents'|'jobs'|'transfers'|'routes'|'relays'|'forwards'|'modules'|'payloads'|'team'|'history'|'settings';
 type Audit = {id:string;at:string;action:string;target:string;client_id?:string;client_session_id?:string;operator_id?:string;display_name?:string;source:string;identity_trust:string;status:number};
 const nav: {id:View; label:string; icon:typeof Network}[] = [
   {id:'topology',label:'Topology',icon:Network},{id:'agents',label:'Agents',icon:Computer},{id:'jobs',label:'Jobs',icon:ListTodo},{id:'transfers',label:'Transfers',icon:Download},
-  {id:'routes',label:'Routes',icon:RouteIcon},{id:'relays',label:'Relays',icon:Cable},{id:'forwards',label:'Forwards',icon:Cable},{id:'modules',label:'Modules',icon:Boxes},{id:'payloads',label:'Payloads',icon:Boxes},{id:'history',label:'History',icon:Clock3},{id:'settings',label:'Settings',icon:Settings}
+  {id:'routes',label:'Routes',icon:RouteIcon},{id:'relays',label:'Relays',icon:Cable},{id:'forwards',label:'Forwards',icon:Cable},{id:'modules',label:'Modules',icon:Boxes},{id:'payloads',label:'Payloads',icon:Boxes},{id:'team',label:'Team',icon:MessagesSquare},{id:'history',label:'History',icon:Clock3},{id:'settings',label:'Settings',icon:Settings}
 ];
 function formatTime(value?:string){return value&&!value.startsWith('0001-')?new Date(value).toLocaleString():'—'}
 function short(value:string){return value.length>18?value.slice(0,18)+'…':value}
@@ -72,7 +73,7 @@ function App(){
     setError(s.status==='rejected'?String(s.reason):'');
   };
   useEffect(()=>{connect().then(()=>{setReady(true);void refresh();void api<{show_archived:boolean}>('/preferences').then(p=>setShowArchived(p.show_archived)).catch(e=>setError(String(e)))}).catch(e=>setAuthError(e instanceof Error&&e.message==='session_expired'?'expired':'link'))},[]);
-  useEffect(()=>{if(!ready||authError)return;const source=new EventSource('/api/events');let timer:number|undefined;source.onopen=()=>{void refresh()};source.onerror=()=>{void refresh()};source.addEventListener('change',event=>{try{if(JSON.parse((event as MessageEvent).data).kind==='worker_log')return}catch{}if(timer)window.clearTimeout(timer);timer=window.setTimeout(()=>refresh(),150)});return()=>{source.close();if(timer)window.clearTimeout(timer)}},[ready,authError]);
+  useEffect(()=>{if(!ready||authError)return;const source=new EventSource('/api/events');let timer:number|undefined;source.onopen=()=>{void refresh();window.dispatchEvent(new Event('undertow-team-changed'))};source.onerror=()=>{void refresh()};source.addEventListener('change',event=>{try{const kind=JSON.parse((event as MessageEvent).data).kind;if(kind==='worker_log')return;if(kind==='team.changed'){window.dispatchEvent(new Event('undertow-team-changed'));return}if(kind==='resync_required')window.dispatchEvent(new Event('undertow-team-changed'))}catch{}if(timer)window.clearTimeout(timer);timer=window.setTimeout(()=>refresh(),150)});return()=>{source.close();if(timer)window.clearTimeout(timer)}},[ready,authError]);
   const agents=useMemo(()=>status?.agents.filter(a=>showArchived||!a.archived)||[],[status,showArchived]);
   const graph=useMemo(()=>visibleTopology(topology,showArchived),[topology,showArchived]);
   const activeAgent=agents.find(a=>a.id===selected);
@@ -97,6 +98,7 @@ function App(){
         {view==='forwards'&&<><PageHeader title="Forwards" description="Agent TCP listeners that forward connections to this client."/><ForwardsView agents={status?.agents.filter(a=>a.online!==false)||[]} revision={topology?.at}/></>}
         {view==='modules'&&<><PageHeader title="Module bank" description="Compiled modules loaded on this client. Select an agent before running one."/><ModulesView agents={status?.agents.filter(a=>a.online!==false)||[]} onJobs={()=>setView('jobs')}/></>}
         {view==='payloads'&&<><PageHeader title="Payloads" description="Existing profiles and built artifacts on the server."/><PayloadView revision={topology?.at} serverAddress={client?.server_address} publicHost={status?.server.public_host} clientTransport={client?.transport} relayTarget={relayTarget} agents={status?.agents||[]} relays={relays}/></>}
+        {view==='team'&&<><PageHeader title="Team" description="Operator conversations and assignments retained by the server."/><TeamView self={operator} connected={!!client?.session_id}/></>}
         {view==='history'&&<><PageHeader title="Operational history" description="Server recorded operator actions and their results." count={history.length}/><div className="panel table-panel"><HistoryTable records={history}/></div></>}
         {view==='settings'&&<SettingsView status={status} client={client} operator={operator} revision={topology?.at} onRefresh={refresh} showArchived={showArchived} onArchivedVisibility={changeArchivedVisibility}/>}
       </main>

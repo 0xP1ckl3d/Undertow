@@ -26,7 +26,7 @@ An operator-only client does not install VPN or accepted routes. To use client r
 2. Open **Topology**. The central server, operator clients, and connected or retained agents show their actual carrier and relay paths. Double-click a connected agent to open its workspace.
 3. Open the agent's **Overview** first for identity, last contact, parent path, capabilities, and advertised routes. In **Console**, type `help` to see the commands available for that selected agent. Merely opening the workspace or Console sends no agent command.
 4. Use **Files**, **Jobs**, **Screenshots**, **Modules**, or **Host** for the corresponding operation. Each tab gives you an explicit control and shows progress or retained results. A disconnected agent remains readable but cannot receive new commands.
-5. Return to **History** for server audit actions. The client, session, and operator identity are bound by the server. **Settings → Identity** shows the authenticated account. A Team Leader can manage other accounts there.
+5. Open **Team** to coordinate with other operators and assign follow-up work. Return to **History** for server audit actions. The client, session, and operator identity are bound by the server. **Settings → Identity** shows the authenticated account. A Team Leader can manage other accounts there.
 
 For terminal equivalents, see [Console guide](console.md). For the server and client startup flags, see [Getting started](getting-started.md) and [CLI reference](cli-reference.md).
 
@@ -98,6 +98,14 @@ The relay listener carries Undertow child sessions. To distribute a built artifa
 For a Windows parent and child, **Relays** also offers an **SMB named pipe** carrier. Choose a Windows parent and enter its local bind as `\\.\pipe\NAME`. **Create child payload** then selects an SMB relay profile; enter the child's reachable address as `\\PARENT_HOST\pipe\NAME` and build a Windows artifact. The child appears as a separate `relay-smb` agent in Topology. A browser cannot download from a named pipe directly; use the generated PowerShell helper or download the artifact through the operator client. Follow the [SMB named-pipe relay guide](smb-named-pipe-relays.md) for the full workflow and Windows access checks.
 
 Payload **Retrieval settings** controls the server's public HTTPS host and retrieval path separately from a profile's embedded connection address. Changing the path rotates hosted download tokens and invalidates earlier URLs. The artifact page shows each build's profile snapshot, platform, size, hash, download, hosted URL, helper preview and lifecycle controls. A built artifact is not an agent until an operator deploys and starts it.
+
+## Team conversations and assignments
+
+Open **Team** in the navigation rail. The left column has a shared **Team** conversation and one direct conversation for each active operator account. Select a conversation, type a message, and press **Enter** to send. Use **Shift+Enter** for a new line. A direct message is readable only by its sender and recipient; even a Team Leader does not automatically receive other operators' direct messages. The sender name is taken from the authenticated server session, never from browser-supplied identity fields.
+
+The right column holds team assignments. Select **New assignment**, choose an operator, and provide a short title plus optional details. All operators can create assignments; the assignee, creator, or a Team Leader can start, complete, reopen, or cancel one. Creating or changing an assignment adds an activity card to the shared Team conversation. The **Active** filter shows open and in-progress tasks, while **All** includes completed and cancelled work. The board shows the latest 200 assignments; conversation history loads in pages of 100. Use **Load older messages** to read earlier pages.
+
+Messages and task records live on the Undertow server and remain available after a browser or client restart. The GUI receives a live change event and fetches only the relevant new messages; it also resynchronizes after reconnecting. The local client stores no authoritative team copy. Server audit entries record the authenticated operator, client session, action, and result without copying message or task text into the audit log. Do not put credentials in chat. The terminal client has the same operations through `team`; see [Interactive consoles](console.md#team-coordination).
 
 ## Data ownership and retention
 

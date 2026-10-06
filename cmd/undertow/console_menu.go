@@ -69,6 +69,8 @@ func printConsoleOverview(output io.Writer, vpnClient, selected, serverAttached 
 	m.row("clear / cls", "Clear the screen")
 	if vpnClient {
 		m.section("OPERATOR ACCOUNT")
+		m.row("team", "Read the team conversation")
+		m.row("team say|dm|roster|tasks|task", "Message operators and manage assignments")
 		m.row("operators me", "Show this authenticated account")
 		m.row("operators list", "List accounts (Team Leader)")
 		m.row("operators create|role|disable|enable|reset|revoke", "Manage accounts (Team Leader)")

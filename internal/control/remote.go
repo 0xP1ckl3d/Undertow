@@ -116,6 +116,39 @@ func (m *Manager) ServeRemote(ctx context.Context, token string, clientID uint64
 
 func clientRequestAllowed(request *http.Request, clientID uint64) bool {
 	path := request.URL.EscapedPath()
+	if path == "/v1/team/operators" || path == "/v1/team/tasks" {
+		return request.URL.RawQuery == "" && (request.Method == http.MethodGet || path == "/v1/team/tasks" && request.Method == http.MethodPost)
+	}
+	if path == "/v1/team/messages" {
+		if request.Method == http.MethodPost {
+			return request.URL.RawQuery == ""
+		}
+		if request.Method != http.MethodGet {
+			return false
+		}
+		query := request.URL.Query()
+		for key, values := range query {
+			if key != "peer" && key != "before" && key != "after" || len(values) != 1 {
+				return false
+			}
+		}
+		if peer := query.Get("peer"); peer != "" && !operatorIDPattern.MatchString(peer) {
+			return false
+		}
+		for _, key := range []string{"before", "after"} {
+			if query.Has(key) {
+				n, err := strconv.ParseInt(query.Get(key), 10, 64)
+				if err != nil || n <= 0 {
+					return false
+				}
+			}
+		}
+		return !query.Has("before") || !query.Has("after")
+	}
+	if strings.HasPrefix(path, "/v1/team/tasks/") && request.Method == http.MethodPut && request.URL.RawQuery == "" {
+		id := strings.TrimPrefix(path, "/v1/team/tasks/")
+		return len(id) == 24 && strings.Trim(id, "0123456789abcdef") == ""
+	}
 	if path == "/v1/operator/me" && request.Method == http.MethodGet && request.URL.RawQuery == "" {
 		return true
 	}

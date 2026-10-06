@@ -37,6 +37,24 @@ func printConsoleHelp(output io.Writer, vpnClient, selected, serverAttached bool
 		}
 	}
 	switch topic {
+	case "team":
+		if !vpnClient {
+			return fmt.Errorf("team chat requires a connected operator client console")
+		}
+		fmt.Fprint(output, `Team chat and assignments:
+  team                              Show recent team messages.
+  team say MESSAGE                  Post to the team conversation.
+  team roster                       List operators available for direct messages and assignments.
+  team dm OPERATOR                   Show your direct conversation with one operator.
+  team dm OPERATOR MESSAGE           Send a direct message.
+  team tasks                        List recent assignments.
+  team task add ID "TITLE" ["DETAILS"] Assign a task to an operator.
+  team task show TASK_ID             Show one task and its description.
+  team task start|done|reopen|cancel TASK_ID  Change task status.
+Messages and assignments are retained on the server. Direct messages are visible
+only to their two participants. The assignee, creator, or Team Leader may change
+task status. The server records the authenticated operator for each action.
+`)
 	case "operators":
 		if !vpnClient {
 			return fmt.Errorf("operator accounts are managed from a connected client console")

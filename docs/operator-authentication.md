@@ -31,6 +31,8 @@ Connection enrollment (`--auth token|password|none`, `--token-file`, and `--pass
 
 ## Account management
 
+Authenticated operator identities are also used for [team conversations and assignments](gui.md#team-conversations-and-assignments). The server binds the sender and task actor to the current client session. Team messages are shared with authenticated operators; direct messages are limited to their two participants, including when a Team Leader is otherwise able to manage accounts. Assignment status can be changed by its creator, assignee, or a Team Leader. The terminal client exposes the same operations with [`team`](console.md#team-coordination).
+
 An authenticated **Operator** can use existing Undertow operations. A **Team Leader** can also manage accounts. In a connected client console:
 
 ```text

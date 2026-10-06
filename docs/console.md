@@ -20,6 +20,27 @@ See [getting started](getting-started.md) for enrollment, fingerprint, and privi
 | `routes` | Show routes; from an agent menu, filter to that agent. |
 | `quit` or `exit` | Detach the server console without stopping its worker. In the VPN client console, stop the VPN and remove its owned routes. |
 
+## Team coordination
+
+The connected **client** console can read and send the same server-retained messages and assignments as the GUI. These commands use the account authenticated when the client connected; an agent selection is not needed. The server console has no operator session for team chat, so use an authenticated client.
+
+```text
+team
+team say I will review the new route
+team roster
+team dm alice
+team dm alice Please check the transfer result
+team tasks
+team task add alice "Review route acceptance" "Confirm the client path"
+team task show TASK_ID
+team task start TASK_ID
+team task done TASK_ID
+team task reopen TASK_ID
+team task cancel TASK_ID
+```
+
+`team` shows recent shared messages and task activity. `team dm ID` shows only the conversation between your account and that operator; `team dm ID MESSAGE` sends to that operator. Only the sender and recipient can read a direct conversation. Task changes may be made by the assignee, creator, or a Team Leader. Messages and assignments persist on the server across client restarts; task changes also appear in the shared team timeline. See [Team conversations and assignments](gui.md#team-conversations-and-assignments) for the browser workflow.
+
 ## Payload deployment
 
 Type `payload` for the four-step profile → build → host → run guide. Both the server console and an authenticated client console can manage profiles and payloads, including downloading built binaries:
