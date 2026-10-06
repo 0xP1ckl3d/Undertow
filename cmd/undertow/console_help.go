@@ -86,7 +86,7 @@ control connection. Profile and payload views never show enrollment secrets.
   deploy create [SOURCE_AGENT] TARGET ARTIFACT_ID METHOD CONTEXT
   deploy show ID                     Inspect the request, progress, and result.
   deploy prepare ID                  Validate the source snapshot and Windows build.
-  deploy start ID direct-share|server|agent-host:HOST_ID [INSTALL_PATH]
+  deploy start ID [INSTALL_PATH]
   deploy link ID AGENT_ID            Associate a matching enrolled agent.
 Methods: winrm, wmi, service-control, scheduled-task.
 Contexts: WinRM and WMI use current-user; Service Control uses local-system;

@@ -119,27 +119,32 @@ func (m *Manager) StartScriptJob(ctx context.Context, owner uint64, agentID, lan
 	return m.startScriptJob(ctx, owner, agentID, language, source, "", true)
 }
 
-// StartDeploymentScriptJob starts immediately, or attaches a script session to
-// an already-created queued deployment Job. Retrieval capabilities remain only
-// in the live session and are never serialized into the sleeping-agent queue.
-func (m *Manager) StartDeploymentScriptJob(ctx context.Context, agentID, deploymentID, existingJobID string, source []byte) (JobInfo, error) {
-	if existingJobID == "" {
-		return m.startScriptJob(ctx, 0, agentID, "powershell", source, deploymentID, false)
-	}
-	if len(source) == 0 || len(source) > pivot.ScriptSourceLimit {
-		return JobInfo{}, errors.New("script source exceeds the 1 MiB limit or is empty")
-	}
+// StartDeploymentCommandJob runs one native Windows management command as the
+// durable Job for a deployment. argv is sent only to the live agent session;
+// deployment history retains output and method metadata without raw command
+// content or artifact retrieval capabilities.
+func (m *Manager) StartDeploymentCommandJob(ctx context.Context, agentID, deploymentID, existingJobID string, argv []string) (JobInfo, error) {
 	m.mu.RLock()
 	state := m.agents[agentID]
+	count := len(m.jobs)
 	m.mu.RUnlock()
 	if state == nil || state.mux == nil {
 		return JobInfo{}, errors.New("agent disconnected")
 	}
+	if existingJobID == "" && count >= 512 {
+		return JobInfo{}, errors.New("job limit reached")
+	}
+	if err := m.jobOutputReady(); err != nil {
+		return JobInfo{}, err
+	}
 	startCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	session, err := pivot.OpenScript(startCtx, state.mux, "powershell", source)
+	session, err := pivot.OpenInteractive(startCtx, state.mux, pivot.InteractiveRequest{Argv: argv})
 	if err != nil {
 		return JobInfo{}, err
+	}
+	if existingJobID == "" {
+		return m.registerJob(0, agentID, state.mux, session, JobInfo{AgentID: agentID, Kind: "deployment", DeploymentID: deploymentID})
 	}
 	m.mu.Lock()
 	job := m.jobs[existingJobID]
@@ -155,7 +160,6 @@ func (m *Manager) StartDeploymentScriptJob(ctx context.Context, agentID, deploym
 	}
 	job.info.State = "running"
 	job.info.Started = time.Now().UTC()
-	job.info.Language = "powershell"
 	queuedRequest := *job.request
 	job.agent, job.session, job.request = state.mux, session, nil
 	info, ownerKey, store := job.info, job.ownerKey, m.operations
@@ -169,8 +173,6 @@ func (m *Manager) StartDeploymentScriptJob(ctx context.Context, agentID, deploym
 			return JobInfo{}, err
 		}
 		if err := store.DeleteQueuedJob(info.ID); err != nil {
-			// The running Job is already durable; retain it and let recovery
-			// surface any stale request on restart.
 			log.Printf("remove dispatched deployment request: %v", err)
 		}
 	}

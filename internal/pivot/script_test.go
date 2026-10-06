@@ -15,7 +15,7 @@ func TestMemoryScriptStreamsAndCapabilities(t *testing.T) {
 	source := []byte("printf 'script-stdout\\n'; printf 'script-stderr\\n' >&2\n")
 	if runtime.GOOS == "windows" {
 		language = "powershell"
-		source = []byte("$ErrorActionPreference = 'Stop'\ntry {\n  [Console]::Out.WriteLine('script-stdout')\n  [Console]::Error.WriteLine('script-stderr')\n} catch {\n  exit 1\n}\n")
+		source = []byte("[Console]::Out.WriteLine('script-stdout')\n[Console]::Error.WriteLine('script-stderr')\n")
 	}
 	name, _, err := scriptExecutable(language)
 	if err != nil {

@@ -5,9 +5,7 @@ package main
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -44,26 +42,30 @@ func deploymentArtifactStore(t *testing.T) (*agentprofile.Store, agentprofile.Ar
 	return store, artifact
 }
 
-func TestWindowsDeploymentPreflightRevalidatesArtifactAndSelectedHost(t *testing.T) {
+func TestWindowsDeploymentPreflightUsesAgentChannelAndRevalidatesArtifact(t *testing.T) {
 	store, artifact := deploymentArtifactStore(t)
-	distribution := &agentDistribution{store: store, agentHosts: map[string]*agentPayloadHost{}}
-	executor := &windowsDeploymentExecutor{distribution: distribution}
+	executor := &windowsDeploymentExecutor{distribution: &agentDistribution{store: store}}
 	record := control.DeploymentRecord{ID: "deployment-one", SourceAgentID: "source", ArtifactID: artifact.ID, ArtifactSHA256: artifact.SHA256, Method: "winrm", Context: "current-user"}
-	if _, err := executor.Preflight(context.Background(), record, control.DeploymentStartRequest{Delivery: "direct-share"}); err != nil {
-		t.Fatalf("direct-share preflight: %v", err)
+
+	for _, delivery := range []string{"", "agent-channel", "direct-share"} {
+		plan, err := executor.Preflight(context.Background(), record, control.DeploymentStartRequest{Delivery: delivery})
+		if err != nil {
+			t.Fatalf("delivery %q: %v", delivery, err)
+		}
+		if plan.DeliveryType != "agent-channel" || plan.DeliveryID != record.SourceAgentID {
+			t.Fatalf("delivery %q plan: %+v", delivery, plan)
+		}
 	}
-	distribution.agentHosts["host-one"] = &agentPayloadHost{info: agentPayloadHostInfo{ID: "host-one", AgentID: "source", ArtifactID: artifact.ID, Retrieval: "https://relay.example/artifact"}}
-	if _, err := executor.Preflight(context.Background(), record, control.DeploymentStartRequest{Delivery: "agent-host:host-one"}); err != nil {
-		t.Fatalf("agent host preflight: %v", err)
+	for _, delivery := range []string{"server", "agent-host:host-one"} {
+		if _, err := executor.Preflight(context.Background(), record, control.DeploymentStartRequest{Delivery: delivery}); err == nil {
+			t.Fatalf("hosted delivery %q passed deployment preflight", delivery)
+		}
 	}
-	delete(distribution.agentHosts, "host-one")
-	if _, err := executor.Preflight(context.Background(), record, control.DeploymentStartRequest{Delivery: "agent-host:host-one"}); err == nil {
-		t.Fatal("removed agent host passed preflight")
-	}
+
 	if err := os.WriteFile(store.ArtifactPath(artifact), []byte("tampered"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := executor.Preflight(context.Background(), record, control.DeploymentStartRequest{Delivery: "direct-share"}); err == nil || !strings.Contains(err.Error(), "integrity") {
+	if _, err := executor.Preflight(context.Background(), record, control.DeploymentStartRequest{}); err == nil || !strings.Contains(err.Error(), "integrity") {
 		t.Fatalf("tampered artifact preflight: %v", err)
 	}
 	revoked, err := store.Build("deploy", "windows", "amd64", "revoked.exe")
@@ -75,7 +77,7 @@ func TestWindowsDeploymentPreflightRevalidatesArtifactAndSelectedHost(t *testing
 	}
 	revokedRecord := record
 	revokedRecord.ArtifactID, revokedRecord.ArtifactSHA256 = revoked.ID, revoked.SHA256
-	if _, err := executor.Preflight(context.Background(), revokedRecord, control.DeploymentStartRequest{Delivery: "direct-share"}); err == nil {
+	if _, err := executor.Preflight(context.Background(), revokedRecord, control.DeploymentStartRequest{}); err == nil {
 		t.Fatal("revoked artifact passed preflight")
 	}
 }
@@ -107,112 +109,58 @@ func TestWindowsDeploymentInstallPathAndShare(t *testing.T) {
 	}
 }
 
-func TestWindowsDeploymentDirectShareMethods(t *testing.T) {
+func TestWindowsDeploymentMethodsUseNativeToolsOnly(t *testing.T) {
 	methods := []struct {
-		method, context, marker string
+		method  string
+		context string
+		program string
 	}{
-		{"winrm", "current-user", "Invoke-Command"},
-		{"wmi", "current-user", "Win32_Process"},
+		{"winrm", "current-user", "winrs.exe"},
+		{"wmi", "current-user", "wmic.exe"},
 		{"service-control", "local-system", "sc.exe"},
 		{"scheduled-task", "local-system", "schtasks.exe"},
 	}
 	for _, item := range methods {
 		t.Run(item.method, func(t *testing.T) {
 			record := control.DeploymentRecord{ID: "0123456789abcdef", Target: "ws01", Method: item.method, Context: item.context}
-			script, service, task, err := buildWindowsDeploymentScript(record, `C:\ProgramData\Undertow\agent.exe`, hostedArtifactInfo{}, true)
-			if err != nil || !strings.Contains(string(script), item.marker) {
-				t.Fatalf("script err=%v\n%s", err, script)
+			argv, service, task, err := buildWindowsDeploymentCommand(record, `C:\Windows\Temp\0123456789abcdef.exe`)
+			if err != nil {
+				t.Fatal(err)
 			}
-			if strings.Contains(string(script), "FromBase64String('')") || strings.Contains(string(script), "https://") || strings.Contains(string(script), "smb-pipe://") {
-				t.Fatalf("direct-share script contains retrieval material: %s", script)
+			command := strings.Join(argv, " ")
+			if !strings.Contains(strings.ToLower(command), strings.ToLower(item.program)) {
+				t.Fatalf("command does not use %s: %q", item.program, argv)
 			}
-			if item.method == "service-control" && service == "" {
-				t.Fatal("service name not recorded")
+			for _, forbidden := range []string{"powershell", "invoke-command", ".ps1", "https://", "smb-pipe://"} {
+				if strings.Contains(strings.ToLower(command), forbidden) {
+					t.Fatalf("native command contains %q: %q", forbidden, argv)
+				}
 			}
-			if item.method == "scheduled-task" && task == "" {
-				t.Fatal("task name not recorded")
+			if item.method == "service-control" && service != "Undertow-0123456789ab" {
+				t.Fatalf("service name=%q", service)
+			}
+			if item.method == "scheduled-task" && task != "Undertow-Deploy-0123456789ab" {
+				t.Fatalf("task name=%q", task)
 			}
 		})
 	}
 }
 
-func TestWindowsDeploymentHostedHelperDoesNotPersistSecretsInRecordShape(t *testing.T) {
-	hosted := hostedArtifactInfo{Artifact: agentprofile.Artifact{Filename: "agent.exe", SHA256: strings.Repeat("a", 64)}, Retrieval: "https://relay.example:8443/" + strings.Repeat("b", 48), RetrievalPath: "/" + strings.Repeat("b", 48)}
-	record := control.DeploymentRecord{ID: "deployment-one", Target: "ws01", Method: "winrm", Context: "current-user"}
-	script, _, _, err := buildWindowsDeploymentScript(record, `C:\ProgramData\Undertow\agent.exe`, hosted, false)
-	if err != nil || !strings.Contains(string(script), "Invoke-Command") {
-		t.Fatalf("hosted WinRM script err=%v", err)
-	}
-	if strings.Contains(record.DeliveryID, hosted.RetrievalPath) || strings.Contains(record.InstallPath, hosted.RetrievalPath) {
-		t.Fatal("deployment record contains retrieval capability")
-	}
-}
-
-func TestWindowsDeploymentHostedServiceUsesAdminShareAndTaskUsesFlatName(t *testing.T) {
-	hosted := hostedArtifactInfo{Artifact: agentprofile.Artifact{Filename: "agent.exe", SHA256: strings.Repeat("a", 64)}, Retrieval: "https://relay.example:8443/" + strings.Repeat("b", 48), RetrievalPath: "/" + strings.Repeat("b", 48)}
-	service := control.DeploymentRecord{ID: "0123456789abcdef", Target: "ws01", Method: "service-control", Context: "local-system"}
-	script, _, _, err := buildWindowsDeploymentScript(service, `C:\Windows\Temp\0123456789abcdef0123456789abcdef.exe`, hosted, false)
+func TestWindowsDeploymentCurrentUserTaskUsesSourceIdentity(t *testing.T) {
+	record := control.DeploymentRecord{ID: "deployment-one", Target: "ws01", Method: "scheduled-task", Context: "current-user"}
+	argv, _, _, err := buildWindowsDeploymentCommand(record, `C:\Windows\Temp\agent.exe`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	value := string(script)
-	if !strings.Contains(value, `\\ws01\ADMIN$\Temp\0123456789abcdef0123456789abcdef.exe`) || strings.Contains(value, `\\ws01\C$\Windows\Temp`) {
-		t.Fatalf("hosted service did not use ADMIN$: %s", value)
-	}
-
-	task := control.DeploymentRecord{ID: "0123456789abcdef", Target: "ws01", Method: "scheduled-task", Context: "local-system"}
-	_, _, taskName, err := buildWindowsDeploymentScript(task, `C:\Windows\Temp\0123456789abcdef0123456789abcdef.exe`, hosted, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(taskName, `\`) || taskName != "Undertow-Deploy-0123456789ab" {
-		t.Fatalf("task name=%q", taskName)
+	command := strings.Join(argv, " ")
+	if !strings.Contains(command, `%USERDOMAIN%\%USERNAME%`) || !strings.Contains(command, " /IT /NP") {
+		t.Fatalf("current-user task command=%q", argv)
 	}
 }
 
-func TestCompletedDeploymentRequiresMethodOutput(t *testing.T) {
-	empty := completedDeploymentProgress("deployment-one", control.JobInfo{ID: "job-empty", State: "completed"})
-	if empty.State != "failed" || !strings.Contains(empty.Failure, "final success marker") {
-		t.Fatalf("empty result: %+v", empty)
-	}
-	incidental := completedDeploymentProgress("deployment-one", control.JobInfo{ID: "job-incidental", State: "completed", Output: "WMI started process 42."})
-	if incidental.State != "failed" {
-		t.Fatalf("incidental output passed: %+v", incidental)
-	}
-	success := completedDeploymentProgress("deployment-one", control.JobInfo{ID: "job-success", State: "completed", Output: "WMI started process 42.\n" + deploymentSuccessMarker("deployment-one")})
-	if success.State != "waiting" || success.JobID != "job-success" || success.Failure != "" {
-		t.Fatalf("successful result: %+v", success)
-	}
-}
-
-func TestGeneratedWindowsDeploymentScriptsParse(t *testing.T) {
-	if runtime.GOOS != "windows" {
-		t.Skip("PowerShell parser is Windows-specific")
-	}
-	powershell, err := exec.LookPath("powershell.exe")
-	if err != nil {
-		t.Skip("Windows PowerShell is unavailable")
-	}
-	hosted := hostedArtifactInfo{Artifact: agentprofile.Artifact{Filename: "agent.exe", SHA256: strings.Repeat("a", 64)}, Retrieval: "https://relay.example:8443/" + strings.Repeat("b", 48), RetrievalPath: "/" + strings.Repeat("b", 48)}
-	methods := []struct{ method, context string }{{"winrm", "current-user"}, {"wmi", "current-user"}, {"service-control", "local-system"}, {"scheduled-task", "local-system"}}
-	for _, direct := range []bool{false, true} {
-		for _, item := range methods {
-			name := item.method + map[bool]string{false: "-hosted", true: "-direct"}[direct]
-			t.Run(name, func(t *testing.T) {
-				record := control.DeploymentRecord{ID: "0123456789abcdef", Target: "ws01", Method: item.method, Context: item.context}
-				script, _, _, err := buildWindowsDeploymentScript(record, `C:\ProgramData\Undertow\agent.exe`, hosted, direct)
-				if err != nil {
-					t.Fatal(err)
-				}
-				path := filepath.Join(t.TempDir(), "deployment.ps1")
-				if err := os.WriteFile(path, script, 0600); err != nil {
-					t.Fatal(err)
-				}
-				command := `$path='` + strings.ReplaceAll(path, "'", "''") + `'; $errors=$null; [System.Management.Automation.Language.Parser]::ParseFile($path,[ref]$null,[ref]$errors) | Out-Null; if($errors.Count){$errors | ForEach-Object {$_.Message}; exit 1}`
-				if output, err := exec.Command(powershell, "-NoProfile", "-NonInteractive", "-Command", command).CombinedOutput(); err != nil {
-					t.Fatalf("PowerShell parse failed: %v\n%s", err, output)
-				}
-			})
-		}
+func TestWindowsDeploymentNativeCommandRejectsShellMetacharacters(t *testing.T) {
+	record := control.DeploymentRecord{ID: "deployment-one", Target: "ws01", Method: "service-control", Context: "local-system"}
+	if _, _, _, err := buildWindowsDeploymentCommand(record, `C:\Windows\Temp\bad&name.exe`); err == nil {
+		t.Fatal("native command accepted shell metacharacters")
 	}
 }

@@ -18,9 +18,9 @@ import (
 func deploymentPrerequisites(method, context string) string {
 	switch method {
 	case "winrm":
-		return "WinRM and PowerShell remoting enabled; source agent identity authorized on the target"
+		return "WinRM and WinRS enabled; source agent identity authorized for the remote session and ADMIN$"
 	case "wmi":
-		return "remote WMI process creation allowed; hosted delivery also needs target ADMIN$ write access"
+		return "remote WMI process creation allowed; source agent identity has target ADMIN$ write access"
 	case "service-control":
 		return "target Service Control Manager and administrative share access; service-capable build; runs as LocalSystem"
 	case "scheduled-task":
@@ -153,15 +153,15 @@ func runConsoleDeployment(ctx context.Context, output io.Writer, call consoleCal
 		if err := json.Unmarshal(data, &record); err != nil {
 			return err
 		}
-		fmt.Fprintf(output, "Deployment %s prepared. Source may be sleeping; start queues the Job for its next check-in. Prerequisites: %s. Use deploy start %s direct-share|server|agent-host:HOST_ID [INSTALL_PATH].\n", record.ID, deploymentPrerequisites(record.Method, record.Context), record.ID)
+		fmt.Fprintf(output, "Deployment %s prepared. Source may be sleeping; start queues the Job for its next check-in. Prerequisites: %s. Use deploy start %s [INSTALL_PATH].\n", record.ID, deploymentPrerequisites(record.Method, record.Context), record.ID)
 		return nil
 	case "start":
-		if len(args) < 4 || len(args) > 5 {
-			return errors.New("use deploy start ID direct-share|server|agent-host:HOST_ID [INSTALL_PATH]")
+		if len(args) < 3 || len(args) > 4 {
+			return errors.New("use deploy start ID [INSTALL_PATH]")
 		}
-		request := map[string]string{"delivery": args[3]}
-		if len(args) == 5 {
-			request["install_path"] = args[4]
+		request := map[string]string{"delivery": "agent-channel"}
+		if len(args) == 4 {
+			request["install_path"] = args[3]
 		}
 		data, err := call(ctx, http.MethodPost, "/v1/deployments/"+url.PathEscape(args[2])+"/start", request)
 		if err != nil {

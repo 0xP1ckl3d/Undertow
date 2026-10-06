@@ -25,7 +25,7 @@ func TestSelectedAgentDeploymentConsoleUsesStructuredAPI(t *testing.T) {
 			return json.Marshal(control.DeploymentRecord{ID: "deployment-one", State: "prepared"})
 		case "/v1/deployments/deployment-one/start":
 			request, ok := body.(map[string]string)
-			if !ok || request["delivery"] != "server" || request["install_path"] != `C:\ProgramData\Undertow\agent.exe` {
+			if !ok || request["delivery"] != "agent-channel" || request["install_path"] != `C:\Windows\Temp\agent.exe` {
 				t.Fatalf("deployment start request: %#v", body)
 			}
 			return json.Marshal(control.DeploymentRecord{ID: "deployment-one", State: "waiting", JobID: "job-one"})
@@ -43,7 +43,7 @@ func TestSelectedAgentDeploymentConsoleUsesStructuredAPI(t *testing.T) {
 	if err := runConsoleDeployment(context.Background(), &output, call, []string{"deploy", "prepare", "deployment-one"}, "source-agent"); err != nil {
 		t.Fatal(err)
 	}
-	if err := runConsoleDeployment(context.Background(), &output, call, []string{"deploy", "start", "deployment-one", "server", `C:\ProgramData\Undertow\agent.exe`}, "source-agent"); err != nil {
+	if err := runConsoleDeployment(context.Background(), &output, call, []string{"deploy", "start", "deployment-one", `C:\Windows\Temp\agent.exe`}, "source-agent"); err != nil {
 		t.Fatal(err)
 	}
 	if err := runConsoleDeployment(context.Background(), &output, call, []string{"deployments"}, "source-agent"); err != nil {
