@@ -20,14 +20,16 @@ export function TeamView({self,connected}:{self:OperatorAccount|null;connected:b
   const [roster,setRoster]=useState<OperatorAccount[]>([]),[peer,setPeer]=useState(''),[messages,setMessages]=useState<TeamMessage[]>([]),[tasks,setTasks]=useState<TeamTask[]>([]);
   const [draft,setDraft]=useState(''),[error,setError]=useState(''),[loading,setLoading]=useState(true),[sending,setSending]=useState(false),[hasOlder,setHasOlder]=useState(false),[olderBusy,setOlderBusy]=useState(false);
   const [taskForm,setTaskForm]=useState(false),[assignee,setAssignee]=useState(''),[title,setTitle]=useState(''),[description,setDescription]=useState(''),[taskBusy,setTaskBusy]=useState(false),[taskFilter,setTaskFilter]=useState<'active'|'all'>('active');
-  const scroll=useRef<HTMLDivElement>(null),keepPosition=useRef<number|null>(null),stickBottom=useRef(true),latest=useRef(0),conversation=useRef(peer);
+  const scroll=useRef<HTMLDivElement>(null),keepPosition=useRef<number|null>(null),stickBottom=useRef(true),latest=useRef(0),conversation=useRef(peer),drafts=useRef(new Map<string,string>());
   const selected=roster.find(operator=>operator.id===peer);
   const taskByID=useMemo(()=>new Map(tasks.map(task=>[task.id,task])),[tasks]);
   const visibleTasks=tasks.filter(task=>taskFilter==='all'||task.status==='open'||task.status==='in_progress');
   const activeCount=tasks.filter(task=>task.status==='open'||task.status==='in_progress').length;
+  const choosePeer=(next:string)=>{drafts.current.set(peer,draft);conversation.current=next;setPeer(next);setDraft(drafts.current.get(next)||'')};
   const loadRoster=()=>api<OperatorAccount[]>('/team/operators').then(setRoster);
   const loadTasks=()=>api<TeamTask[]>('/team/tasks').then(setTasks);
   useEffect(()=>{if(!connected)return;void Promise.all([loadRoster(),loadTasks()]).catch(e=>setError(String(e)))},[connected]);
+  useEffect(()=>{if(!connected)return;const changed=()=>{void loadRoster().catch(e=>setError(String(e)))};window.addEventListener('undertow-team-roster-changed',changed);return()=>window.removeEventListener('undertow-team-roster-changed',changed)},[connected]);
   useEffect(()=>{
     conversation.current=peer;latest.current=0;setMessages([]);setHasOlder(false);setLoading(true);setError('');stickBottom.current=true;
     if(!connected){setLoading(false);return}
@@ -73,12 +75,12 @@ export function TeamView({self,connected}:{self:OperatorAccount|null;connected:b
     }catch(e){setError(String(e))}finally{setOlderBusy(false)}
   };
   const send=async()=>{
-    const body=draft.trim();if(!body||sending||!connected)return;
+    const body=draft.trim(),recipient=peer;if(!body||sending||!connected)return;
     setSending(true);setError('');
     try{
-      const message=await api<TeamMessage>('/team/messages','POST',{recipient_id:peer,body});
-      setDraft('');stickBottom.current=true;
-      setMessages(previous=>previous.some(item=>item.id===message.id)?previous:[...previous,message]);latest.current=Math.max(latest.current,message.id);
+      const message=await api<TeamMessage>('/team/messages','POST',{recipient_id:recipient,body});
+      drafts.current.delete(recipient);
+      if(conversation.current===recipient){setDraft(current=>current.trim()===body?'':current);stickBottom.current=true;setMessages(previous=>mergeMessages(previous,[message]));latest.current=Math.max(latest.current,message.id)}
     }catch(e){setError(String(e))}finally{setSending(false)}
   };
   const createTask=async()=>{
@@ -95,9 +97,9 @@ export function TeamView({self,connected}:{self:OperatorAccount|null;connected:b
   const canUpdate=(task:TeamTask)=>self?.id===task.assignee_id||self?.id===task.creator_id||self?.role==='team_leader';
   return <div className="team-layout">
     <aside className="team-conversations"><div className="team-side-title"><Users size={16}/><strong>Conversations</strong><button title="Refresh team data" aria-label="Refresh team data" onClick={()=>void Promise.all([loadRoster(),loadTasks()]).catch(e=>setError(String(e)))}><RefreshCw size={14}/></button></div>
-      <button className={'team-conversation '+(!peer?'selected':'')} onClick={()=>setPeer('')}><span className="team-conversation-icon"><Users size={17}/></span><span><strong>Team</strong><small>Shared conversation</small></span></button>
+      <button className={'team-conversation '+(!peer?'selected':'')} onClick={()=>choosePeer('')}><span className="team-conversation-icon"><Users size={17}/></span><span><strong>Team</strong><small>Shared conversation</small></span></button>
       <div className="team-side-label">DIRECT MESSAGES</div>
-      {roster.filter(operator=>operator.id!==self?.id).map(operator=><button key={operator.id} className={'team-conversation '+(peer===operator.id?'selected':'')} onClick={()=>setPeer(operator.id)}><span className="team-avatar">{operator.display_name.slice(0,1).toUpperCase()}</span><span><strong>{operator.display_name}</strong><small>{operator.id}{operator.role==='team_leader'?' · Team Leader':''}</small></span></button>)}
+      {roster.filter(operator=>operator.id!==self?.id).map(operator=><button key={operator.id} className={'team-conversation '+(peer===operator.id?'selected':'')} onClick={()=>choosePeer(operator.id)}><span className="team-avatar">{operator.display_name.slice(0,1).toUpperCase()}</span><span><strong>{operator.display_name}</strong><small>{operator.id}{operator.role==='team_leader'?' · Team Leader':''}</small></span></button>)}
       {!roster.some(operator=>operator.id!==self?.id)&&<p className="team-roster-empty">Other operators appear here when accounts are created.</p>}
       <div className="team-side-foot">Messages are retained by the Undertow server.</div>
     </aside>
@@ -108,10 +110,10 @@ export function TeamView({self,connected}:{self:OperatorAccount|null;connected:b
         {hasOlder&&<button className="team-older" disabled={olderBusy} onClick={()=>void older()}>{olderBusy?'Loading…':'Load older messages'}</button>}
         {loading?<div className="team-empty">Loading conversation…</div>:messages.length===0?<div className="team-empty"><MessageSquare size={28}/><strong>No messages yet</strong><span>{peer?'Start a direct conversation with this operator.':'Post a message for the team or create an assignment.'}</span></div>:messages.map((message,index)=>{
           const previous=messages[index-1],newDay=!previous||dateOf(previous.sent_at)!==dateOf(message.sent_at),task=message.task_id?taskByID.get(message.task_id):undefined;
-          return <div key={message.id}>{newDay&&<div className="team-day"><span>{dateOf(message.sent_at)}</span></div>}{message.kind==='text'?<article className={'team-message '+(message.sender_id===self?.id?'mine':'')}><div className="team-message-meta"><strong>{message.sender_name}</strong><time dateTime={message.sent_at}>{timeOf(message.sent_at)}</time></div><p>{message.body}</p></article>:<article className="team-task-event"><ClipboardList size={15}/><div><strong>{message.kind==='task_created'?'Task assigned':'Task updated'}</strong><p>{task?.title||message.body}</p><small>{message.sender_name} · {task?.assignee_name||'Assigned operator'}{task?` · ${taskStatus[task.status]}`:''} · {timeOf(message.sent_at)}</small></div></article>}</div>
+          return <div key={message.id}>{newDay&&<div className="team-day"><span>{dateOf(message.sent_at)}</span></div>}{message.kind==='text'?<article className={'team-message '+(message.sender_id===self?.id?'mine':'')}><div className="team-message-meta"><strong>{message.sender_name}</strong><time dateTime={message.sent_at}>{timeOf(message.sent_at)}</time></div><p>{message.body}</p></article>:<article className="team-task-event"><ClipboardList size={15}/><div><strong>{message.kind==='task_created'?'Task assigned':'Task updated'}</strong><p>{message.body}</p><small>{message.sender_name} · {task?.assignee_name||'Assigned operator'} · {timeOf(message.sent_at)}</small></div></article>}</div>
         })}
       </div>
-      <div className="team-composer"><label htmlFor="team-message-draft">Message {selected?.display_name||'Team'}</label><textarea id="team-message-draft" value={draft} maxLength={4096} disabled={!connected} onChange={event=>setDraft(event.target.value)} onKeyDown={event=>{if(event.key==='Enter'&&!event.shiftKey&&!event.nativeEvent.isComposing){event.preventDefault();void send()}}} placeholder={connected?'Write a message…':'Waiting for server'} rows={3}/><div><small>Enter to send · Shift+Enter for a new line</small><button disabled={!connected||sending||!draft.trim()} onClick={()=>void send()}><Send size={14}/>{sending?'Sending…':'Send'}</button></div></div>
+      <div className="team-composer"><label htmlFor="team-message-draft">Message {selected?.display_name||'Team'}</label><textarea id="team-message-draft" value={draft} maxLength={4096} disabled={!connected||sending} onChange={event=>setDraft(event.target.value)} onKeyDown={event=>{if(event.key==='Enter'&&!event.shiftKey&&!event.nativeEvent.isComposing){event.preventDefault();void send()}}} placeholder={connected?'Write a message…':'Waiting for server'} rows={3}/><div><small>Enter to send · Shift+Enter for a new line</small><button disabled={!connected||sending||!draft.trim()} onClick={()=>void send()}><Send size={14}/>{sending?'Sending…':'Send'}</button></div></div>
     </section>
     <aside className="team-assignments"><div className="team-assignments-head"><div><span>ASSIGNMENTS</span><h2>Team tasks <em>{activeCount}</em></h2></div><button title="New assignment" aria-label="New assignment" disabled={!connected} onClick={()=>setTaskForm(value=>!value)}>{taskForm?<X size={17}/>:<Plus size={17}/>}</button></div>
       {taskForm&&<div className="team-task-form"><label>Assign to<select value={assignee} onChange={event=>setAssignee(event.target.value)}><option value="">Select operator</option>{roster.map(operator=><option key={operator.id} value={operator.id}>{operator.display_name} · {operator.id}</option>)}</select></label><label>Task title<input value={title} maxLength={160} onChange={event=>setTitle(event.target.value)} placeholder="What needs to be done?"/></label><label>Details <span>optional</span><textarea value={description} maxLength={4000} onChange={event=>setDescription(event.target.value)} rows={4} placeholder="Scope, context, or handoff notes"/></label><button disabled={taskBusy||!assignee||!title.trim()} onClick={()=>void createTask()}>{taskBusy?'Assigning…':'Assign task'}</button></div>}
