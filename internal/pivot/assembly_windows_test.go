@@ -65,7 +65,7 @@ func compileAssemblyFixture(t *testing.T, source string, library bool) []byte {
 }
 
 func TestAssemblyMemoryExecution(t *testing.T) {
-	program := compileAssemblyFixture(t, `using System; class Program { static int Main(string[] args) { Console.WriteLine("args="+String.Join("|",args)); Console.Error.WriteLine("stderr-ok"); return 7; } }`, false)
+	program := compileAssemblyFixture(t, `using System; class Program { static int Main(string[] args) { Console.WriteLine("args="+String.Join("|",args)); Console.Error.WriteLine("stderr-π"); return 7; } }`, false)
 	if meta, err := assembly.Inspect(program); err != nil || meta.Architecture != "amd64" || !meta.Executable {
 		t.Fatalf("inspect=%+v %v", meta, err)
 	}
@@ -79,7 +79,7 @@ func TestAssemblyMemoryExecution(t *testing.T) {
 			}
 			return nil
 		})
-		if code != 7 || err == nil || !strings.Contains(stdout.String(), "args=héllo|two words") || !strings.Contains(stderr.String(), "stderr-ok") {
+		if code != 7 || err == nil || !strings.Contains(stdout.String(), "args=héllo|two words") || !strings.Contains(stderr.String(), "stderr-π") {
 			t.Fatalf("code=%d err=%v stdout=%q stderr=%q", code, err, stdout.String(), stderr.String())
 		}
 	}
@@ -87,6 +87,9 @@ func TestAssemblyMemoryExecution(t *testing.T) {
 
 func TestAssemblyLibraryAndCancellation(t *testing.T) {
 	library := compileAssemblyFixture(t, `using System; using System.Threading; public class Program { public static int Main(string[] args) { if (args.Length>0) Thread.Sleep(30000); Console.WriteLine("library-ok"); return 0; } }`, true)
+	temporary := t.TempDir()
+	t.Setenv("TMP", temporary)
+	t.Setenv("TEMP", temporary)
 	if _, err := assembly.Inspect(library); err != nil {
 		t.Fatal(err)
 	}
@@ -100,5 +103,41 @@ func TestAssemblyLibraryAndCancellation(t *testing.T) {
 	code, err = executeAssembly(ctx, library, []string{"wait"}, func(byte, []byte) error { return nil })
 	if code != -1 || err == nil {
 		t.Fatalf("cancel code=%d err=%v", code, err)
+	}
+	entries, err := os.ReadDir(temporary)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("cancelled worker temporary files remain: %v %v", entries, err)
+	}
+}
+
+func TestAssemblyWorkerRequestAndCleanup(t *testing.T) {
+	request := assemblyWorkerRequest([]byte{0x4d, 0x5a}, []string{"héllo"})
+	if string(request[:4]) != "UTA1" || binary.LittleEndian.Uint32(request[4:8]) != 1 || binary.LittleEndian.Uint32(request[8:12]) != 6 || string(request[12:18]) != "héllo" || binary.LittleEndian.Uint32(request[18:22]) != 2 || string(request[22:]) != "MZ" {
+		t.Fatalf("unexpected worker request: %x", request)
+	}
+
+	program := compileAssemblyFixture(t, `using System; class Program { static int Main(string[] args) { Console.WriteLine(args[0]); return 0; } }`, false)
+	temporary := t.TempDir()
+	t.Setenv("TMP", temporary)
+	t.Setenv("TEMP", temporary)
+	var output strings.Builder
+	code, err := executeAssembly(context.Background(), program, []string{"héllo"}, func(_ byte, data []byte) error {
+		_, _ = output.Write(data)
+		return nil
+	})
+	if err != nil || code != 0 || !strings.Contains(output.String(), "héllo") {
+		t.Fatalf("worker code=%d err=%v output=%q", code, err, output.String())
+	}
+	entries, err := os.ReadDir(temporary)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("worker temporary files remain: %v %v", entries, err)
+	}
+}
+
+func TestAssemblyWorkerAwaitsTaskResult(t *testing.T) {
+	library := compileAssemblyFixture(t, `using System.Threading.Tasks; public class Program { public static Task<int> Main(string[] args) { return Task.FromResult(args.Length + 3); } }`, true)
+	code, err := executeAssembly(context.Background(), library, []string{"one"}, func(byte, []byte) error { return nil })
+	if code != 4 || err == nil || !strings.Contains(err.Error(), "status 4") {
+		t.Fatalf("task result code=%d err=%v", code, err)
 	}
 }

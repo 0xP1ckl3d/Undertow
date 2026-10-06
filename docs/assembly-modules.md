@@ -2,7 +2,7 @@
 
 Undertow supports a fourth module type: a managed Windows .NET Framework 4.x assembly. It complements portable WASM, Undertow native `.module` DLLs, and BOF `.o` objects. The first assembly runtime targets **Windows amd64 agents** and accepts pure-IL AnyCPU or x64 `.exe` and `.dll` PE assemblies. x86-only, mixed-mode, .NET 6+, and single-file .NET applications are outside this subset.
 
-The agent needs 64-bit Windows PowerShell 5.1 and the .NET Framework 4.x CLR. Undertow starts a short-lived PowerShell worker, sends the assembly bytes over stdin, and calls `Assembly.Load(byte[])`. It does not place the assembly or a generated loader script on the agent filesystem. The worker uses the agent's Windows identity and permissions. Dependencies must already be resolvable by the installed CLR; Undertow does not package companion DLLs.
+The agent needs the .NET Framework 4.x CLR. Undertow embeds a dedicated x64 managed worker in the agent binary. For each run it writes that fixed worker executable to a unique temporary directory, starts it directly, sends the assembly bytes and UTF-8 arguments over stdin, and removes the worker directory when it exits. The operator's assembly is loaded with `Assembly.Load(byte[])` and is never written to the agent filesystem. PowerShell is not used for assembly execution. The worker uses the agent's Windows identity and permissions. Dependencies must already be resolvable by the installed CLR; Undertow does not package companion DLLs.
 
 ## Entry point and arguments
 
@@ -47,4 +47,8 @@ class Hello {
 }
 ```
 
-Copy `hello.exe` to `modules/assembly/hello.exe`, or run it directly. The loader checks PE and CLR headers before transfer; the worker reports CLR load and invocation failures through stderr. A missing PowerShell executable produces a worker startup error; a missing or incompatible CLR produces a loader error.
+Copy `hello.exe` to `modules/assembly/hello.exe`, or run it directly. The loader checks PE and CLR headers before transfer; the worker reports CLR load and invocation failures through stderr. A missing or incompatible CLR produces a worker startup or loader error. If the agent cannot create or execute files in its temporary directory, the worker startup error identifies that failure.
+
+## Rebuilding the worker
+
+The fixed worker source is `internal/pivot/assemblyworker/worker.cs`. On a Windows development host, run `internal/pivot/assemblyworker/build.ps1` before building the Go agent if you change that source. The build uses the x64 .NET Framework compiler and produces the worker executable embedded by Go. The worker accepts one bounded binary request (`UTA1`, little-endian argument count and UTF-8 strings, followed by the assembly length and bytes); its protocol is internal to Undertow and does not change the operator commands.

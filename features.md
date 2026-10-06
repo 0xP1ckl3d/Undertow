@@ -348,7 +348,7 @@ Server console: job stop 1
 
 ### .NET Framework assemblies
 
-`run-assembly` loads a pure-IL .NET Framework 4.x `.exe` or `.dll` from transferred bytes in a short-lived Windows PowerShell 5.1 worker on a Windows amd64 agent. It accepts Unicode command-line arguments, streams `Console.Out` and `Console.Error`, and uses the normal foreground and background Jobs paths. Assemblies share the `native` capability and two-run limit; cancellation terminates the worker. See the [.NET assembly guide](docs/assembly-modules.md).
+`run-assembly` loads a pure-IL .NET Framework 4.x `.exe` or `.dll` from transferred bytes in a short-lived dedicated CLR worker on a Windows amd64 agent. It accepts Unicode command-line arguments, streams `Console.Out` and `Console.Error`, and uses the normal foreground and background Jobs paths. Assemblies share the `native` capability and two-run limit; cancellation terminates the worker. PowerShell is not required. See the [.NET assembly guide](docs/assembly-modules.md).
 
 ### Beacon Object Files
 

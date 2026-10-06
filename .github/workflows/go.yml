@@ -23,6 +23,10 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+      - name: Build dedicated .NET Framework worker
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: ./internal/pivot/assemblyworker/build.ps1
       - name: Test
         run: go test -p 1 -timeout 10m ./...
       - name: Vet

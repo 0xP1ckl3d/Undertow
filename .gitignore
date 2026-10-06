@@ -16,6 +16,7 @@ payloads/
 /undertow-*
 *.elf
 *.exe
+!internal/pivot/assemblyworker/worker.exe
 *.dll
 !internal/bof/bridge/bridge.dll
 *.obj

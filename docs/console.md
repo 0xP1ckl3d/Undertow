@@ -245,7 +245,7 @@ To run a WASI module, use `run-wasm ./tool.wasm option`, `run-wasm --stdin ./inp
 
 On a Windows amd64 agent, `run-native ./tool.module option` loads a native Windows DLL module. `run-native --data ./payload.bin ./tool.module` supplies opaque bytes, and `run-native --background ./tool.module` starts a standard job. Use `job stop NUMBER` to request cooperative cancellation. See the [native module guide](native-modules.md).
 
-On a Windows amd64 agent with Windows PowerShell 5.1 and .NET Framework 4.x, `run-assembly ./tool.exe option` runs a managed assembly loaded from transferred bytes. Use `run-assembly --background ./tool.dll` for a retained job, or `load assembly ./tool.exe tool` to register a local command. See the [.NET assembly guide](assembly-modules.md).
+On a Windows amd64 agent with .NET Framework 4.x, `run-assembly ./tool.exe option` runs a managed assembly loaded from transferred bytes in Undertow's dedicated CLR worker. Use `run-assembly --background ./tool.dll` for a retained job, or `load assembly ./tool.exe tool` to register a local command. See the [.NET assembly guide](assembly-modules.md).
 
 To reuse a compatible BOF, inspect it locally with `undertow bof inspect ./tool.o`, then run `run-bof ./tool.o` on a selected Windows amd64 agent. Use `--format` or a sidecar manifest for Beacon arguments. `run-bof --background ./tool.o` uses the same jobs and `native` capability; `job stop NUMBER` terminates its isolated worker. See the [BOF compatibility guide](bof-compatibility.md).
 
