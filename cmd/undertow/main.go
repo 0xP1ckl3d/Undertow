@@ -400,7 +400,7 @@ func serve(args []string) error {
 		return control.DeploymentArtifact{ID: a.ID, ProfileID: a.ProfileID, Profile: a.Profile, Platform: a.Platform, SHA256: a.SHA256, Revoked: a.Revoked, ServiceCapable: a.ServiceCapable}, nil
 	})
 	manager.SetArtifactLookup(func(id string) (string, string, bool) {
-		a, err := distributionStore.Artifact(id)
+		a, err := distributionStore.EnrollmentArtifact(id)
 		if err != nil || a.ID != id {
 			return "", "", false
 		}

@@ -123,7 +123,9 @@ These commands have different effects:
 | `agent shutdown` | Sends an authenticated shutdown request, waits for acknowledgement, and stops that configured agent process. The executable remains. |
 | `payload unhost` | Disables future downloads from that payload's current URL; it does not affect enrollment or running agents. |
 | `payload revoke` | Rejects future enrollment with that payload's credential; current sessions stay connected. Other payloads and manual agent/client enrollment are unaffected. |
-| `payload delete` | Removes the server's payload record, file, retrieval URL, and enrollment credential; it does not remove deployed copies. |
+| `payload delete` | Removes the server file and retrieval URL, and hides the build from the artifact list. It retains the enrollment record so deployed copies can reconnect. Use `payload revoke PAYLOAD_ID` to block future enrollment, including after deletion. Keep the full ID if you may need to revoke a deleted build later. |
+
+Older releases deleted the enrollment secret with the artifact. That cannot be undone by this update. If the original store backup is unavailable, build and deploy a new payload for those agents.
 
 ## Profiles, credentials, and endpoint state
 

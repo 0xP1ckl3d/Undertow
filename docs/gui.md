@@ -103,6 +103,8 @@ For a Windows parent and child, **Relays** also offers an **SMB named pipe** car
 
 Payload **Retrieval settings** controls the server's public HTTPS host and retrieval path separately from a profile's embedded connection address. Changing the path rotates hosted download tokens and invalidates earlier URLs. The artifact page shows each build's profile snapshot, platform, size, hash, download, hosted URL, helper preview and lifecycle controls. A built artifact is not an agent until an operator deploys and starts it.
 
+Deleting an artifact removes its downloadable server file and hides it from the artifact list, but keeps its enrollment record so deployed copies can reconnect. **Revoke enrollment** explicitly to block future callbacks from that build. Keep the full payload ID if you may need to revoke a deleted build later. Deletions made by older Undertow versions removed the enrollment secret; they require a new build or recovery from a backup.
+
 ## Team conversations and assignments
 
 Open **Team** in the navigation rail. The left column has a shared **Team** conversation and one direct conversation for each active operator account. Select a conversation, type a message, and press **Enter** to send. Use **Shift+Enter** for a new line. A direct message is readable only by its sender and recipient; even a Team Leader does not automatically receive other operators' direct messages. The sender name is taken from the authenticated server session, never from browser-supplied identity fields.

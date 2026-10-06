@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"encoding/binary"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -292,5 +293,68 @@ func TestNewWindowsArtifactsAdvertiseServiceSupport(t *testing.T) {
 	}
 	if !artifact.ServiceCapable {
 		t.Fatal("new Windows artifact lacks service capability metadata")
+	}
+}
+
+func TestDeletingArtifactKeepsDeployedEnrollmentUntilRevoked(t *testing.T) {
+	dir := t.TempDir()
+	templates := filepath.Join(dir, "templates")
+	if err := os.MkdirAll(templates, 0700); err != nil {
+		t.Fatal(err)
+	}
+	name := "undertow-agent-linux-amd64"
+	if err := os.WriteFile(filepath.Join(templates, name), []byte("agent-template"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteTemplateManifest(templates, "test", []string{name}); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(dir, "store")
+	store, err := OpenStore(root, templates, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile := testProfile()
+	if _, err := store.Create("office", profile.Config); err != nil {
+		t.Fatal(err)
+	}
+	a, err := store.Build("office", "linux", "amd64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	embedded, err := Read(store.ArtifactPath(a))
+	if err != nil {
+		t.Fatal(err)
+	}
+	transcript := []byte("deleted-artifact-reconnect")
+	_, key, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof := security.MakeAuth(embedded.Config.Credential, key, transcript)
+	if err := store.DeleteArtifact(a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.Artifacts()) != 0 {
+		t.Fatal("deleted artifact remains downloadable/listed")
+	}
+	if _, err := store.Artifact(a.ID); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("deleted artifact remained available: %v", err)
+	}
+	store, err = OpenStore(root, templates, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, id, err := store.VerifyEnrollment(profile.Config.Credential, proof, transcript); err != nil || id != a.ID {
+		t.Fatalf("deployed copy could not reconnect after deletion: %s %v", id, err)
+	}
+	if _, err := store.EnrollmentArtifact(a.ID); err != nil {
+		t.Fatalf("enrollment metadata lost: %v", err)
+	}
+	if _, err := store.Revoke(a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.VerifyEnrollment(profile.Config.Credential, proof, transcript); err == nil {
+		t.Fatal("revoked deleted artifact enrolled")
 	}
 }

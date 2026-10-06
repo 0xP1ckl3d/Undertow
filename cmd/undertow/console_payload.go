@@ -463,6 +463,15 @@ func printPayloadList(ctx context.Context, out io.Writer, call consoleCaller, ho
 }
 
 func runPayloadAction(ctx context.Context, out io.Writer, call consoleCaller, action, ref string) error {
+	// A deleted payload has no public artifact record, but its retained
+	// enrollment can still be revoked by its ID.
+	if action == "revoke" {
+		if _, err := call(ctx, http.MethodPost, "/v1/agent-artifacts/"+url.PathEscape(ref)+"/revoke", nil); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "Payload %s enrollment revoked. Running agents stay connected; future connections using this build are rejected.\n", ref)
+		return nil
+	}
 	a, err := resolvePayload(ctx, call, ref)
 	if err != nil {
 		return err
@@ -519,7 +528,7 @@ func runPayloadAction(ctx context.Context, out io.Writer, call consoleCaller, ac
 		if _, err := call(ctx, http.MethodDelete, path, nil); err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "Payload %s deleted from the server. Copies already on endpoints remain.\n", a.ID)
+		fmt.Fprintf(out, "Payload %s file deleted from the server. Deployed copies retain enrollment and can reconnect. Revoke enrollment explicitly to block them.\n", a.ID)
 	}
 	return nil
 }

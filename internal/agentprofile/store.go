@@ -34,6 +34,7 @@ type Artifact struct {
 	ProfileFormatVersion uint32    `json:"profile_format_version"`
 	Hosted               bool      `json:"hosted"`
 	Revoked              bool      `json:"revoked,omitempty"`
+	Deleted              bool      `json:"deleted,omitempty"`
 	ServiceCapable       bool      `json:"service_capable,omitempty"`
 }
 
@@ -441,7 +442,9 @@ func (s *Store) Artifacts() []Artifact {
 	defer s.mu.Unlock()
 	out := make([]Artifact, 0, len(s.state.Artifacts))
 	for _, a := range s.state.Artifacts {
-		out = append(out, a)
+		if !a.Deleted {
+			out = append(out, a)
+		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Created.Before(out[j].Created) })
 	return out
@@ -450,6 +453,18 @@ func (s *Store) Artifact(id string) (Artifact, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	a, ok := s.find(id)
+	if !ok || a.Deleted {
+		return Artifact{}, os.ErrNotExist
+	}
+	return a, nil
+}
+
+// EnrollmentArtifact retains the identity of a deployed build after its
+// downloadable file has been deleted. Deletion is not enrollment revocation.
+func (s *Store) EnrollmentArtifact(id string) (Artifact, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a, ok := s.state.Artifacts[id]
 	if !ok {
 		return Artifact{}, os.ErrNotExist
 	}
@@ -490,7 +505,7 @@ func (s *Store) setHosted(id string, hosted bool) (Artifact, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	a, ok := s.find(id)
-	if !ok {
+	if !ok || a.Deleted {
 		return Artifact{}, os.ErrNotExist
 	}
 	if hosted {
@@ -593,25 +608,27 @@ func (s *Store) DeleteArtifact(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	a, ok := s.find(id)
-	if !ok {
+	if !ok || a.Deleted {
 		return os.ErrNotExist
 	}
-	delete(s.state.Artifacts, a.ID)
+	old := a
+	a.Deleted = true
+	a.Hosted = false
+	s.state.Artifacts[a.ID] = a
 	token := s.state.RetrievalTokens[a.ID]
 	delete(s.state.RetrievalTokens, a.ID)
-	secret := s.state.EnrollmentSecrets[a.ID]
-	delete(s.state.EnrollmentSecrets, a.ID)
 	if err := s.save(); err != nil {
-		s.state.Artifacts[a.ID] = a
+		s.state.Artifacts[a.ID] = old
 		if token != "" {
 			s.state.RetrievalTokens[a.ID] = token
 		}
-		if secret != "" {
-			s.state.EnrollmentSecrets[a.ID] = secret
-		}
 		return err
 	}
-	return os.Remove(filepath.Join(s.root, "artifacts", a.Filename))
+	err := os.Remove(filepath.Join(s.root, "artifacts", a.Filename))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
 }
 
 // OpenHosted checks the allowlist before opening an artifact. The returned file is
