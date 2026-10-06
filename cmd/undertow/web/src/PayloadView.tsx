@@ -4,6 +4,7 @@ import {api} from './api';
 import {PayloadRetrieval} from './PayloadRetrieval';
 import {AgentPayloadHosting} from './AgentPayloadHosting';
 import type {Agent,Status} from './api';
+import {endpointParts} from './payloadEndpoint';
 
 type Profile = {id:string;name:string;created:string;server:string;transport:string;domain?:string;fingerprint:string;auth_mode:string;payload_profile?:string;websocket_path?:string;tls_server_name?:string;tls_insecure_skip_verify?:boolean;advertised_routes?:string[];denied_capabilities?:string;sleep?:{interval_seconds:number;jitter_percent:number}};
 type Artifact = {id:string;profile:string;platform:string;architecture:string;filename:string;size:number;sha256:string;server_path:string;hosted:boolean;revoked?:boolean;created:string};
@@ -14,11 +15,12 @@ const targets=[{value:'windows/amd64',label:'Windows · x64'},{value:'linux/amd6
 
 const directCarrier=(transport:string)=>transport==='dns'||transport==='quic'||transport==='websocket';
 function hostOnly(endpoint:string){
-  try{return new URL(`tcp://${endpoint}`).hostname||endpoint}catch{return endpoint.replace(/^\[([^\]]+)\]$/,'$1')}
+  return endpointParts(endpoint).host;
 }
 function carrierPort(serverInfo:Status['server']|undefined,transport:string){
   const listen=serverInfo?.listeners?.find(item=>item.transport===transport)?.listen||'';
-  try{const port=new URL(`tcp://${listen}`).port;if(port)return port}catch{}
+  const port=endpointParts(listen).port;
+  if(port)return port;
   return transport==='dns'?'53':'443';
 }
 function endpointForProfile(host:string,transport:string,serverInfo:Status['server']|undefined){
@@ -77,7 +79,7 @@ export function PayloadView({revision,serverAddress,serverInfo,publicHost,client
   const buildIssues:string[]=[];
   if(chosenProfile&&directCarrier(chosenProfile.transport)){
     const expected=carrierPort(serverInfo,chosenProfile.transport);
-    let saved='';try{saved=new URL(`tcp://${chosenProfile.server}`).port}catch{}
+    const saved=endpointParts(chosenProfile.server).port;
     if(saved!==expected)buildIssues.push(`Saved ${chosenProfile.transport.toUpperCase()} port ${saved||'missing'} differs from the server listener port ${expected}. Open this profile and save it to use the listener port.`);
     if(serverInfo?.listeners?.find(item=>item.transport===chosenProfile.transport)?.tls_mode==='self-signed'&&!chosenProfile.tls_insecure_skip_verify&&chosenProfile.transport!=='dns')buildIssues.push('This listener has a self-signed TLS certificate, but this profile does not allow it. Open the profile, enable the self-signed option, and save it.');
   }
