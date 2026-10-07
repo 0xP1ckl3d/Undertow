@@ -83,23 +83,12 @@ func runWinRS(ctx context.Context, output io.Writer, target string, args ...stri
 	return nil
 }
 
-func runWinRM(ctx context.Context, target, path, taskName string, output io.Writer) error {
-	create := []string{"schtasks.exe", "/Create", "/TN", taskName, "/SC", "ONCE", "/ST", "00:00", "/TR", path, "/IT", "/RL", "HIGHEST", "/F"}
-	if err := runWinRS(ctx, output, target, create...); err != nil {
-		return fmt.Errorf("create target-local WinRM task: %w", err)
+func runWinRM(ctx context.Context, target, path, _ string, output io.Writer) error {
+	command := `start "" "` + path + `" && echo Undertow WinRM launch accepted`
+	if _, err := runCommand(ctx, output, "winrs.exe", "-r:"+target, "cmd.exe", "/d", "/s", "/c", command); err != nil {
+		return fmt.Errorf("launch through WinRM: %w", err)
 	}
-	defer cleanupWinRMTask(target, taskName, output)
-	if err := runWinRS(ctx, output, target, "schtasks.exe", "/Run", "/TN", taskName); err != nil {
-		return fmt.Errorf("run target-local WinRM task: %w", err)
-	}
-	fmt.Fprintln(output, "WinRM launch accepted")
-	return waitForLaunch(ctx)
-}
-
-func cleanupWinRMTask(target, taskName string, output io.Writer) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	_ = runWinRS(ctx, output, target, "schtasks.exe", "/Delete", "/TN", taskName, "/F")
+	return nil
 }
 
 func runService(ctx context.Context, target, path, serviceName string, output io.Writer) error {

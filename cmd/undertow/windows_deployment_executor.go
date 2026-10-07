@@ -191,8 +191,7 @@ func buildWindowsDeploymentCommand(record control.DeploymentRecord, installPath 
 	worker := []string{pivot.AgentExecutable, "_jump", record.Method, record.Target, installPath, record.Context, shortID}
 	switch record.Method {
 	case "winrm":
-		taskName := "T" + shortID
-		return worker, "", taskName, nil
+		return worker, "", "", nil
 	case "wmi":
 		return worker, "", "", nil
 	case "service-control":

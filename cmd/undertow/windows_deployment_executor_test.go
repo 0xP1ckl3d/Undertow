@@ -139,8 +139,11 @@ func TestWindowsDeploymentMethodsUseNativeToolsOnly(t *testing.T) {
 			if item.method == "service-control" && service != "S0123456789ab" {
 				t.Fatalf("service name=%q", service)
 			}
-			if (item.method == "scheduled-task" || item.method == "winrm") && task != "T0123456789ab" {
+			if item.method == "scheduled-task" && task != "T0123456789ab" {
 				t.Fatalf("task name=%q", task)
+			}
+			if item.method == "winrm" && task != "" {
+				t.Fatalf("WinRM should not report a task name: %q", task)
 			}
 		})
 	}

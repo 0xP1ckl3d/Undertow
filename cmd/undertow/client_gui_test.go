@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"undertow/internal/control"
 )
 
 func TestGUIMutationRequiresLaunchSessionOriginAndCSRF(t *testing.T) {
@@ -57,5 +59,28 @@ func TestGUIMutationRequiresLaunchSessionOriginAndCSRF(t *testing.T) {
 func TestGUIRejectsRemoteBinding(t *testing.T) {
 	if _, _, err := startClientGUI(context.Background(), &liveClientConsole{}, "0.0.0.0:0", filepath.Join(t.TempDir(), "ui.db")); err == nil {
 		t.Fatal("non-loopback bind accepted")
+	}
+}
+
+func TestGUIKeepsRemoteAPIStatusAndMessage(t *testing.T) {
+	client := &liveClientConsole{request: func(context.Context, string, string, any) ([]byte, error) {
+		return nil, &control.RemoteAPIError{Status: http.StatusConflict, Body: `{"error":"source and artifact versions do not match"}`}
+	}}
+	store, err := openClientGUIStore(filepath.Join(t.TempDir(), "ui.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	gui := &guiServer{client: client, store: store, host: "127.0.0.1:9000", sessionSecret: "session", csrfSecret: "csrf"}
+	request := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:9000/api/deployments", strings.NewReader(`{}`))
+	request.Host = "127.0.0.1:9000"
+	request.Header.Set("Origin", "http://127.0.0.1:9000")
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Undertow-CSRF", "csrf")
+	request.AddCookie(&http.Cookie{Name: "undertow_gui", Value: "session"})
+	response := httptest.NewRecorder()
+	gui.handler().ServeHTTP(response, request)
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "source and artifact versions do not match") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 }

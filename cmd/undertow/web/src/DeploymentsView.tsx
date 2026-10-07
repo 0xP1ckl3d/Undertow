@@ -3,7 +3,7 @@ import {ArrowRight, RefreshCw} from 'lucide-react';
 import {api, type Agent, type Deployment} from './api';
 import './deployments.css';
 
-type Artifact = {id:string;profile:string;profile_id:string;platform:string;architecture:string;sha256:string;revoked?:boolean;filename:string;hosted?:boolean;service_capable?:boolean};
+type Artifact = {id:string;profile:string;profile_id:string;platform:string;architecture:string;sha256:string;undertow_version?:string;revoked?:boolean;filename:string;hosted?:boolean;service_capable?:boolean};
 const methods=[['winrm','WinRM'],['wmi','WMI'],['service-control','Service Control'],['scheduled-task','Scheduled Task']] as const;
 const contexts=[['current-user','Current user'],['local-system','LocalSystem']] as const;
 const methodName=(value:string)=>methods.find(method=>method[0]===value)?.[1]||value;
@@ -34,8 +34,11 @@ export function DeploymentsView({agents,initialSource,initialRecord,revision,onA
   useEffect(()=>{setInstallPath('')},[selectedRecord?.id,selectedRecord?.state]);
   const windowsAgents=agents.filter(agent=>agent.os?.toLowerCase()==='windows'&&(agent.online!==false||agent.connection_state==='sleeping')).sort((a,b)=>(a.hostname||'').localeCompare(b.hostname||'')||a.id.localeCompare(b.id));
   const sourceIsWindows=windowsAgents.some(agent=>agent.id===source);
+  const formSource=windowsAgents.find(agent=>agent.id===source);
   const availableArtifacts=artifacts.filter(item=>item.platform==='windows'&&!item.revoked&&(method!=='service-control'||item.service_capable));
   const chosenArtifact=availableArtifacts.find(item=>item.id===artifact);
+  const versionsMatch=!!formSource?.undertow_version&&!!chosenArtifact?.undertow_version&&formSource.undertow_version===chosenArtifact.undertow_version;
+  const incompatibleSelection=!!formSource&&!!chosenArtifact&&!versionsMatch;
   const allowedContexts=contexts.filter(item=>!(method==='service-control'&&item[0]==='current-user')&&!((method==='winrm'||method==='wmi')&&item[0]==='local-system'));
   const matchingAgents=selectedRecord?agents.filter(agent=>agent.online!==false&&agent.id!==selectedRecord.source_agent_id&&agent.artifact_id===selectedRecord.artifact_id&&agent.os?.toLowerCase()==='windows'&&(!selectedRecord.waiting_at||!!agent.connected&&Date.parse(agent.connected)>=Date.parse(selectedRecord.waiting_at))&&(agent.hostname?.toLowerCase()===selectedRecord.target.toLowerCase()||agent.remote?.startsWith(`${selectedRecord.target}:`)||agent.remote?.startsWith(`[${selectedRecord.target}]:`)||agent.interfaces?.some(address=>address.split('=')[1]?.split('/')[0]===selectedRecord.target))):[];
   const run=async(action:()=>Promise<Deployment>,message:string)=>{setBusy(true);setError('');setNotice('');try{const record=await action();await reload();setSelected(record.id);setNotice(message)}catch(e){setError(String(e))}finally{setBusy(false)}};
@@ -46,15 +49,15 @@ export function DeploymentsView({agents,initialSource,initialRecord,revision,onA
   return <div className="deployments-layout">
     <section className="panel deployment-create"><div className="deployment-section-heading"><div><h2>New jump</h2><p>Record the target and existing Windows build. Preparing checks that the source agent and artifact are available.</p></div></div>
       <div className="deployment-form">
-        <label>Source agent<select value={sourceIsWindows?source:''} onChange={event=>setSource(event.target.value)}><option value="">Select a Windows agent</option>{windowsAgents.map(agent=><option key={agent.id} value={agent.id}>{agent.nickname||agent.hostname||short(agent.id)} · {short(agent.id)}{agent.connection_state==='sleeping'?' · sleeping':''}</option>)}</select></label>
+        <label>Source agent<select value={sourceIsWindows?source:''} onChange={event=>setSource(event.target.value)}><option value="">Select a Windows agent</option>{windowsAgents.map(agent=><option key={agent.id} value={agent.id}>{agent.nickname||agent.hostname||short(agent.id)} · {short(agent.id)}{agent.undertow_version?` · ${agent.undertow_version.split(' ')[0]}`:''}{agent.connection_state==='sleeping'?' · sleeping':''}</option>)}</select></label>
         <label>Target hostname or IP<input value={target} maxLength={253} onChange={event=>setTarget(event.target.value)} placeholder="Target host"/></label>
-        <label>Built artifact<select value={artifact} onChange={event=>setArtifact(event.target.value)}><option value="">Select a Windows build</option>{availableArtifacts.map(item=><option key={item.id} value={item.id}>{item.filename} · {item.profile} · {item.architecture}</option>)}</select></label>
-        {chosenArtifact&&<div className="deployment-artifact-facts"><span>Profile <strong>{chosenArtifact.profile}</strong></span><span>SHA-256 <code>{chosenArtifact.sha256}</code></span></div>}
+        <label>Built artifact<select value={artifact} onChange={event=>setArtifact(event.target.value)}><option value="">Select a Windows build</option>{availableArtifacts.map(item=>{const compatible=!formSource||!!formSource.undertow_version&&!!item.undertow_version&&formSource.undertow_version===item.undertow_version;return <option key={item.id} value={item.id} disabled={!compatible}>{item.filename} · {item.profile} · {item.architecture}{item.undertow_version?` · ${item.undertow_version.split(' ')[0]}`:''}{!compatible?' · incompatible source':''}</option>})}</select></label>
+        {chosenArtifact&&<div className="deployment-artifact-facts"><span>Profile <strong>{chosenArtifact.profile}</strong></span><span>Undertow <strong>{chosenArtifact.undertow_version||'unknown'}</strong></span><span>SHA-256 <code>{chosenArtifact.sha256}</code></span>{incompatibleSelection&&<span className="deployment-error">Source runs {formSource?.undertow_version||'an unknown version'}; select a build with that exact Undertow version or update the source agent.</span>}</div>}
         <label>Windows method<select value={method} onChange={event=>{const next=event.target.value;setMethod(next);if(next==='service-control'&&context==='current-user')setContext('local-system');if((next==='winrm'||next==='wmi')&&context==='local-system')setContext('current-user');if(next==='service-control'&&chosenArtifact&&!chosenArtifact.service_capable)setArtifact('')}}>{methods.map(item=><option key={item[0]} value={item[0]}>{item[1]}</option>)}</select></label>
         <label>Target execution context<select value={context} onChange={event=>setContext(event.target.value)}>{allowedContexts.map(item=><option key={item[0]} value={item[0]}>{item[1]}</option>)}</select></label>
         <div className="deployment-prerequisites"><strong>Prerequisites</strong><p>{prerequisites(method,context)}</p></div>
       </div>
-      <div className="deployment-form-actions"><button disabled={busy||!sourceIsWindows||!target.trim()||!artifact} onClick={create}>Create jump</button><span>Uses the selected source agent's Windows identity. Named-account credentials are not stored.</span></div>
+      <div className="deployment-form-actions"><button disabled={busy||!sourceIsWindows||!target.trim()||!artifact||incompatibleSelection} onClick={create}>Create jump</button><span>Uses the selected source agent's Windows identity. Named-account credentials are not stored.</span></div>
     </section>
     <section className="panel deployment-records"><div className="deployment-section-heading"><div><h2>Jump records</h2><p>Server retained state for Windows targets.</p></div><button className="deployment-refresh" title="Refresh Jump records" onClick={()=>void reload().catch(e=>setError(String(e)))}><RefreshCw size={15}/></button></div>
       <div className="deployment-record-list">{records.map(record=><button key={record.id} className={'deployment-record '+(record.id===selectedRecord?.id?'selected':'')} onClick={()=>{setSelected(record.id);setCandidate('')}}><span><strong>{record.target}</strong><small>{methodName(record.method)} · {record.profile}</small></span><span className={'deployment-state '+record.state}>{record.state}</span></button>)}{records.length===0&&<p>No Jump records yet.</p>}</div>

@@ -486,6 +486,15 @@ func (g *guiServer) remote(method string, path func(*http.Request) string) http.
 		}
 		data, err := g.client.call(control.WithActionClaims(r.Context(), claims), method, path(r), body)
 		if err != nil {
+			var remoteErr *control.RemoteAPIError
+			if errors.As(err, &remoteErr) && remoteErr.Status >= 400 && remoteErr.Status <= 599 {
+				message := remoteAPIErrorMessage(remoteErr.Body)
+				if message == "" {
+					message = http.StatusText(remoteErr.Status)
+				}
+				guiJSON(w, remoteErr.Status, map[string]string{"error": message})
+				return
+			}
 			guiJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 			return
 		}
@@ -505,6 +514,16 @@ func (g *guiServer) remote(method string, path func(*http.Request) string) http.
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(data)
 	}
+}
+
+func remoteAPIErrorMessage(body string) string {
+	var response struct {
+		Error string `json:"error"`
+	}
+	if json.Unmarshal([]byte(body), &response) == nil && strings.TrimSpace(response.Error) != "" {
+		return strings.TrimSpace(response.Error)
+	}
+	return strings.TrimSpace(body)
 }
 
 func (g *guiServer) actionClaims() (control.ActionClaims, error) {

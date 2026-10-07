@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/netip"
@@ -107,8 +108,13 @@ func TestConnectedVPNClientHasLimitedAPI(t *testing.T) {
 		{"POST", "/v1/clients/999/forwards", map[string]string{"agent_id": "agent-a", "bind": "0.0.0.0:8080", "target": "127.0.0.1:8080"}},
 		{"DELETE", "/v1/clients/999/forwards?agent_id=agent-a&bind=0.0.0.0:8080", nil},
 	} {
-		if _, err := CallRemote(ctx, client, request.method, request.path, request.body); err == nil || !strings.Contains(err.Error(), "403") {
-			t.Fatalf("VPN client was not denied %s %s: %v", request.method, request.path, err)
+		if _, err := CallRemote(ctx, client, request.method, request.path, request.body); err == nil {
+			t.Fatalf("VPN client was not denied %s %s", request.method, request.path)
+		} else {
+			var remoteErr *RemoteAPIError
+			if !errors.As(err, &remoteErr) || remoteErr.Status != http.StatusForbidden {
+				t.Fatalf("VPN client error did not preserve HTTP 403 for %s %s: %v", request.method, request.path, err)
+			}
 		}
 	}
 	if len(manager.routes.List()) != 0 {

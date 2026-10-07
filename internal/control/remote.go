@@ -435,7 +435,18 @@ func CallRemote(ctx context.Context, session *mux.Mux, method, path string, body
 		return nil, fmt.Errorf("operator response: %w", err)
 	}
 	if response.Status >= 300 {
-		return nil, fmt.Errorf("operator API: HTTP %d: %s", response.Status, strings.TrimSpace(string(response.Body)))
+		return nil, &RemoteAPIError{Status: response.Status, Body: strings.TrimSpace(string(response.Body))}
 	}
 	return response.Body, nil
+}
+
+// RemoteAPIError preserves an operator API response across the authenticated
+// client channel so local frontends can retain its status and useful message.
+type RemoteAPIError struct {
+	Status int
+	Body   string
+}
+
+func (e *RemoteAPIError) Error() string {
+	return fmt.Sprintf("operator API: HTTP %d: %s", e.Status, e.Body)
 }

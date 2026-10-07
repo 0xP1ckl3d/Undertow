@@ -6,6 +6,7 @@
 .deployment-form input,.deployment-form select,.deployment-link-agent select{width:100%;min-width:0;min-height:38px;padding:7px 10px;background:#0a100e;border:1px solid #405047;border-radius:5px;color:#e5ece6}
 .deployment-form input:focus,.deployment-form select:focus,.deployment-link-agent select:focus{outline:2px solid #c99b4b;outline-offset:1px}
 .deployment-artifact-facts{grid-column:1 / -1;display:flex;flex-wrap:wrap;gap:15px;padding:10px 12px;border:1px solid #38453e;background:#111b16;font-size:12px}.deployment-artifact-facts code{word-break:break-all}
+.deployment-artifact-facts .deployment-error{flex-basis:100%;color:#ffc2b8}
 .deployment-prerequisites{grid-column:1/-1;border-left:2px solid #c99b4b;background:#111b16;padding:10px 12px}.deployment-prerequisites strong{color:#e5ece6;font-size:11px;letter-spacing:.08em;text-transform:uppercase}.deployment-prerequisites p{margin:5px 0 0;color:#aab7ac;line-height:1.45}
 .deployment-form-actions,.deployment-detail-actions{display:flex;align-items:center;flex-wrap:wrap;gap:13px;margin-top:18px}.deployment-form-actions span,.deployment-detail-actions span{font-size:12px;color:#aeb8af}
 .deployment-refresh{display:grid;place-items:center;width:32px;height:32px}.deployment-record-list{display:flex;flex-direction:column;gap:6px;max-height:570px;overflow:auto}
