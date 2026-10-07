@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -36,10 +37,42 @@ const (
 )
 
 type InteractiveRequest struct {
-	Argv  []string `json:"argv,omitempty"`
-	Cols  uint16   `json:"cols,omitempty"`
-	Rows  uint16   `json:"rows,omitempty"`
-	NoPTY bool     `json:"no_pty,omitempty"`
+	Argv       []string           `json:"argv,omitempty"`
+	Cols       uint16             `json:"cols,omitempty"`
+	Rows       uint16             `json:"rows,omitempty"`
+	NoPTY      bool               `json:"no_pty,omitempty"`
+	Credential *WindowsCredential `json:"credential,omitempty"`
+}
+
+func validateInteractiveRequest(request InteractiveRequest) error {
+	if len(request.Argv) != 0 {
+		if err := validateArgv(request.Argv); err != nil {
+			return err
+		}
+	}
+	if request.Credential == nil {
+		return nil
+	}
+	if len(request.Argv) < 2 || request.Argv[0] != AgentExecutable || request.Argv[1] != "_jump" || !request.NoPTY {
+		return errors.New("Windows credentials are supported only for the piped Jump worker")
+	}
+	secretCount := 0
+	if request.Credential.Password != "" {
+		secretCount++
+	}
+	if request.Credential.NTHash != "" {
+		secretCount++
+	}
+	if request.Credential.Username == "" || secretCount != 1 || len(request.Credential.Username) > 256 || len(request.Credential.Domain) > 256 || len(request.Credential.Password) > 512 || len(request.Credential.NTHash) > 32 {
+		return errors.New("invalid Windows credential request")
+	}
+	if request.Credential.NTHash != "" {
+		decoded, err := hex.DecodeString(request.Credential.NTHash)
+		if err != nil || len(decoded) != 16 {
+			return errors.New("invalid Windows NT-hash credential request")
+		}
+	}
+	return nil
 }
 
 type interactiveProcess interface {
@@ -59,10 +92,8 @@ func OpenInteractive(ctx context.Context, agent *mux.Mux, request InteractiveReq
 	if agent == nil {
 		return nil, errors.New("agent is not connected")
 	}
-	if len(request.Argv) != 0 {
-		if err := validateArgv(request.Argv); err != nil {
-			return nil, err
-		}
+	if err := validateInteractiveRequest(request); err != nil {
+		return nil, err
 	}
 	stream, err := agent.Open(ctx, InteractiveDestination)
 	if err != nil {
@@ -77,11 +108,9 @@ func StartInteractive(ctx context.Context, stream interface {
 	io.ReadWriteCloser
 	CloseWrite() error
 }, reader *bufio.Reader, request InteractiveRequest) (*InteractiveSession, error) {
-	if len(request.Argv) != 0 {
-		if err := validateArgv(request.Argv); err != nil {
-			stream.Close()
-			return nil, err
-		}
+	if err := validateInteractiveRequest(request); err != nil {
+		stream.Close()
+		return nil, err
 	}
 	session := &InteractiveSession{stream: stream, reader: reader}
 	ready := make(chan struct{})
@@ -181,7 +210,7 @@ func RejectInteractive(stream *mux.Stream, err error) {
 	}
 }
 
-func serveInteractive(ctx context.Context, stream *mux.Stream) {
+func serveInteractive(ctx context.Context, stream *mux.Stream, caps Capabilities) {
 	defer stream.Close()
 	if err := stream.AcceptOpen(ctx); err != nil {
 		return
@@ -205,11 +234,17 @@ func serveInteractive(ctx context.Context, stream *mux.Stream) {
 		RejectInteractive(stream, errors.New("invalid interactive request"))
 		return
 	}
-	if len(request.Argv) != 0 {
-		if err := validateArgv(request.Argv); err != nil {
-			RejectInteractive(stream, err)
-			return
-		}
+	if err := validateInteractiveRequest(request); err != nil {
+		RejectInteractive(stream, err)
+		return
+	}
+	if request.Credential != nil && !caps.JumpCredentials {
+		RejectInteractive(stream, errors.New("agent supplied Jump credentials are disabled"))
+		return
+	}
+	if request.Credential != nil && request.Credential.UsesNTHash() && !caps.JumpNTHash {
+		RejectInteractive(stream, errors.New("agent NT-hash Jump authentication is disabled"))
+		return
 	}
 	commandCtx, cancel := context.WithCancel(ctx)
 	defer cancel()

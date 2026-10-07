@@ -86,13 +86,17 @@ control connection. Profile and payload views never show enrollment secrets.
   jump create [SOURCE_AGENT] TARGET ARTIFACT_ID METHOD CONTEXT
   jump show ID                       Inspect the request, progress, and result.
   jump prepare ID                    Validate the source snapshot and Windows build.
-  jump start ID [INSTALL_PATH]
+  jump start ID [INSTALL_PATH] [--username USER (--password-file FILE | --nt-hash-file FILE)]
   jump link ID AGENT_ID              Associate a matching enrolled agent.
 Methods: winrm, wmi, service-control, scheduled-task.
 Contexts: WinRM and WMI use current-user; Service Control uses local-system;
 Scheduled Task supports both. A selected agent supplies SOURCE_AGENT automatically.
 Start streams through the source agent to the target administrative share,
-then creates one linked Job for the selected native Windows method.
+then creates one linked Job for the selected native Windows method. A sleeping
+source keeps that Job queued until its next authenticated check-in. The default
+path is C:\Windows\Temp\<random>.exe through ADMIN$\Temp; INSTALL_PATH may be
+another absolute .exe path. Hosting is not required. Optional credentials accept
+USER, DOMAIN\USER, or USER@DOMAIN; the password file stays on the console host.
 `)
 	case "agent":
 		fmt.Fprint(output, `Connected agents:

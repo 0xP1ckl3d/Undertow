@@ -4,6 +4,7 @@ package pivot
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -100,6 +101,7 @@ type interactiveCommandProcess struct{ command *exec.Cmd }
 func (p *interactiveCommandProcess) Wait() error { return p.command.Wait() }
 
 var updateProcThreadAttribute = windows.NewLazySystemDLL("kernel32.dll").NewProc("UpdateProcThreadAttribute")
+var createProcessWithLogonW = windows.NewLazySystemDLL("advapi32.dll").NewProc("CreateProcessWithLogonW")
 
 func attachPseudoConsole(list *windows.ProcThreadAttributeList, console windows.Handle) error {
 	// This Windows attribute takes the HPCON handle value itself as lpValue.
@@ -154,6 +156,20 @@ func startInteractiveProcess(ctx context.Context, request InteractiveRequest) (i
 		return nil, nil, nil, err
 	}
 	if request.NoPTY {
+		if request.Credential != nil {
+			if request.Credential.UsesNTHash() {
+				process, terminal, resize, err := startPipedInteractiveProcess(ctx, path, append(argv[1:], "--credential-stdin"))
+				if err != nil {
+					return nil, nil, nil, err
+				}
+				if err := json.NewEncoder(terminal).Encode(request.Credential); err != nil {
+					_ = terminal.Close()
+					return nil, nil, nil, fmt.Errorf("send NT-hash credential to Jump worker: %w", err)
+				}
+				return process, terminal, resize, nil
+			}
+			return startCredentialedPipedProcess(ctx, path, argv[1:], request.Credential)
+		}
 		return startPipedInteractiveProcess(ctx, path, argv[1:])
 	}
 	app, err := windows.UTF16PtrFromString(path)
@@ -260,4 +276,92 @@ func startPipedInteractiveProcess(ctx context.Context, path string, args []strin
 	_ = outputWrite.Close()
 	terminal := &interactivePipeTerminal{input: inputWrite, output: outputRead}
 	return &interactiveCommandProcess{command: command}, terminal, func(uint16, uint16) error { return nil }, nil
+}
+
+func startCredentialedPipedProcess(ctx context.Context, path string, args []string, credential *WindowsCredential) (interactiveProcess, io.ReadWriteCloser, func(uint16, uint16) error, error) {
+	user, err := windows.UTF16PtrFromString(credential.Username)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	var domain *uint16
+	if credential.Domain != "" {
+		domain, err = windows.UTF16PtrFromString(credential.Domain)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+	}
+	password, err := windows.UTF16PtrFromString(credential.Password)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	application, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	arguments := make([]string, len(args)+1)
+	arguments[0] = windows.EscapeArg(path)
+	for i, argument := range args {
+		arguments[i+1] = windows.EscapeArg(argument)
+	}
+	line, err := windows.UTF16FromString(strings.Join(arguments, " "))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	attributes := windows.SecurityAttributes{Length: uint32(unsafe.Sizeof(windows.SecurityAttributes{})), InheritHandle: 1}
+	var inputRead, inputWrite, outputRead, outputWrite windows.Handle
+	defer func() {
+		for _, handle := range []windows.Handle{inputRead, inputWrite, outputRead, outputWrite} {
+			if handle != 0 {
+				_ = windows.CloseHandle(handle)
+			}
+		}
+	}()
+	if err := windows.CreatePipe(&inputRead, &inputWrite, &attributes, 0); err != nil {
+		return nil, nil, nil, err
+	}
+	if err := windows.SetHandleInformation(inputWrite, windows.HANDLE_FLAG_INHERIT, 0); err != nil {
+		return nil, nil, nil, err
+	}
+	if err := windows.CreatePipe(&outputRead, &outputWrite, &attributes, 0); err != nil {
+		return nil, nil, nil, err
+	}
+	if err := windows.SetHandleInformation(outputRead, windows.HANDLE_FLAG_INHERIT, 0); err != nil {
+		return nil, nil, nil, err
+	}
+	startup := windows.StartupInfo{Cb: uint32(unsafe.Sizeof(windows.StartupInfo{})), Flags: windows.STARTF_USESTDHANDLES, StdInput: inputRead, StdOutput: outputWrite, StdErr: outputWrite}
+	var processInfo windows.ProcessInformation
+	const logonNetCredentialsOnly = 0x00000002
+	result, _, logonProcessErr := createProcessWithLogonW.Call(
+		uintptr(unsafe.Pointer(user)), uintptr(unsafe.Pointer(domain)), uintptr(unsafe.Pointer(password)), logonNetCredentialsOnly,
+		uintptr(unsafe.Pointer(application)), uintptr(unsafe.Pointer(&line[0])), windows.CREATE_NO_WINDOW, 0, 0,
+		uintptr(unsafe.Pointer(&startup)), uintptr(unsafe.Pointer(&processInfo)),
+	)
+	if result == 0 {
+		// CreateProcessWithLogonW cannot be called by LocalSystem. Service-run
+		// agents use a NEW_CREDENTIALS primary token with CreateProcessAsUserW.
+		token, tokenErr := logonWindowsCredential(credential)
+		if tokenErr != nil {
+			return nil, nil, nil, fmt.Errorf("create Jump worker with supplied Windows credentials: %v; fallback: %w", logonProcessErr, tokenErr)
+		}
+		defer token.Close()
+		if err := windows.CreateProcessAsUser(token, application, &line[0], nil, nil, true, windows.CREATE_NO_WINDOW, nil, nil, &startup, &processInfo); err != nil {
+			return nil, nil, nil, fmt.Errorf("create Jump worker with supplied Windows credentials: %v; service fallback: %w", logonProcessErr, err)
+		}
+	}
+	_ = windows.CloseHandle(processInfo.Thread)
+	_ = windows.CloseHandle(inputRead)
+	inputRead = 0
+	_ = windows.CloseHandle(outputWrite)
+	outputWrite = 0
+	terminal := &interactivePipeTerminal{input: os.NewFile(uintptr(inputWrite), "jump-credential-input"), output: os.NewFile(uintptr(outputRead), "jump-credential-output")}
+	inputWrite, outputRead = 0, 0
+	process := &interactiveWindowsProcess{handle: processInfo.Process, done: make(chan struct{})}
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = windows.TerminateProcess(processInfo.Process, 1)
+		case <-process.done:
+		}
+	}()
+	return process, terminal, func(uint16, uint16) error { return nil }, nil
 }

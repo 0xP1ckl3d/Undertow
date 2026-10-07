@@ -158,7 +158,7 @@ func TestStatusShowsAgentAndVPNHostnames(t *testing.T) {
 	if !strings.Contains(output.String(), "Server: websocket (tcp) listening on 0.0.0.0:443") || !strings.Contains(output.String(), "WebSocket path: /undertow") || !strings.Contains(output.String(), "TLS: self-signed") || !strings.Contains(output.String(), "Fingerprint: server-pin") || !strings.Contains(output.String(), "agent-host") || !strings.Contains(output.String(), "vpn-host") {
 		t.Fatalf("hostnames missing from status: %s", output.String())
 	}
-	if !strings.Contains(output.String(), "supported=pivot,exec,hostops,interactive,scripts,wasm,native,upload,download,listeners,relay allowed=pivot,download") {
+	if !strings.Contains(output.String(), "supported=pivot,exec,hostops,interactive,scripts,wasm,native,upload,download,listeners,relay,jump-credentials,jump-nt-hash allowed=pivot,download") {
 		t.Fatalf("agent capabilities missing from status: %s", output.String())
 	}
 }

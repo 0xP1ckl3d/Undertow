@@ -18,26 +18,27 @@ import (
 // queuedJobRequest is retained by the server while an agent is intentionally
 // sleeping. The original typed job API validates the payload before enqueue.
 type queuedJobRequest struct {
-	Kind          string             `json:"kind"`
-	Language      string             `json:"language,omitempty"`
-	Argv          []string           `json:"argv,omitempty"`
-	Source        []byte             `json:"source,omitempty"`
-	Input         []byte             `json:"input,omitempty"`
-	Arguments     []byte             `json:"arguments,omitempty"`
-	Exec          *pivot.ExecRequest `json:"exec,omitempty"`
-	Screen        int                `json:"screen,omitempty"`
-	Actor         actionContext      `json:"actor,omitempty"`
-	DeploymentID  string             `json:"deployment_id,omitempty"`
-	Delivery      string             `json:"delivery,omitempty"`
-	InstallPath   string             `json:"install_path,omitempty"`
-	deferDispatch bool               `json:"-"`
+	Kind              string             `json:"kind"`
+	Language          string             `json:"language,omitempty"`
+	Argv              []string           `json:"argv,omitempty"`
+	Source            []byte             `json:"source,omitempty"`
+	Input             []byte             `json:"input,omitempty"`
+	Arguments         []byte             `json:"arguments,omitempty"`
+	Exec              *pivot.ExecRequest `json:"exec,omitempty"`
+	Screen            int                `json:"screen,omitempty"`
+	Actor             actionContext      `json:"actor,omitempty"`
+	DeploymentID      string             `json:"deployment_id,omitempty"`
+	Delivery          string             `json:"delivery,omitempty"`
+	InstallPath       string             `json:"install_path,omitempty"`
+	CredentialAccount string             `json:"credential_account,omitempty"`
+	deferDispatch     bool               `json:"-"`
 }
 
 const maxQueuedJobs = 32
 const maxQueuedJobBytes = 64 << 20
 
 func (r queuedJobRequest) size() int {
-	n := len(r.Source) + len(r.Input) + len(r.Arguments) + len(r.Language) + len(r.DeploymentID) + len(r.Delivery) + len(r.InstallPath)
+	n := len(r.Source) + len(r.Input) + len(r.Arguments) + len(r.Language) + len(r.DeploymentID) + len(r.Delivery) + len(r.InstallPath) + len(r.CredentialAccount)
 	for _, arg := range r.Argv {
 		n += len(arg)
 	}

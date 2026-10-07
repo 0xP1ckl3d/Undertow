@@ -4,7 +4,7 @@ Operator authentication is required for every client connection. Bootstrap the f
 
 Use this page for terminal flags, startup options, diagnostics, and scripting. For day-to-day operations, start in the [server or client console](console.md): select an agent, configure routes, manage payloads, and run tools there. The [Getting started](getting-started.md) guide gives the full first-run workflow.
 
-For task-focused detail, see [payload deployment](agent-distribution.md), [networking modes](networking-modes.md), the [module bank](module-bank.md), and the [BOF](bof-compatibility.md), [native](native-modules.md), [WASM](wasm-development.md), and [.NET assembly](assembly-modules.md) guides.
+For task-focused detail, see [payload deployment](agent-distribution.md), [Windows Jump](windows-deployments.md), [networking modes](networking-modes.md), the [module bank](module-bank.md), and the [BOF](bof-compatibility.md), [native](native-modules.md), [WASM](wasm-development.md), and [.NET assembly](assembly-modules.md) guides.
 
 Run `undertow help` or `undertow help COMMAND` for terminal help. Linux binary: `./bin/undertow`; Windows binary: `.\bin\undertow.exe`. This page describes the current command line. Paths are relative to the process working directory unless absolute.
 
@@ -121,7 +121,7 @@ In a terminal, `server` starts a separate worker and opens its operator console.
 | `--fingerprint-file PATH` | `server.fingerprint` | Read saved pin or save a trust-on-first-use pin. |
 | `--trust-on-first-use` | Off | Discover the server pin for first connection. |
 | `--agent-key PATH` | `agent.key` | Stable agent Ed25519 identity. |
-| `--deny LIST` | None | Disable agent capabilities independently: `pivot`, `exec`, `hostops`, `interactive`, `scripts`, `wasm`, `upload`, `download`, `listeners`, `relay`. All are allowed by default. `listeners` controls client-service TCP forwards; `relay` controls child-agent relay listeners. Neither opens a listener automatically. |
+| `--deny LIST` | None | Disable agent capabilities independently: `pivot`, `exec`, `hostops`, `interactive`, `scripts`, `wasm`, `native`, `upload`, `download`, `listeners`, `relay`, `jump-credentials`, `jump-nt-hash`. All are allowed by default. `listeners` controls client-service TCP forwards; `relay` controls child-agent relay listeners. `jump-credentials` controls supplied Windows identities; `jump-nt-hash` separately controls NT-hash authentication. None opens a listener automatically. |
 | `--advertise-route CIDR` | None | Offer an additional IPv4 subnet to VPN clients; repeatable. Up IPv4 interface subnets are offered automatically. |
 | `--domain NAME` | `t.undertow.invalid` | DNS only; must match the server. |
 | `--auth`, `--token`, `--token-file`, `--password`, `--password-file` | See above | Enrollment. |

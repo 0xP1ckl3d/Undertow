@@ -52,3 +52,5 @@ Copy `hello.exe` to `modules/assembly/hello.exe`, or run it directly. The loader
 ## Rebuilding the worker
 
 The fixed worker source is `internal/pivot/assemblyworker/worker.cs`. On a Windows development host, run `internal/pivot/assemblyworker/build.ps1` before building the Go agent if you change that source. The build uses the x64 .NET Framework compiler and produces the worker executable embedded by Go. The worker accepts one bounded binary request (`UTA1`, little-endian argument count and UTF-8 strings, followed by the assembly length and bytes); its protocol is internal to Undertow and does not change the operator commands.
+
+Back to [documentation home](README.md).

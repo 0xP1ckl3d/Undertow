@@ -31,6 +31,7 @@ The client also serves an optional local [browser operator workspace](docs/gui.m
 | Reach a service on a remote internal network | An outbound agent and an accepted route from the server or client; TCP, UDP, and ICMP traffic can use the agent's network | [Getting started](docs/getting-started.md#5-route-client-traffic-through-the-agent) · [Routing scenarios](docs/scenarios.md) |
 | Route your laptop's traffic | `client --internal` for agent networks, `client --vpn` for server Internet egress, or both | [Networking modes](docs/networking-modes.md) |
 | Work on a remote host | Interactive shell, one-shot commands, built-in host operations, file transfer, and background jobs | [Console guide](docs/console.md) |
+| Jump from one Windows host to another | Queue a verified artifact transfer and launch through WinRM, WMI, Service Control, or Scheduled Task, with durable Job output and enrolment correlation | [Windows Jump](docs/windows-deployments.md) |
 | Expose a local service through an agent | Let a remote host reach one or several TCP services running on your client | [Remote port forwarding](docs/remote-port-forwarding.md) |
 | Run specialized tools | Stream scripts, run WASM modules, or run Windows native modules, BOFs, and .NET Framework assemblies through the agent | [Module bank](docs/module-bank.md) |
 | Deploy an unattended agent | Build a Windows or Linux payload, host it over HTTPS, generate a verification script, or download it for your own delivery flow. Each running copy gets its own identity. | [Payload deployment](docs/agent-distribution.md) |

@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -12,16 +13,21 @@ import (
 	"time"
 
 	"undertow/internal/mux"
+	"undertow/internal/pivot"
 	"undertow/internal/routing"
 )
 
 type deploymentExecutorStub struct{ preflightErr error }
 
-func (s deploymentExecutorStub) Preflight(_ context.Context, _ DeploymentRecord, _ DeploymentStartRequest) (DeploymentExecutionPlan, error) {
+func (s deploymentExecutorStub) Preflight(_ context.Context, record DeploymentRecord, request DeploymentStartRequest) (DeploymentExecutionPlan, error) {
 	if s.preflightErr != nil {
 		return DeploymentExecutionPlan{}, s.preflightErr
 	}
-	return DeploymentExecutionPlan{DeliveryType: "direct-share", DeliveryID: "source", InstallPath: `C:\ProgramData\Undertow\agent.exe`}, nil
+	credential, err := pivot.NewWindowsCredentialSecret(record.Target, request.Username, request.Password, request.NTHash)
+	if err != nil {
+		return DeploymentExecutionPlan{}, err
+	}
+	return DeploymentExecutionPlan{DeliveryType: "direct-share", DeliveryID: "source", InstallPath: `C:\ProgramData\Undertow\agent.exe`, Credential: credential}, nil
 }
 
 func (deploymentExecutorStub) Start(_ context.Context, _ DeploymentRecord, plan DeploymentExecutionPlan, _ *mux.Mux, existingJobID string, report func(DeploymentProgress) error) error {
@@ -50,7 +56,8 @@ func deploymentTestManager(t *testing.T) (*Manager, *OperationsStore, string) {
 		}
 		return DeploymentArtifact{}, nil
 	})
-	m.agents["source"] = &agentState{inventoryReady: true, inventory: AgentInfo{ID: "source", OS: "windows", ArtifactIdentity: ArtifactIdentity{UndertowVersion: "test"}}}
+	report := pivot.DefaultCapabilities().Report()
+	m.agents["source"] = &agentState{inventoryReady: true, inventory: AgentInfo{ID: "source", OS: "windows", ArtifactIdentity: ArtifactIdentity{UndertowVersion: "test"}, Capabilities: &report}}
 	return m, store, path
 }
 
@@ -218,7 +225,8 @@ func TestSleepingDeploymentQueuesUntilCheckIn(t *testing.T) {
 	m, store, _ := deploymentTestManager(t)
 	defer store.Close()
 	delete(m.agents, "source")
-	m.offlineAgents["source"] = AgentInfo{ID: "source", OS: "windows", ArtifactIdentity: ArtifactIdentity{UndertowVersion: "test"}, ConnectionState: "sleeping", SleepSupported: true, Sleep: SleepPolicy{IntervalSeconds: 15}, SleepLostAfter: time.Now().Add(time.Minute)}
+	report := pivot.DefaultCapabilities().Report()
+	m.offlineAgents["source"] = AgentInfo{ID: "source", OS: "windows", ArtifactIdentity: ArtifactIdentity{UndertowVersion: "test"}, Capabilities: &report, ConnectionState: "sleeping", SleepSupported: true, Sleep: SleepPolicy{IntervalSeconds: 15}, SleepLostAfter: time.Now().Add(time.Minute)}
 	m.SetDeploymentMethodExecutor(deploymentExecutorStub{})
 	record, err := m.createDeployment(context.Background(), createDeploymentRequest{SourceAgentID: "source", Target: "ws06", ArtifactID: "build-one", Method: "winrm", Context: "current-user"})
 	if err != nil {
@@ -241,6 +249,157 @@ func TestSleepingDeploymentQueuesUntilCheckIn(t *testing.T) {
 	}
 	if got.State != "dispatching" || got.JobID == "" || !strings.Contains(got.Progress, "next check-in") {
 		t.Fatalf("queued record: %+v err=%v", got, err)
+	}
+}
+
+func TestSleepingDeploymentKeepsPasswordOnlyInMemory(t *testing.T) {
+	m, store, _ := deploymentTestManager(t)
+	defer store.Close()
+	delete(m.agents, "source")
+	report := pivot.DefaultCapabilities().Report()
+	m.offlineAgents["source"] = AgentInfo{ID: "source", OS: "windows", ArtifactIdentity: ArtifactIdentity{UndertowVersion: "test"}, Capabilities: &report, ConnectionState: "sleeping", SleepSupported: true, Sleep: SleepPolicy{IntervalSeconds: 15}, SleepLostAfter: time.Now().Add(time.Minute)}
+	m.SetDeploymentMethodExecutor(deploymentExecutorStub{})
+	record, err := m.createDeployment(context.Background(), createDeploymentRequest{SourceAgentID: "source", Target: "ws06", ArtifactID: "build-one", Method: "winrm", Context: "current-user"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.prepareDeployment(record.ID); err != nil {
+		t.Fatal(err)
+	}
+	const password = "never persist this password"
+	if err := m.startDeployment(context.Background(), record.ID, DeploymentStartRequest{Username: `LAB\operator`, Password: password}); err != nil {
+		t.Fatal(err)
+	}
+	queuedRecord, err := store.Deployment(record.ID)
+	if err != nil || queuedRecord.Account != `LAB\operator` || queuedRecord.JobID == "" {
+		t.Fatalf("queued credential record=%+v err=%v", queuedRecord, err)
+	}
+	queued, err := store.LoadQueuedJobs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := queued[queuedRecord.JobID]
+	encoded, err := json.Marshal(request)
+	if err != nil || strings.Contains(string(encoded), password) || request.CredentialAccount != `LAB\operator` {
+		t.Fatalf("persisted queued credential request=%s err=%v", encoded, err)
+	}
+	credential, ok := m.deploymentCredentials[record.ID]
+	if !ok || credential.Password != password {
+		t.Fatal("credential was not retained in memory for queued dispatch")
+	}
+	if err := m.CancelJob(0, queuedRecord.JobID); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := m.deploymentCredentials[record.ID]; ok {
+		t.Fatal("cancelled Jump retained supplied credentials")
+	}
+}
+
+func TestSleepingDeploymentKeepsNTHashOnlyInMemory(t *testing.T) {
+	m, store, _ := deploymentTestManager(t)
+	defer store.Close()
+	delete(m.agents, "source")
+	report := pivot.DefaultCapabilities().Report()
+	m.offlineAgents["source"] = AgentInfo{ID: "source", OS: "windows", ArtifactIdentity: ArtifactIdentity{UndertowVersion: "test"}, Capabilities: &report, ConnectionState: "sleeping", SleepSupported: true, Sleep: SleepPolicy{IntervalSeconds: 15}, SleepLostAfter: time.Now().Add(time.Minute)}
+	m.SetDeploymentMethodExecutor(deploymentExecutorStub{})
+	record, err := m.createDeployment(context.Background(), createDeploymentRequest{SourceAgentID: "source", Target: "ws06", ArtifactID: "build-one", Method: "wmi", Context: "current-user"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.prepareDeployment(record.ID); err != nil {
+		t.Fatal(err)
+	}
+	const hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	if err := m.startDeployment(context.Background(), record.ID, DeploymentStartRequest{Username: `LAB\operator`, NTHash: hash}); err != nil {
+		t.Fatal(err)
+	}
+	queuedRecord, err := store.Deployment(record.ID)
+	if err != nil || queuedRecord.Account != `LAB\operator` || queuedRecord.JobID == "" {
+		t.Fatalf("queued hash record=%+v err=%v", queuedRecord, err)
+	}
+	queued, err := store.LoadQueuedJobs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(queued[queuedRecord.JobID])
+	if err != nil || strings.Contains(string(encoded), hash) {
+		t.Fatalf("persisted NT hash in queued request=%s err=%v", encoded, err)
+	}
+	credential, ok := m.deploymentCredentials[record.ID]
+	if !ok || credential.NTHash != hash || credential.Password != "" {
+		t.Fatal("NT hash was not retained only in memory for queued dispatch")
+	}
+}
+
+func TestSuppliedCredentialRejectsOlderSourceWithoutCapability(t *testing.T) {
+	m, store, _ := deploymentTestManager(t)
+	defer store.Close()
+	m.agents["source"].inventory.Capabilities = nil
+	m.SetDeploymentMethodExecutor(deploymentExecutorStub{})
+	record, err := m.createDeployment(context.Background(), createDeploymentRequest{SourceAgentID: "source", Target: "ws06", ArtifactID: "build-one", Method: "winrm", Context: "current-user"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.prepareDeployment(record.ID); err != nil {
+		t.Fatal(err)
+	}
+	err = m.startDeployment(context.Background(), record.ID, DeploymentStartRequest{Username: `LAB\operator`, Password: "test password"})
+	if err == nil || !strings.Contains(err.Error(), "does not support supplied Jump credentials") {
+		t.Fatalf("older source credential start error=%v", err)
+	}
+	prepared, err := store.Deployment(record.ID)
+	if err != nil || prepared.State != "prepared" || prepared.Account != "" {
+		t.Fatalf("older source mutated record=%+v err=%v", prepared, err)
+	}
+}
+
+func TestNTHashRejectsSourceWithoutHashCapability(t *testing.T) {
+	m, store, _ := deploymentTestManager(t)
+	defer store.Close()
+	report := pivot.DefaultCapabilities().Report()
+	allowed := report.Allowed[:0]
+	for _, capability := range report.Allowed {
+		if capability != "jump-nt-hash" {
+			allowed = append(allowed, capability)
+		}
+	}
+	report.Allowed = allowed
+	m.agents["source"].inventory.Capabilities = &report
+	m.SetDeploymentMethodExecutor(deploymentExecutorStub{})
+	record, err := m.createDeployment(context.Background(), createDeploymentRequest{SourceAgentID: "source", Target: "ws06", ArtifactID: "build-one", Method: "wmi", Context: "current-user"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.prepareDeployment(record.ID); err != nil {
+		t.Fatal(err)
+	}
+	err = m.startDeployment(context.Background(), record.ID, DeploymentStartRequest{Username: `LAB\operator`, NTHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"})
+	if err == nil || !strings.Contains(err.Error(), "does not support NT-hash") {
+		t.Fatalf("source without hash capability error=%v", err)
+	}
+}
+
+func TestSourceIdentityStillAllowsSourceWithoutCredentialCapability(t *testing.T) {
+	m, store, _ := deploymentTestManager(t)
+	defer store.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	m.agents["source"].inventory.Capabilities = nil
+	m.agents["source"].mux = mux.New(ctx, &idleTransport{done: make(chan struct{})}, true)
+	m.SetDeploymentMethodExecutor(deploymentExecutorStub{})
+	record, err := m.createDeployment(context.Background(), createDeploymentRequest{SourceAgentID: "source", Target: "ws06", ArtifactID: "build-one", Method: "winrm", Context: "current-user"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.prepareDeployment(record.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.startDeployment(context.Background(), record.ID, DeploymentStartRequest{}); err != nil {
+		t.Fatalf("source-identity Jump regressed for an older source: %v", err)
+	}
+	started, err := store.Deployment(record.ID)
+	if err != nil || started.State != "waiting" || started.Account != "" {
+		t.Fatalf("source-identity Jump=%+v err=%v", started, err)
 	}
 }
 

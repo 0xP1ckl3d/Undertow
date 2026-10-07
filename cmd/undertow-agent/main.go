@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -24,7 +26,20 @@ func main() {
 		return
 	}
 	if len(os.Args) > 1 && os.Args[1] == "_jump" {
-		if err := windowsdeploy.Run(context.Background(), os.Args[2:], os.Stdout); err != nil {
+		var err error
+		args := os.Args[2:]
+		if len(args) == 6 && args[5] == "--credential-stdin" {
+			var credential windowsdeploy.HashCredential
+			decoder := json.NewDecoder(io.LimitReader(os.Stdin, 2048))
+			if decodeErr := decoder.Decode(&credential); decodeErr != nil {
+				err = errors.New("invalid Jump credential input")
+			} else {
+				err = windowsdeploy.RunNTHash(context.Background(), args[:5], credential, os.Stdout)
+			}
+		} else {
+			err = windowsdeploy.Run(context.Background(), args, os.Stdout)
+		}
+		if err != nil {
 			_, _ = fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}

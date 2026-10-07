@@ -123,7 +123,7 @@ func (m *Manager) StartScriptJob(ctx context.Context, owner uint64, agentID, lan
 // durable Job for a deployment. argv is sent only to the live agent session;
 // deployment history retains output and method metadata without raw command
 // content or artifact retrieval capabilities.
-func (m *Manager) StartDeploymentCommandJob(ctx context.Context, agentID, deploymentID, existingJobID string, argv []string) (JobInfo, error) {
+func (m *Manager) StartDeploymentCommandJob(ctx context.Context, agentID, deploymentID, existingJobID string, argv []string, credentials ...*pivot.WindowsCredential) (JobInfo, error) {
 	m.mu.RLock()
 	state := m.agents[agentID]
 	count := len(m.jobs)
@@ -139,7 +139,11 @@ func (m *Manager) StartDeploymentCommandJob(ctx context.Context, agentID, deploy
 	}
 	startCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	session, err := pivot.OpenInteractive(startCtx, state.mux, pivot.InteractiveRequest{Argv: argv, NoPTY: true})
+	var credential *pivot.WindowsCredential
+	if len(credentials) != 0 {
+		credential = credentials[0]
+	}
+	session, err := pivot.OpenInteractive(startCtx, state.mux, pivot.InteractiveRequest{Argv: argv, NoPTY: true, Credential: credential})
 	if err != nil {
 		return JobInfo{}, err
 	}
@@ -632,6 +636,9 @@ func (m *Manager) CancelJob(owner uint64, id string) error {
 	session := job.session
 	info, ownerKey, outputPath, store := job.info, job.ownerKey, job.outputPath, m.operations
 	m.mu.Unlock()
+	if info.DeploymentID != "" {
+		m.clearDeploymentCredential(info.DeploymentID)
+	}
 	if file != nil {
 		_ = file.Sync()
 		_ = file.Close()

@@ -77,7 +77,7 @@ func printConsoleOverview(output io.Writer, vpnClient, selected, serverAttached 
 	}
 	m.section("PAYLOAD DEPLOYMENT")
 	m.row("jumps [SOURCE_AGENT]", "List Windows Jump records")
-	m.row("jump start ID [PATH]", "Stream and start a prepared Jump")
+	m.row("jump start ID [PATH] [--username USER (--password-file FILE | --nt-hash-file FILE)]", "Queue a prepared Windows Jump")
 	m.row("jump create [SOURCE] TARGET ARTIFACT METHOD CONTEXT", "Record a Windows Jump")
 	m.row("jump show|prepare ID", "Inspect or prepare one Jump")
 	m.row("payload", "Show the profile → build → host → run workflow")

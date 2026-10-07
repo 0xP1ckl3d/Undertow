@@ -41,9 +41,21 @@ team task cancel TASK_ID
 
 `team` shows recent shared messages and task activity. `team dm ID` shows only the conversation between your account and that operator; `team dm ID MESSAGE` sends to that operator. Only the sender and recipient can read a direct conversation. Task changes may be made by the assignee, creator, or a Team Leader. Messages and assignments persist on the server across client restarts; task changes also appear in the shared team timeline. See [Team conversations and assignments](gui.md#team-conversations-and-assignments) for the browser workflow.
 
-## Payload deployment
+## Windows Jump and payload deployment
 
-For a guided Windows jump, select a Windows agent and run `jump create TARGET ARTIFACT_ID METHOD CONTEXT`, then `jump prepare ID` and `jump start ID [INSTALL_PATH]`. Jump streams the verified build through the authenticated source-agent channel to the target administrative share. Use `jumps`, `jump show ID`, and the linked Job to inspect progress. See [Jump](windows-deployments.md).
+For a guided Windows jump, select a connected or intentionally sleeping Windows agent and create a durable record. Creation and preparation do not touch the target. Start queues one retained Job, streams the artifact through the source agent to the target administrative share, verifies its SHA-256, and invokes the selected native Windows method:
+
+```text
+use SOURCE_AGENT
+jump create TARGET ARTIFACT_ID winrm current-user
+jump prepare JUMP_ID
+jump start JUMP_ID
+jump show JUMP_ID
+```
+
+Use `winrm`, `wmi`, `service-control`, or `scheduled-task`. WinRM and WMI use `current-user`; Service Control uses `local-system`; Scheduled Task supports either. With no path override, Jump writes a random `.exe` under `C:\Windows\Temp` through `ADMIN$\Temp`. A sleeping source keeps the Job queued until its next authenticated check-in, so the operator does not need to race its awake window. Use `jumps [SOURCE_AGENT]`, the linked Job and Transfer, and `jump link JUMP_ID AGENT_ID` for an ambiguous enrolment. See [Windows Jump](windows-deployments.md) for prerequisites, states, cleanup, and correlation rules.
+
+Start uses the source agent's Windows identity by default. To use another target account without putting its secret in console history, supply `--username USER|DOMAIN\USER|USER@DOMAIN` with either `--password-file PATH` or `--nt-hash-file PATH`. The flags are mutually exclusive. NT-hash mode supports WMI, Service Control, and LocalSystem Scheduled Task. The console reads the local file only for the request. A queued secret remains in server memory until the source checks in and is cleared on a server restart.
 
 Type `payload` for the four-step profile → build → host → run guide. Both the server console and an authenticated client console can manage profiles and payloads, including downloading built binaries:
 

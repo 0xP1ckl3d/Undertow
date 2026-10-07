@@ -89,7 +89,7 @@ func ServeAgentWithLifecycle(ctx context.Context, m *mux.Mux, caps Capabilities,
 				s.Fail(errors.New("agent interactive sessions are disabled"))
 				continue
 			}
-			go serveInteractive(ctx, s)
+			go serveInteractive(ctx, s, caps)
 			continue
 		}
 		if s.Destination() == ScriptDestination {

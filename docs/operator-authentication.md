@@ -50,3 +50,5 @@ operators revoke alice
 `create` and `reset` read the password from a local file in the console; the GUI offers a password input instead. Do not put a password in a command argument. The GUI shows the authenticated account under **Settings → Identity**. Team Leaders can create accounts, change roles, enable or disable accounts, reset passwords, and revoke accounts there. Disabling is reversible. Revocation is permanent and retains the account ID and audit history; IDs cannot be reused. The final active Team Leader cannot be disabled, revoked, or demoted.
 
 Any role, state, or password change closes that account's connected sessions. An enabled account reconnects with its current password; a disabled account cannot reconnect. The server records client actions under the server-bound operator ID and display name, even if a client sends different identity text. Audit history labels this attribution `server_authenticated_operator`.
+
+Back to [documentation home](README.md).

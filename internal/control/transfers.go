@@ -42,6 +42,17 @@ type TransferRecord struct {
 // Transfers history for a server-owned deployment upload. The remote path may
 // be a Windows administrative share resolved by the source agent.
 func (m *Manager) StreamDeploymentArtifact(ctx context.Context, agentID string, source *mux.Mux, localPath, remotePath string) (pivot.FileMessage, TransferRecord, error) {
+	return m.streamDeploymentArtifact(ctx, agentID, source, localPath, remotePath, nil)
+}
+
+// StreamDeploymentArtifactWithCredential applies an operator-supplied Windows
+// network identity only inside the authenticated upload stream. Transfer
+// history retains ordinary metadata and never the credential.
+func (m *Manager) StreamDeploymentArtifactWithCredential(ctx context.Context, agentID string, source *mux.Mux, localPath, remotePath string, credential *pivot.WindowsCredential) (pivot.FileMessage, TransferRecord, error) {
+	return m.streamDeploymentArtifact(ctx, agentID, source, localPath, remotePath, credential)
+}
+
+func (m *Manager) streamDeploymentArtifact(ctx context.Context, agentID string, source *mux.Mux, localPath, remotePath string, credential *pivot.WindowsCredential) (pivot.FileMessage, TransferRecord, error) {
 	var empty pivot.FileMessage
 	if source == nil {
 		return empty, TransferRecord{}, errors.New("source agent is disconnected")
@@ -66,7 +77,7 @@ func (m *Manager) StreamDeploymentArtifact(ctx context.Context, agentID string, 
 		return empty, TransferRecord{}, err
 	}
 	m.PublishEvent("transfer.changed", record.ID)
-	result, transferErr := pivot.TransferFileDirectProgress(ctx, source, agentID, "upload", localPath, remotePath, func(progress pivot.TransferProgress) {
+	result, transferErr := pivot.TransferFileDirectCredentialProgress(ctx, source, agentID, "upload", localPath, remotePath, credential, func(progress pivot.TransferProgress) {
 		record.Bytes = progress.Bytes
 		if store.saveTransfer(record) == nil {
 			m.PublishEvent("transfer.changed", record.ID)

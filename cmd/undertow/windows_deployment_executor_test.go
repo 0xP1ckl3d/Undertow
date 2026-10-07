@@ -110,6 +110,42 @@ func TestWindowsDeploymentInstallPathAndShare(t *testing.T) {
 	}
 }
 
+func TestWindowsDeploymentPreflightAcceptsOptionalCredentialForms(t *testing.T) {
+	store, artifact := deploymentArtifactStore(t)
+	executor := &windowsDeploymentExecutor{distribution: &agentDistribution{store: store}}
+	record := control.DeploymentRecord{ID: "deployment-one", SourceAgentID: "source", Target: "app01.example.com", ArtifactID: artifact.ID, ArtifactSHA256: artifact.SHA256, Method: "winrm", Context: "current-user"}
+	for _, account := range []string{"local-user", `LAB\operator`, "operator@example.com"} {
+		plan, err := executor.Preflight(context.Background(), record, control.DeploymentStartRequest{Username: account, Password: "test password"})
+		if err != nil || plan.Credential == nil || plan.Credential.Password != "test password" {
+			t.Fatalf("account %q: plan=%+v err=%v", account, plan, err)
+		}
+	}
+	for _, request := range []control.DeploymentStartRequest{{Username: "local-user"}, {Password: "test password"}, {Username: `bad\\account`, Password: "test password"}} {
+		if _, err := executor.Preflight(context.Background(), record, request); err == nil {
+			t.Fatalf("accepted invalid credential request: %+v", request)
+		}
+	}
+}
+
+func TestWindowsDeploymentPreflightAcceptsNTHashForSupportedMethods(t *testing.T) {
+	store, artifact := deploymentArtifactStore(t)
+	executor := &windowsDeploymentExecutor{distribution: &agentDistribution{store: store}}
+	const hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	for _, item := range []struct{ method, context string }{{"wmi", "current-user"}, {"service-control", "local-system"}, {"scheduled-task", "local-system"}} {
+		record := control.DeploymentRecord{ID: "deployment-one", SourceAgentID: "source", Target: "app01", ArtifactID: artifact.ID, ArtifactSHA256: artifact.SHA256, Method: item.method, Context: item.context}
+		plan, err := executor.Preflight(context.Background(), record, control.DeploymentStartRequest{Username: `LAB\operator`, NTHash: hash})
+		if err != nil || plan.Credential == nil || plan.Credential.NTHash != hash {
+			t.Fatalf("%s: plan=%+v err=%v", item.method, plan, err)
+		}
+	}
+	for _, item := range []struct{ method, context string }{{"winrm", "current-user"}, {"scheduled-task", "current-user"}} {
+		record := control.DeploymentRecord{ID: "deployment-one", SourceAgentID: "source", Target: "app01", ArtifactID: artifact.ID, ArtifactSHA256: artifact.SHA256, Method: item.method, Context: item.context}
+		if _, err := executor.Preflight(context.Background(), record, control.DeploymentStartRequest{Username: `LAB\operator`, NTHash: hash}); err == nil {
+			t.Fatalf("accepted unsupported NT-hash method/context: %+v", item)
+		}
+	}
+}
+
 func TestWindowsDeploymentMethodsUseNativeToolsOnly(t *testing.T) {
 	methods := []struct {
 		method  string

@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 
 	"undertow/internal/control"
@@ -18,16 +19,16 @@ import (
 func deploymentPrerequisites(method, context string) string {
 	switch method {
 	case "winrm":
-		return "WinRM and WinRS enabled; source agent identity authorized for the remote session and ADMIN$"
+		return "WinRM and WinRS enabled; selected Windows identity authorized for the remote session and ADMIN$"
 	case "wmi":
-		return "remote WMI process creation allowed; source agent identity has target ADMIN$ write access"
+		return "remote WMI process creation allowed; selected Windows identity has target ADMIN$ write access"
 	case "service-control":
-		return "target Service Control Manager and administrative share access; service-capable build; runs as LocalSystem"
+		return "selected Windows identity has target Service Control Manager and administrative share access; service-capable build; runs as LocalSystem"
 	case "scheduled-task":
 		if context == "current-user" {
-			return "remote Scheduled Task and administrative share access; source identity has an interactive target session"
+			return "remote Scheduled Task and administrative share access; selected Windows identity has an interactive target session"
 		}
-		return "remote Scheduled Task and administrative share access; task runs as LocalSystem"
+		return "selected Windows identity has remote Scheduled Task and administrative share access; task runs as LocalSystem"
 	default:
 		return "unknown method"
 	}
@@ -157,12 +158,68 @@ func runConsoleDeployment(ctx context.Context, output io.Writer, call consoleCal
 		fmt.Fprintf(output, "Jump %s prepared. Source may be sleeping; start queues the Job for its next check-in. Prerequisites: %s. Use jump start %s [INSTALL_PATH].\n", record.ID, deploymentPrerequisites(record.Method, record.Context), record.ID)
 		return nil
 	case "start":
-		if len(args) < 3 || len(args) > 4 {
-			return errors.New("use jump start ID [INSTALL_PATH]")
+		if len(args) < 3 {
+			return errors.New("use jump start ID [INSTALL_PATH] [--username USER (--password-file FILE | --nt-hash-file FILE)]")
 		}
 		request := map[string]string{"delivery": "agent-channel"}
-		if len(args) == 4 {
-			request["install_path"] = args[3]
+		installPath, username, passwordFile, hashFile := "", "", "", ""
+		for i := 3; i < len(args); i++ {
+			switch args[i] {
+			case "--username":
+				i++
+				if i >= len(args) || username != "" {
+					return errors.New("--username requires one Windows account")
+				}
+				username = args[i]
+			case "--password-file":
+				i++
+				if i >= len(args) || passwordFile != "" {
+					return errors.New("--password-file requires one local file")
+				}
+				passwordFile = args[i]
+			case "--nt-hash-file":
+				i++
+				if i >= len(args) || hashFile != "" {
+					return errors.New("--nt-hash-file requires one local file")
+				}
+				hashFile = args[i]
+			default:
+				if strings.HasPrefix(args[i], "--") || installPath != "" {
+					return errors.New("use jump start ID [INSTALL_PATH] [--username USER (--password-file FILE | --nt-hash-file FILE)]")
+				}
+				installPath = args[i]
+			}
+		}
+		if installPath != "" {
+			request["install_path"] = installPath
+		}
+		if passwordFile != "" && hashFile != "" {
+			return errors.New("choose --password-file or --nt-hash-file")
+		}
+		if (username == "") != (passwordFile == "" && hashFile == "") {
+			return errors.New("use --username with --password-file or --nt-hash-file")
+		}
+		if passwordFile != "" {
+			secret, err := os.ReadFile(passwordFile)
+			if err != nil {
+				return fmt.Errorf("read Windows password file: %w", err)
+			}
+			password := strings.TrimRight(string(secret), "\r\n")
+			if password == "" {
+				return errors.New("Windows password file is empty")
+			}
+			request["username"], request["password"] = username, password
+		}
+		if hashFile != "" {
+			secret, err := os.ReadFile(hashFile)
+			if err != nil {
+				return fmt.Errorf("read Windows NT hash file: %w", err)
+			}
+			hash := strings.TrimSpace(string(secret))
+			if hash == "" {
+				return errors.New("Windows NT hash file is empty")
+			}
+			request["username"], request["nt_hash"] = username, hash
 		}
 		data, err := call(ctx, http.MethodPost, "/v1/deployments/"+url.PathEscape(args[2])+"/start", request)
 		if err != nil {

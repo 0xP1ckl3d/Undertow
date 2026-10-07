@@ -14,6 +14,9 @@ import (
 )
 
 func startInteractiveProcess(ctx context.Context, request InteractiveRequest) (interactiveProcess, io.ReadWriteCloser, func(uint16, uint16) error, error) {
+	if request.Credential != nil {
+		return nil, nil, nil, fmt.Errorf("Windows credentials require a Windows source agent")
+	}
 	argv := request.Argv
 	if len(argv) == 0 {
 		argv = []string{"/bin/sh"}

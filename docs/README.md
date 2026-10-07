@@ -7,7 +7,7 @@ New to Undertow? Follow [Getting started](getting-started.md) first. It takes yo
 | I want to… | Start here |
 | --- | --- |
 | Build, host, download, or deploy a headless agent | [Payload deployment](agent-distribution.md) |
-| Jump a Windows agent through an existing source agent | [Jump](windows-deployments.md) |
+| Jump a Windows agent through an existing source agent | [Windows Jump](windows-deployments.md) |
 | Host a child payload through its parent's TCP relay or Windows SMB pipe | [Agent-hosted payloads](agent-distribution.md#host-a-payload-through-a-connected-agent) |
 | Choose VPN egress, internal routing, or a carrier | [Networking modes and transports](networking-modes.md) |
 | Configure carrier identities and agent callbacks | [Deployment profiles](deployment-profiles.md) |
@@ -17,9 +17,9 @@ New to Undertow? Follow [Getting started](getting-started.md) first. It takes yo
 | Expose one or several local services through an agent | [Remote port forwarding](remote-port-forwarding.md) |
 | Work through a complete network layout | [Deployment scenarios](scenarios.md) |
 | Run an included module or load one in a session | [Module bank](module-bank.md) |
-| Build and deploy a new module | [WASM](wasm-development.md), [native Windows](native-modules.md), or [BOF](bof-compatibility.md) development |
+| Build and deploy a new module | [WASM](wasm-development.md), [native Windows](native-modules.md), [BOF](bof-compatibility.md), or [.NET assembly](assembly-modules.md) development |
 | Connect child agents through a parent | [Topology and relays](topology-and-relays.md) |
 | Connect a Windows child through an SMB named pipe | [Windows SMB named-pipe relays](smb-named-pipe-relays.md) |
 | Use startup flags, terminal commands, or scripts | [CLI reference](cli-reference.md) |
 
-The [feature catalogue](../features.md) covers every operator capability in one place. For implementation and measurement, see the [protocol](protocol.md) and [benchmark guide](benchmarks.md).
+The [feature catalogue](../features.md) covers every operator capability in one place. For implementation and measurement, see the [protocol](protocol.md), [benchmark guide](benchmarks.md), and [raw benchmark results index](benchmark-results/README.md).

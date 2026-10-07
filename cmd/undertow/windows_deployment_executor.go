@@ -66,8 +66,20 @@ func (e *windowsDeploymentExecutor) Preflight(_ context.Context, record control.
 	if record.Method == "service-control" && !a.ServiceCapable {
 		return control.DeploymentExecutionPlan{}, errors.New("Service Control requires a service-capable Windows artifact")
 	}
-	if record.Context == "named-account" || record.Account != "" {
+	if record.Context == "named-account" {
 		return control.DeploymentExecutionPlan{}, errors.New("named-account deployments require a future credential integration")
+	}
+	credential, err := pivot.NewWindowsCredentialSecret(record.Target, request.Username, request.Password, request.NTHash)
+	if err != nil {
+		return control.DeploymentExecutionPlan{}, err
+	}
+	if credential != nil && credential.UsesNTHash() {
+		if record.Method == "winrm" {
+			return control.DeploymentExecutionPlan{}, errors.New("WinRM does not support NT-hash authentication; use a password or select WMI, Service Control, or Scheduled Task")
+		}
+		if record.Method == "scheduled-task" && record.Context != "local-system" {
+			return control.DeploymentExecutionPlan{}, errors.New("Scheduled Task with an NT hash requires the LocalSystem context")
+		}
 	}
 	path, err := normalizeWindowsInstallPath(request.InstallPath)
 	if err != nil {
@@ -80,7 +92,7 @@ func (e *windowsDeploymentExecutor) Preflight(_ context.Context, record control.
 	if ip := net.ParseIP(strings.Trim(record.Target, "[]")); ip != nil && ip.To4() == nil {
 		return control.DeploymentExecutionPlan{}, errors.New("IPv6 targets are not supported by Windows administrative-share delivery")
 	}
-	return control.DeploymentExecutionPlan{DeliveryType: "agent-channel", DeliveryID: record.SourceAgentID, InstallPath: path, ArtifactPath: artifactPath}, nil
+	return control.DeploymentExecutionPlan{DeliveryType: "agent-channel", DeliveryID: record.SourceAgentID, InstallPath: path, ArtifactPath: artifactPath, Credential: credential}, nil
 }
 
 func (e *windowsDeploymentExecutor) Start(ctx context.Context, record control.DeploymentRecord, plan control.DeploymentExecutionPlan, source *mux.Mux, existingJobID string, report func(control.DeploymentProgress) error) error {
@@ -91,7 +103,7 @@ func (e *windowsDeploymentExecutor) Start(ctx context.Context, record control.De
 	if err != nil {
 		return err
 	}
-	transfer, history, err := e.manager.StreamDeploymentArtifact(ctx, record.SourceAgentID, source, plan.ArtifactPath, sharePath)
+	transfer, history, err := e.manager.StreamDeploymentArtifactWithCredential(ctx, record.SourceAgentID, source, plan.ArtifactPath, sharePath, plan.Credential)
 	transferID := history.ID
 	if err != nil {
 		if transferID != "" {
@@ -108,7 +120,7 @@ func (e *windowsDeploymentExecutor) Start(ctx context.Context, record control.De
 		_ = report(control.DeploymentProgress{State: "failed", Progress: "Method preparation failed", Failure: err.Error(), TransferID: transferID, InstallPath: plan.InstallPath})
 		return err
 	}
-	job, err := e.manager.StartDeploymentCommandJob(ctx, record.SourceAgentID, record.ID, existingJobID, argv)
+	job, err := e.manager.StartDeploymentCommandJob(ctx, record.SourceAgentID, record.ID, existingJobID, argv, plan.Credential)
 	if err != nil {
 		if transferID != "" {
 			_ = report(control.DeploymentProgress{State: "failed", Progress: "Method Job start failed", Failure: "Windows method Job could not start after artifact transfer: " + trimDeploymentError(err), TransferID: transferID, InstallPath: plan.InstallPath})

@@ -22,14 +22,15 @@ import (
 const FileDestination = "file.undertow.invalid:0"
 
 type FileMessage struct {
-	AgentID   string `json:"agent_id,omitempty"`
-	Operation string `json:"operation,omitempty"`
-	Path      string `json:"path,omitempty"`
-	Size      int64  `json:"size,omitempty"`
-	OK        bool   `json:"ok,omitempty"`
-	Error     string `json:"error,omitempty"`
-	SHA256    string `json:"sha256,omitempty"`
-	Direct    bool   `json:"direct,omitempty"`
+	AgentID    string             `json:"agent_id,omitempty"`
+	Operation  string             `json:"operation,omitempty"`
+	Path       string             `json:"path,omitempty"`
+	Size       int64              `json:"size,omitempty"`
+	OK         bool               `json:"ok,omitempty"`
+	Error      string             `json:"error,omitempty"`
+	SHA256     string             `json:"sha256,omitempty"`
+	Direct     bool               `json:"direct,omitempty"`
+	Credential *WindowsCredential `json:"credential,omitempty"`
 }
 
 type TransferProgress struct {
@@ -121,17 +122,24 @@ func TransferFile(parent context.Context, session *mux.Mux, agentID, operation, 
 }
 
 func TransferFileProgress(parent context.Context, session *mux.Mux, agentID, operation, localPath, remotePath string, progress func(TransferProgress)) (FileMessage, error) {
-	return transferFileProgress(parent, session, agentID, operation, localPath, remotePath, false, progress)
+	return transferFileProgress(parent, session, agentID, operation, localPath, remotePath, false, nil, progress)
 }
 
 // TransferFileDirectProgress writes an upload to its final destination using
 // exclusive creation. It is reserved for Jump's unique target paths so the
 // destination never has a second executable-bearing temporary entry.
 func TransferFileDirectProgress(parent context.Context, session *mux.Mux, agentID, operation, localPath, remotePath string, progress func(TransferProgress)) (FileMessage, error) {
-	return transferFileProgress(parent, session, agentID, operation, localPath, remotePath, true, progress)
+	return transferFileProgress(parent, session, agentID, operation, localPath, remotePath, true, nil, progress)
 }
 
-func transferFileProgress(parent context.Context, session *mux.Mux, agentID, operation, localPath, remotePath string, direct bool, progress func(TransferProgress)) (FileMessage, error) {
+// TransferFileDirectCredentialProgress is Jump's direct upload path when the
+// operator supplies a separate Windows network identity. The credential is
+// carried only inside the authenticated file stream.
+func TransferFileDirectCredentialProgress(parent context.Context, session *mux.Mux, agentID, operation, localPath, remotePath string, credential *WindowsCredential, progress func(TransferProgress)) (FileMessage, error) {
+	return transferFileProgress(parent, session, agentID, operation, localPath, remotePath, true, credential, progress)
+}
+
+func transferFileProgress(parent context.Context, session *mux.Mux, agentID, operation, localPath, remotePath string, direct bool, credential *WindowsCredential, progress func(TransferProgress)) (FileMessage, error) {
 	var result FileMessage
 	if session == nil {
 		return result, errors.New("VPN session is not connected")
@@ -176,7 +184,7 @@ func transferFileProgress(parent context.Context, session *mux.Mux, agentID, ope
 		case <-done:
 		}
 	}()
-	if err := WriteFileMessage(stream, FileMessage{AgentID: agentID, Operation: operation, Path: remotePath, Size: size, Direct: direct}); err != nil {
+	if err := WriteFileMessage(stream, FileMessage{AgentID: agentID, Operation: operation, Path: remotePath, Size: size, Direct: direct, Credential: credential}); err != nil {
 		return result, err
 	}
 	if operation == "download" || operation == "screenshot" {
@@ -286,6 +294,10 @@ func serveFile(ctx context.Context, stream *mux.Stream, caps Capabilities) {
 	}
 	if request.Operation == "upload" && !caps.Upload {
 		fileError(stream, reader, errors.New("agent upload is disabled"))
+	} else if request.Operation == "upload" && request.Credential != nil && !caps.JumpCredentials {
+		fileError(stream, reader, errors.New("agent supplied Jump credentials are disabled"))
+	} else if request.Operation == "upload" && request.Credential != nil && request.Credential.UsesNTHash() && !caps.JumpNTHash {
+		fileError(stream, reader, errors.New("agent NT-hash Jump authentication is disabled"))
 	} else if request.Operation == "download" && !caps.Download {
 		fileError(stream, reader, errors.New("agent download is disabled"))
 	} else if request.Operation == "screenshot" && (!caps.Download || !caps.HostOps) {
@@ -324,6 +336,22 @@ func serveScreenshot(stream *mux.Stream, request FileMessage) {
 }
 
 func serveUpload(stream *mux.Stream, reader *bufio.Reader, request FileMessage) {
+	if request.Credential != nil {
+		credential := request.Credential
+		request.Credential = nil
+		if credential.UsesNTHash() {
+			serveUploadNTHash(stream, reader, request, credential)
+			return
+		}
+		if err := withWindowsCredential(credential, func() { serveUploadContent(stream, reader, request) }); err != nil {
+			fileError(stream, reader, err)
+		}
+		return
+	}
+	serveUploadContent(stream, reader, request)
+}
+
+func serveUploadContent(stream *mux.Stream, reader *bufio.Reader, request FileMessage) {
 	if _, err := os.Lstat(request.Path); err == nil {
 		fileError(stream, reader, fmt.Errorf("upload destination already exists: %s", request.Path))
 		return

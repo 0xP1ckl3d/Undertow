@@ -35,3 +35,5 @@ Omitted fields use the existing Undertow values. Durations are Go duration strin
 An embedded agent generates its Ed25519 identity in memory per process and does not write a config, key, PID, or log during normal operation. Windows native DLL modules and the BOF bridge still require a temporary DLL file for the system loader; Undertow creates one file per execution and removes it after unloading the library. A process crash can leave that temporary file behind. Module uploads, downloads, and explicit file operations have their own operator-selected destinations. The Wintun VPN path is separate from ordinary agent carrier operation and installs its bundled DLL beside the executable when needed.
 
 Windows process inventory now reads the Toolhelp process snapshot in-process for `hostops ps` and WASM `processes`; it returns image name, PID, parent PID, and thread count. Other host operations that require their existing system-tool output remain as they are.
+
+Back to [documentation home](README.md).

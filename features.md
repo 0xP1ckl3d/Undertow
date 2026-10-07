@@ -96,6 +96,21 @@ For agents that connect through a relay or private address, `payload retrieval-h
 
 An operator can enable an opaque HTTPS artifact URL on an existing TCP relay listener with `payload host-agent`. The parent agent fetches each artifact over its current Undertow session; the server retains the binary. Stopping that URL leaves the child relay running. See [agent-hosted distribution](docs/agent-distribution.md#host-a-payload-through-a-connected-agent).
 
+## Windows Jump
+
+Jump deploys an existing Windows artifact from an existing Windows source agent to another Windows host. The operator creates and prepares a durable record, then starts one source-agent Job using WinRM, WMI, Service Control, or Scheduled Task. A source agent in intentional check-in sleep remains selectable: its Job queues on the server and dispatches on the next authenticated callback.
+
+The server streams the artifact through the source agent to the target administrative share and verifies its SHA-256. The default target is `C:\Windows\Temp\<random>.exe`, written through `ADMIN$\Temp`; an operator may supply another absolute `.exe` path. Start uses the source Windows identity by default or accepts a target-local username, `DOMAIN\user`, or UPN with a password. WMI, Service Control, and LocalSystem Scheduled Task also accept an NT hash. The supplied secret is held in server memory only until dispatch and never enters a Job command line or durable record. Jump does not require artifact hosting or target-side retrieval. Jobs retain method output, Transfers retain delivery progress, History records operator actions, and a matching later enrolment completes the record and adds its `deployed_from` relationship to Topology.
+
+```text
+Agent console: jump create TARGET ARTIFACT_ID winrm current-user
+Agent console: jump prepare JUMP_ID
+Agent console: jump start JUMP_ID
+Agent console: jump show JUMP_ID
+```
+
+Service Control uses LocalSystem and requires a service-capable artifact. Scheduled Task supports LocalSystem or current user; WinRM and WMI use current user. See [Windows Jump](docs/windows-deployments.md) for source compatibility, method prerequisites, states, cleanup, result correlation, GUI workflow, and the HTTP API.
+
 ## Routing and network traffic
 
 ### Full IPv4 VPN mode
@@ -374,7 +389,7 @@ VPN client keyboard during a transfer: Ctrl-] to cancel
 
 ### Granular agent capabilities
 
-All capabilities are enabled by default: `pivot`, `exec`, `hostops`, `interactive`, `scripts`, `wasm`, `native`, `upload`, `download`, `listeners`, and `relay`. Deny any combination at agent startup; the server and agent enforce the operation at the relevant stream. `relay` allows an operator-requested child-agent listener; zero relay listeners exist until explicitly started on a selected agent. It is independent of `listeners`, which controls client-service TCP forwards.
+All capabilities are enabled by default: `pivot`, `exec`, `hostops`, `interactive`, `scripts`, `wasm`, `native`, `upload`, `download`, `listeners`, `relay`, `jump-credentials`, and `jump-nt-hash`. Deny any combination at agent startup; the server and agent enforce the operation at the relevant stream. `relay` allows an operator-requested child-agent listener; zero relay listeners exist until explicitly started on a selected agent. It is independent of `listeners`, which controls client-service TCP forwards. `jump-credentials` allows a Jump to use an operator-supplied Windows identity, while `jump-nt-hash` separately gates NT-hash authentication. Denying either does not affect Jumps that use the source agent identity.
 
 ```text
 Agent: undertow agent --transport quic --server SERVER_IP:443 --tls-insecure-skip-verify --fingerprint FINGERPRINT --token-file token.key --deny=exec,upload

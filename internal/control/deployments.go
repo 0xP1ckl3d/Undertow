@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"undertow/internal/mux"
+	"undertow/internal/pivot"
 )
 
 type DeploymentArtifact struct {
@@ -32,6 +33,9 @@ type DeploymentArtifact struct {
 type DeploymentStartRequest struct {
 	Delivery    string `json:"delivery"`
 	InstallPath string `json:"install_path,omitempty"`
+	Username    string `json:"username,omitempty"`
+	Password    string `json:"password,omitempty"`
+	NTHash      string `json:"nt_hash,omitempty"`
 }
 
 type DeploymentExecutionPlan struct {
@@ -39,6 +43,7 @@ type DeploymentExecutionPlan struct {
 	DeliveryID   string
 	InstallPath  string
 	ArtifactPath string
+	Credential   *pivot.WindowsCredential
 }
 
 type DeploymentProgress struct {
@@ -117,6 +122,32 @@ func (m *Manager) SetDeploymentArtifactLookup(lookup func(string) (DeploymentArt
 func (m *Manager) SetDeploymentMethodExecutor(executor DeploymentMethodExecutor) {
 	m.mu.Lock()
 	m.deploymentExecutor = executor
+	m.mu.Unlock()
+}
+
+func (m *Manager) retainDeploymentCredential(id string, credential *pivot.WindowsCredential) {
+	if credential == nil {
+		return
+	}
+	m.mu.Lock()
+	if m.deploymentCredentials == nil {
+		m.deploymentCredentials = make(map[string]pivot.WindowsCredential)
+	}
+	m.deploymentCredentials[id] = *credential
+	m.mu.Unlock()
+}
+
+func (m *Manager) takeDeploymentCredential(id string) (pivot.WindowsCredential, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	credential, ok := m.deploymentCredentials[id]
+	delete(m.deploymentCredentials, id)
+	return credential, ok
+}
+
+func (m *Manager) clearDeploymentCredential(id string) {
+	m.mu.Lock()
+	delete(m.deploymentCredentials, id)
 	m.mu.Unlock()
 }
 
@@ -361,21 +392,36 @@ func (m *Manager) startDeployment(ctx context.Context, id string, request Deploy
 	if err != nil {
 		return err
 	}
+	if plan.Credential != nil && !sourceInfo.Capabilities.Allows("jump-credentials") {
+		return errors.New("source Windows agent does not support supplied Jump credentials; build and run a current agent first")
+	}
+	if plan.Credential != nil && plan.Credential.UsesNTHash() && !sourceInfo.Capabilities.Allows("jump-nt-hash") {
+		return errors.New("source Windows agent does not support NT-hash Jump authentication; build and run a current agent first")
+	}
 	claimed, err := store.ChangeDeployment(id, func(item *DeploymentRecord) error {
 		if item.State != "prepared" {
 			return ErrDeploymentConflict
 		}
 		item.State, item.UpdatedAt, item.Progress = "dispatching", time.Now().UTC(), "Starting Windows method"
 		item.DeliveryType, item.DeliveryID, item.InstallPath = plan.DeliveryType, plan.DeliveryID, plan.InstallPath
+		if plan.Credential != nil {
+			item.Account = plan.Credential.Account()
+		}
 		return nil
 	})
 	if err != nil {
 		return err
 	}
 	m.PublishEvent("deployment.changed", id)
-	queuedRequest := queuedJobRequest{Kind: "deployment", DeploymentID: id, Delivery: request.Delivery, InstallPath: plan.InstallPath, Actor: boundActionFromContext(ctx), deferDispatch: true}
+	credentialAccount := ""
+	if plan.Credential != nil {
+		credentialAccount = plan.Credential.Account()
+		m.retainDeploymentCredential(id, plan.Credential)
+	}
+	queuedRequest := queuedJobRequest{Kind: "deployment", DeploymentID: id, Delivery: request.Delivery, InstallPath: plan.InstallPath, CredentialAccount: credentialAccount, Actor: boundActionFromContext(ctx), deferDispatch: true}
 	job, queued, queueErr := m.queueJobIfSleeping(0, record.SourceAgentID, queuedRequest)
 	if queueErr != nil {
+		m.clearDeploymentCredential(id)
 		failure := queueErr.Error()
 		_ = m.AdvanceDeployment(id, DeploymentProgress{State: "failed", Progress: "Deployment could not be queued", Failure: failure})
 		return queueErr
@@ -391,6 +437,7 @@ func (m *Manager) startDeployment(ctx context.Context, id string, request Deploy
 			return nil
 		})
 		if err != nil {
+			m.clearDeploymentCredential(id)
 			_ = m.CancelJob(0, job.ID)
 			return err
 		}
@@ -400,6 +447,7 @@ func (m *Manager) startDeployment(ctx context.Context, id string, request Deploy
 		}
 		return nil
 	}
+	m.clearDeploymentCredential(id)
 	if source == nil {
 		failure := "source agent is no longer connected; retry while it is awake or in a valid sleeping window"
 		_ = m.AdvanceDeployment(id, DeploymentProgress{State: "failed", Progress: "Source agent unavailable", Failure: failure})
@@ -447,6 +495,9 @@ func (m *Manager) dispatchQueuedDeployment(agentID string, stream *mux.Mux, job 
 		m.failQueuedDeploymentJob(job, "queued deployment record is no longer dispatching")
 		return
 	}
+	if request.CredentialAccount != "" {
+		defer m.clearDeploymentCredential(record.ID)
+	}
 	sourceInfo, _, sourceReady := m.deploymentSource(agentID)
 	m.mu.RLock()
 	lookup := m.deploymentArtifactLookup
@@ -475,6 +526,22 @@ func (m *Manager) dispatchQueuedDeployment(agentID string, stream *mux.Mux, job 
 		m.failQueuedDeploymentJob(job, "Queued deployment preflight failed: "+err.Error())
 		return
 	}
+	if request.CredentialAccount != "" {
+		credential, ok := m.takeDeploymentCredential(record.ID)
+		if !ok || credential.Account() != request.CredentialAccount {
+			failure := "supplied Windows credentials are no longer available; server restarts intentionally clear queued passwords and NT hashes"
+			_ = m.AdvanceDeployment(record.ID, DeploymentProgress{State: "failed", Progress: "Queued credentials unavailable", Failure: failure, JobID: job.info.ID})
+			m.failQueuedDeploymentJob(job, failure)
+			return
+		}
+		if credential.UsesNTHash() && !sourceInfo.Capabilities.Allows("jump-nt-hash") {
+			failure := "source Windows agent no longer supports NT-hash Jump authentication"
+			_ = m.AdvanceDeployment(record.ID, DeploymentProgress{State: "failed", Progress: "Queued credentials unsupported", Failure: failure, JobID: job.info.ID})
+			m.failQueuedDeploymentJob(job, failure)
+			return
+		}
+		plan.Credential = &credential
+	}
 	err = executor.Start(ctx, record, plan, stream, job.info.ID, func(update DeploymentProgress) error {
 		return m.AdvanceDeployment(record.ID, update)
 	})
@@ -492,6 +559,9 @@ func (m *Manager) dispatchQueuedDeployment(agentID string, stream *mux.Mux, job 
 }
 
 func (m *Manager) failQueuedDeploymentJob(job *jobState, reason string) {
+	if job != nil && job.info.DeploymentID != "" {
+		m.clearDeploymentCredential(job.info.DeploymentID)
+	}
 	m.mu.Lock()
 	if job.info.State != "dispatching" && job.info.State != "queued" {
 		m.mu.Unlock()
@@ -510,6 +580,9 @@ func (m *Manager) failQueuedDeploymentJob(job *jobState, reason string) {
 }
 
 func (m *Manager) interruptQueuedDeploymentJob(job *jobState, reason string) {
+	if job != nil && job.info.DeploymentID != "" {
+		m.clearDeploymentCredential(job.info.DeploymentID)
+	}
 	m.mu.Lock()
 	if job.info.State != "dispatching" && job.info.State != "queued" {
 		m.mu.Unlock()
