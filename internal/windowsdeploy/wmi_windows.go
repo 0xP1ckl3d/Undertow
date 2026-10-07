@@ -60,6 +60,7 @@ type variant struct {
 	reserved2 uint16
 	reserved3 uint16
 	value     int64
+	padding   [8]byte
 }
 
 type dispatchParams struct {
