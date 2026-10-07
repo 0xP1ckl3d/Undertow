@@ -27,12 +27,12 @@ export function DeploymentsView({agents,initialSource,initialRecord,revision,onA
   const [selected,setSelected]=useState(''),[candidate,setCandidate]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
   const reload=async()=>{const [nextRecords,nextArtifacts]=await Promise.all([api<Deployment[]>('/deployments'),api<Artifact[]>('/artifacts')]);setRecords(nextRecords);setArtifacts(nextArtifacts)};
   useEffect(()=>{void reload().catch(e=>setError(String(e)))},[revision]);
-  useEffect(()=>{if(initialSource&&agents.some(agent=>agent.id===initialSource&&agent.os?.toLowerCase()==='windows'))setSource(current=>current||initialSource)},[initialSource,agents]);
+  useEffect(()=>{if(initialSource&&agents.some(agent=>agent.id===initialSource&&agent.os?.toLowerCase()==='windows'&&(agent.online!==false||agent.connection_state==='sleeping')))setSource(current=>current||initialSource)},[initialSource,agents]);
   useEffect(()=>{if(initialRecord)setSelected(initialRecord)},[initialRecord]);
   const selectedRecord=records.find(record=>record.id===selected)||records[0];
   const selectedSource=selectedRecord?agents.find(agent=>agent.id===selectedRecord.source_agent_id):undefined;
   useEffect(()=>{setInstallPath('')},[selectedRecord?.id,selectedRecord?.state]);
-  const windowsAgents=agents.filter(agent=>agent.os?.toLowerCase()==='windows');
+  const windowsAgents=agents.filter(agent=>agent.os?.toLowerCase()==='windows'&&(agent.online!==false||agent.connection_state==='sleeping')).sort((a,b)=>(a.hostname||'').localeCompare(b.hostname||'')||a.id.localeCompare(b.id));
   const sourceIsWindows=windowsAgents.some(agent=>agent.id===source);
   const availableArtifacts=artifacts.filter(item=>item.platform==='windows'&&!item.revoked&&(method!=='service-control'||item.service_capable));
   const chosenArtifact=availableArtifacts.find(item=>item.id===artifact);
@@ -46,7 +46,7 @@ export function DeploymentsView({agents,initialSource,initialRecord,revision,onA
   return <div className="deployments-layout">
     <section className="panel deployment-create"><div className="deployment-section-heading"><div><h2>New jump</h2><p>Record the target and existing Windows build. Preparing checks that the source agent and artifact are available.</p></div></div>
       <div className="deployment-form">
-        <label>Source agent<select value={sourceIsWindows?source:''} onChange={event=>setSource(event.target.value)}><option value="">Select a Windows agent</option>{windowsAgents.map(agent=><option key={agent.id} value={agent.id}>{agent.nickname||agent.hostname||short(agent.id)} · {short(agent.id)}{agent.connection_state==='sleeping'?' · sleeping':agent.online===false?' · disconnected':''}</option>)}</select></label>
+        <label>Source agent<select value={sourceIsWindows?source:''} onChange={event=>setSource(event.target.value)}><option value="">Select a Windows agent</option>{windowsAgents.map(agent=><option key={agent.id} value={agent.id}>{agent.nickname||agent.hostname||short(agent.id)} · {short(agent.id)}{agent.connection_state==='sleeping'?' · sleeping':''}</option>)}</select></label>
         <label>Target hostname or IP<input value={target} maxLength={253} onChange={event=>setTarget(event.target.value)} placeholder="Target host"/></label>
         <label>Built artifact<select value={artifact} onChange={event=>setArtifact(event.target.value)}><option value="">Select a Windows build</option>{availableArtifacts.map(item=><option key={item.id} value={item.id}>{item.filename} · {item.profile} · {item.architecture}</option>)}</select></label>
         {chosenArtifact&&<div className="deployment-artifact-facts"><span>Profile <strong>{chosenArtifact.profile}</strong></span><span>SHA-256 <code>{chosenArtifact.sha256}</code></span></div>}

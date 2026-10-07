@@ -1331,9 +1331,6 @@ func (m *Manager) AgentCatalog() []AgentInfo {
 	}
 	m.mu.RUnlock()
 	sort.Slice(live, func(i, j int) bool {
-		if live[i].Online != live[j].Online {
-			return live[i].Online
-		}
 		if live[i].Hostname != live[j].Hostname {
 			return live[i].Hostname < live[j].Hostname
 		}

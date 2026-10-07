@@ -7,6 +7,9 @@
 .agent-row.disconnected{opacity:.66}
 .agent-row.archived{opacity:.52}
 .agent-row.archived .agent-icon{border-style:dashed}
+.agent-icon.privilege-low,.workspace-avatar.privilege-low{color:#7ccaff;border-color:#5eace6;background:#112638}
+.agent-icon.privilege-high,.workspace-avatar.privilege-high{color:#ff8585;border-color:#e06565;background:#361b1d}
+.agent-icon.privilege-unknown,.workspace-avatar.privilege-unknown{color:#aeb7af;border-color:#526047;background:#181e19}
 .agent-row .state-indicator.offline{background:#7c817d;box-shadow:0 0 0 3px #252a27}
 .offline-notice{background:#222720;border-bottom:1px solid #434b3e;color:#c7cdc4;font-size:10px;line-height:1.5;padding:11px 16px}
 .graph-device.agent.offline{opacity:.6;filter:grayscale(.8)}

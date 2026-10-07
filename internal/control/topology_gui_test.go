@@ -35,6 +35,19 @@ func TestTopologyShowsEveryCarrierAndConfiguredServerHost(t *testing.T) {
 	}
 }
 
+func TestAgentCatalogOrderStableAcrossCheckIns(t *testing.T) {
+	manager := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	manager.offlineAgents["first"] = AgentInfo{ID: "first", Hostname: "FILE01", Online: false, ConnectionState: "sleeping"}
+	manager.offlineAgents["second"] = AgentInfo{ID: "second", Hostname: "WS01", Online: true, ConnectionState: "connected"}
+	before := manager.AgentCatalog()
+	manager.offlineAgents["first"] = AgentInfo{ID: "first", Hostname: "FILE01", Online: true, ConnectionState: "connected"}
+	manager.offlineAgents["second"] = AgentInfo{ID: "second", Hostname: "WS01", Online: false, ConnectionState: "sleeping"}
+	after := manager.AgentCatalog()
+	if len(before) != 2 || len(after) != 2 || before[0].ID != "first" || before[1].ID != "second" || after[0].ID != "first" || after[1].ID != "second" {
+		t.Fatalf("agent order changed with connection state: before=%+v after=%+v", before, after)
+	}
+}
+
 func TestLegacyAgentPrivilegeRestoredFromExplicitResult(t *testing.T) {
 	store, err := OpenOperationsStore(filepath.Join(t.TempDir(), "ops.db"))
 	if err != nil {
