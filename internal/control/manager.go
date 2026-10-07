@@ -68,6 +68,8 @@ type AgentInfo struct {
 	Routes               []NetworkRoute          `json:"routes,omitempty"`
 	DefaultRoute         *NetworkRoute           `json:"default_route,omitempty"`
 	Capabilities         *pivot.CapabilityReport `json:"capabilities,omitempty"`
+	FirstSeen            time.Time               `json:"first_seen,omitempty"`
+	FirstSeenEstimated   bool                    `json:"first_seen_estimated,omitempty"`
 	Connected            time.Time               `json:"connected"`
 	LastSeen             time.Time               `json:"last_seen"`
 	RTT                  time.Duration           `json:"rtt_ns"`
@@ -270,6 +272,11 @@ func (m *Manager) SetOperationsStore(store *OperationsStore) error {
 	m.sleepOverrides = sleepOverrides
 	m.offlineAgents = make(map[string]AgentInfo, len(previous))
 	for _, agent := range previous {
+		if agent.FirstSeen.IsZero() && !agent.Connected.IsZero() {
+			// Older snapshots retain the last session start, not the original arrival.
+			agent.FirstSeen = agent.Connected
+			agent.FirstSeenEstimated = true
+		}
 		if agent.Privilege == "" {
 			agent.Privilege = privileges[agent.ID]
 		}
@@ -758,8 +765,23 @@ func (m *Manager) Register(peer transport.Peer, streamMux *mux.Mux) {
 		timer.Stop()
 		delete(m.sleepTimers, id)
 	}
-	_, knownIdentity := m.offlineAgents[id]
-	m.agents[id] = &agentState{peer: peer, mux: streamMux, privilege: privilege, newIdentity: old == nil && !knownIdentity, inventory: AgentInfo{Via: peer.Snapshot().Via, RelayBind: peer.Snapshot().RelayBind, Depth: depth}}
+	previous, knownIdentity := m.offlineAgents[id]
+	firstSeen, firstSeenEstimated := peer.Snapshot().Connected, false
+	if old != nil {
+		firstSeen, firstSeenEstimated = old.inventory.FirstSeen, old.inventory.FirstSeenEstimated
+		if firstSeen.IsZero() {
+			firstSeen, firstSeenEstimated = old.peer.Snapshot().Connected, true
+		}
+	} else if knownIdentity {
+		firstSeen, firstSeenEstimated = previous.FirstSeen, previous.FirstSeenEstimated
+		if firstSeen.IsZero() && !previous.Connected.IsZero() {
+			firstSeen, firstSeenEstimated = previous.Connected, true
+		}
+	}
+	if firstSeen.IsZero() {
+		firstSeen, firstSeenEstimated = time.Now().UTC(), knownIdentity
+	}
+	m.agents[id] = &agentState{peer: peer, mux: streamMux, privilege: privilege, newIdentity: old == nil && !knownIdentity, inventory: AgentInfo{Via: peer.Snapshot().Via, RelayBind: peer.Snapshot().RelayBind, Depth: depth, FirstSeen: firstSeen, FirstSeenEstimated: firstSeenEstimated}}
 	if m.archivedAgents[id] {
 		if m.operations != nil {
 			if err := m.operations.SetAgentArchived(id, false); err != nil {

@@ -32,6 +32,8 @@ type TopologyNode struct {
 	Remote               string         `json:"remote,omitempty"`
 	PublicIP             string         `json:"public_ip,omitempty"`
 	LastSeen             time.Time      `json:"last_seen,omitempty"`
+	FirstSeen            time.Time      `json:"first_seen,omitempty"`
+	FirstSeenEstimated   bool           `json:"first_seen_estimated,omitempty"`
 	RTTNs                int64          `json:"rtt_ns,omitempty"`
 	Depth                int            `json:"depth,omitempty"`
 	OS                   string         `json:"os,omitempty"`
@@ -161,7 +163,7 @@ func BuildTopology(agents []AgentInfo, clients []ClientInfo, routes []routing.Ro
 		if label == "" {
 			label = a.ID
 		}
-		t.Nodes = append(t.Nodes, TopologyNode{ID: id, Kind: "agent", Label: label, Hostname: a.Hostname, AgentID: a.ID, Via: a.Via, SessionID: a.SessionID, Carrier: a.Transport, RelayBind: a.RelayBind, Remote: a.Remote, PublicIP: a.PublicIP, LastSeen: a.LastSeen, RTTNs: int64(a.RTT), Depth: a.Depth, OS: a.OS, Arch: a.Arch, Connected: a.Connected, DisconnectedAt: a.DisconnectedAt, Privilege: a.Privilege, Archived: a.Archived, ConnectionMode: a.ConnectionMode, ConnectionState: a.ConnectionState, ConnectionReason: a.ConnectionReason, Sleep: a.Sleep, SleepProtocolVersion: a.SleepProtocolVersion, IdleGraceSeconds: a.IdleGraceSeconds, ExpectedCheckIn: a.ExpectedCheckIn, SleepLostAfter: a.SleepLostAfter, Active: a.Online})
+		t.Nodes = append(t.Nodes, TopologyNode{ID: id, Kind: "agent", Label: label, Hostname: a.Hostname, AgentID: a.ID, Via: a.Via, SessionID: a.SessionID, Carrier: a.Transport, RelayBind: a.RelayBind, Remote: a.Remote, PublicIP: a.PublicIP, LastSeen: a.LastSeen, FirstSeen: a.FirstSeen, FirstSeenEstimated: a.FirstSeenEstimated, RTTNs: int64(a.RTT), Depth: a.Depth, OS: a.OS, Arch: a.Arch, Connected: a.Connected, DisconnectedAt: a.DisconnectedAt, Privilege: a.Privilege, Archived: a.Archived, ConnectionMode: a.ConnectionMode, ConnectionState: a.ConnectionState, ConnectionReason: a.ConnectionReason, Sleep: a.Sleep, SleepProtocolVersion: a.SleepProtocolVersion, IdleGraceSeconds: a.IdleGraceSeconds, ExpectedCheckIn: a.ExpectedCheckIn, SleepLostAfter: a.SleepLostAfter, Active: a.Online})
 		parent, kind := "server", "carrier"
 		if a.Via != "" {
 			parent, kind = "agent:"+a.Via, "relay_path"

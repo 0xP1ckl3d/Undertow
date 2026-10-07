@@ -47,6 +47,7 @@ function GraphDetails({node,edge,localClient,topology,onMouseEnter,onMouseLeave}
       if(node.os)rows.push(['Platform',`${node.os}${node.arch?' / '+node.arch:''}`]);
       if(node.kind==='agent')rows.push(['Privilege',node.privilege==='high'?'Elevated (observed)':node.privilege==='low'?'Standard (observed)':'Unknown · run Privileges to classify']);
       if(node.kind==='agent'){
+        if(node.first_seen&&!node.first_seen.startsWith('0001-'))rows.push(['First seen',`${node.first_seen_estimated?'At least since ':''}${new Date(node.first_seen).toLocaleString()}`]);
         rows.push(['State',node.active?'Connected':node.connection_state==='sleeping'?'Sleeping by policy':`${node.archived?'Archived · ':''}Disconnected${node.disconnected_at?' · '+new Date(node.disconnected_at).toLocaleString():''}`]);
         rows.push(['Mode',node.connection_mode==='checkin'?'Check-in':'Continuous']);
         if(node.sleep?.interval_seconds)rows.push(['Sleep cadence',`${node.sleep.interval_seconds}s ±${node.sleep.jitter_percent}%`]);
@@ -158,12 +159,13 @@ export function TopologyGraph({topology,onAgent,localClient,actions}:{topology:T
   const menuItems:{label:string;run:()=>void;confirm?:string}[]=[];
   if(menuNode?.kind==='agent'&&menuNode.agent_id){
     const id=menuNode.agent_id;
-    menuItems.push({label:menuNode.active?'Open workspace':'View retained workspace',run:()=>onAgent(id)});
+    const available=menuNode.active||menuNode.connection_state==='sleeping';
+    menuItems.push({label:available?'Open workspace':'View retained workspace',run:()=>onAgent(id)});
     menuItems.push({label:'Rename agent',run:()=>actions.renameAgent(id)});
-    if(!menuNode.active&&menuNode.connection_state!=='sleeping')menuItems.push({label:menuNode.archived?'Restore to agent list':'Archive agent',run:()=>actions.archiveAgent(id,!menuNode.archived)});
-    if(menuNode.active){
-      menuItems.push({label:'Kill current session',run:()=>actions.killSession(id),confirm:'The current session will disconnect. The agent may reconnect.'});
-      menuItems.push({label:'Shut down agent',run:()=>actions.shutdownAgent(id),confirm:'This sends the existing agent shutdown operation.'});
+    if(!available)menuItems.push({label:menuNode.archived?'Restore to agent list':'Archive agent',run:()=>actions.archiveAgent(id,!menuNode.archived)});
+    if(available){
+      menuItems.push({label:'Kill current session',run:()=>actions.killSession(id),confirm:'The current session will disconnect. If the agent is sleeping, this runs at its next check-in. The agent may reconnect.'});
+      menuItems.push({label:'Shut down agent',run:()=>actions.shutdownAgent(id),confirm:'This sends the agent shutdown operation. If the agent is sleeping, it runs at its next check-in.'});
     }
   }else if(menuNode?.kind==='network'){
     menuItems.push({label:'View routes',run:actions.openRoutes});

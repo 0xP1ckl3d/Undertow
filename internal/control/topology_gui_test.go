@@ -54,7 +54,8 @@ func TestLegacyAgentPrivilegeRestoredFromExplicitResult(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	if err := store.SaveAgentSnapshot(AgentInfo{ID: "legacy-agent", Hostname: "WS01"}); err != nil {
+	legacyConnected := time.Now().UTC().Add(-time.Hour)
+	if err := store.SaveAgentSnapshot(AgentInfo{ID: "legacy-agent", Hostname: "WS01", Connected: legacyConnected}); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.SaveHostResult(HostResult{AgentID: "legacy-agent", Operation: "privileges", Result: pivot.ExecResult{Stdout: "Mandatory Label\\High Mandatory Level S-1-16-12288"}}); err != nil {
@@ -65,7 +66,7 @@ func TestLegacyAgentPrivilegeRestoredFromExplicitResult(t *testing.T) {
 		t.Fatal(err)
 	}
 	catalog := manager.AgentCatalog()
-	if len(catalog) != 1 || catalog[0].Privilege != "high" {
+	if len(catalog) != 1 || catalog[0].Privilege != "high" || !catalog[0].FirstSeen.Equal(legacyConnected) || !catalog[0].FirstSeenEstimated {
 		t.Fatalf("restored privilege: %+v", catalog)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -102,7 +103,8 @@ func TestArchivedAgentRestoresOnCallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SaveAgentSnapshot(AgentInfo{ID: "lost-agent", Hostname: "WS01"}); err != nil {
+	firstSeen := time.Now().UTC().Add(-time.Hour)
+	if err := store.SaveAgentSnapshot(AgentInfo{ID: "lost-agent", Hostname: "WS01", FirstSeen: firstSeen}); err != nil {
 		t.Fatal(err)
 	}
 	manager := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
@@ -151,7 +153,7 @@ func TestArchivedAgentRestoresOnCallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	restarted.Register(&dns.Peer{Session: sess, AgentID: "lost-agent", Connected: time.Now()}, serverMux)
-	if catalog := restarted.AgentCatalog(); len(catalog) != 1 || catalog[0].Archived || !catalog[0].Online {
+	if catalog := restarted.AgentCatalog(); len(catalog) != 1 || catalog[0].Archived || !catalog[0].Online || !catalog[0].FirstSeen.Equal(firstSeen) {
 		t.Fatalf("callback did not restore agent: %+v", catalog)
 	}
 	archived, err := store.LoadArchivedAgents()
@@ -402,7 +404,8 @@ func TestDisconnectedAgentRemainsInServerCatalogAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager.Register(&dns.Peer{Session: sess, AgentID: "agent-record", Connected: time.Now()}, serverMux)
+	firstSeen := time.Now().UTC().Add(-time.Minute)
+	manager.Register(&dns.Peer{Session: sess, AgentID: "agent-record", Connected: firstSeen}, serverMux)
 	manager.UpdateInventory("agent-record", serverMux, []byte(`{"hostname":"WS01","os":"windows","privilege":"high","advertised_routes":["10.44.0.0/16"]}`))
 	if err := manager.SetAgentNickname("agent-record", "File server relay"); err != nil {
 		t.Fatal(err)
@@ -415,7 +418,7 @@ func TestDisconnectedAgentRemainsInServerCatalogAcrossRestart(t *testing.T) {
 		t.Fatal("offline agent remained operational")
 	}
 	catalog := manager.AgentCatalog()
-	if len(catalog) != 1 || catalog[0].Online || catalog[0].Hostname != "WS01" || catalog[0].Nickname != "File server relay" || catalog[0].Privilege != "high" || len(catalog[0].AdvertisedRoutes) != 1 || catalog[0].DisconnectedAt.IsZero() {
+	if len(catalog) != 1 || catalog[0].Online || catalog[0].Hostname != "WS01" || catalog[0].Nickname != "File server relay" || catalog[0].Privilege != "high" || len(catalog[0].AdvertisedRoutes) != 1 || catalog[0].DisconnectedAt.IsZero() || !catalog[0].FirstSeen.Equal(firstSeen) || catalog[0].FirstSeenEstimated {
 		t.Fatalf("catalog=%+v", catalog)
 	}
 	if err := store.Close(); err != nil {
@@ -431,12 +434,12 @@ func TestDisconnectedAgentRemainsInServerCatalogAcrossRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	catalog = restarted.AgentCatalog()
-	if len(catalog) != 1 || catalog[0].Online || catalog[0].Hostname != "WS01" || catalog[0].Nickname != "File server relay" || catalog[0].Privilege != "high" {
+	if len(catalog) != 1 || catalog[0].Online || catalog[0].Hostname != "WS01" || catalog[0].Nickname != "File server relay" || catalog[0].Privilege != "high" || !catalog[0].FirstSeen.Equal(firstSeen) || catalog[0].FirstSeenEstimated {
 		t.Fatalf("restored=%+v", catalog)
 	}
 	topology := restarted.Topology()
 	for _, node := range topology.Nodes {
-		if node.ID == "agent:agent-record" && (node.Label != "File server relay" || node.Privilege != "high") {
+		if node.ID == "agent:agent-record" && (node.Label != "File server relay" || node.Privilege != "high" || !node.FirstSeen.Equal(firstSeen)) {
 			t.Fatalf("retained topology agent=%+v", node)
 		}
 	}
