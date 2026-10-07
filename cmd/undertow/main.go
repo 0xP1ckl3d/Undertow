@@ -397,7 +397,7 @@ func serve(args []string) error {
 		if err != nil {
 			return control.DeploymentArtifact{}, err
 		}
-		return control.DeploymentArtifact{ID: a.ID, ProfileID: a.ProfileID, Profile: a.Profile, Platform: a.Platform, SHA256: a.SHA256, Revoked: a.Revoked, ServiceCapable: a.ServiceCapable}, nil
+		return control.DeploymentArtifact{ID: a.ID, ProfileID: a.ProfileID, Profile: a.Profile, Platform: a.Platform, SHA256: a.SHA256, UndertowVersion: a.UndertowVersion, Revoked: a.Revoked, ServiceCapable: a.ServiceCapable}, nil
 	})
 	manager.SetArtifactLookup(func(id string) (string, string, bool) {
 		a, err := distributionStore.EnrollmentArtifact(id)

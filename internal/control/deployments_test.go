@@ -46,12 +46,29 @@ func deploymentTestManager(t *testing.T) (*Manager, *OperationsStore, string) {
 	}
 	m.SetDeploymentArtifactLookup(func(id string) (DeploymentArtifact, error) {
 		if id == "build-one" {
-			return DeploymentArtifact{ID: id, ProfileID: "profile-one", Profile: "office", Platform: "windows", SHA256: "abc"}, nil
+			return DeploymentArtifact{ID: id, ProfileID: "profile-one", Profile: "office", Platform: "windows", SHA256: "abc", UndertowVersion: "test"}, nil
 		}
 		return DeploymentArtifact{}, nil
 	})
-	m.agents["source"] = &agentState{inventoryReady: true, inventory: AgentInfo{ID: "source", OS: "windows"}}
+	m.agents["source"] = &agentState{inventoryReady: true, inventory: AgentInfo{ID: "source", OS: "windows", ArtifactIdentity: ArtifactIdentity{UndertowVersion: "test"}}}
 	return m, store, path
+}
+
+func TestCreateDeploymentRejectsSourceArtifactVersionMismatch(t *testing.T) {
+	m, store, _ := deploymentTestManager(t)
+	defer store.Close()
+	m.agents["source"].inventory.ArtifactIdentity.UndertowVersion = "older"
+
+	_, err := m.createDeployment(context.Background(), createDeploymentRequest{
+		SourceAgentID: "source",
+		Target:        "ws02",
+		ArtifactID:    "build-one",
+		Method:        "wmi",
+		Context:       "current-user",
+	})
+	if err == nil || !strings.Contains(err.Error(), "source agent runs Undertow older but selected artifact uses test") {
+		t.Fatalf("expected explicit source/artifact version mismatch, got %v", err)
+	}
 }
 
 func TestDeploymentStageOneAndUniqueEnrollment(t *testing.T) {
@@ -201,7 +218,7 @@ func TestSleepingDeploymentQueuesUntilCheckIn(t *testing.T) {
 	m, store, _ := deploymentTestManager(t)
 	defer store.Close()
 	delete(m.agents, "source")
-	m.offlineAgents["source"] = AgentInfo{ID: "source", OS: "windows", ConnectionState: "sleeping", SleepSupported: true, Sleep: SleepPolicy{IntervalSeconds: 15}, SleepLostAfter: time.Now().Add(time.Minute)}
+	m.offlineAgents["source"] = AgentInfo{ID: "source", OS: "windows", ArtifactIdentity: ArtifactIdentity{UndertowVersion: "test"}, ConnectionState: "sleeping", SleepSupported: true, Sleep: SleepPolicy{IntervalSeconds: 15}, SleepLostAfter: time.Now().Add(time.Minute)}
 	m.SetDeploymentMethodExecutor(deploymentExecutorStub{})
 	record, err := m.createDeployment(context.Background(), createDeploymentRequest{SourceAgentID: "source", Target: "ws06", ArtifactID: "build-one", Method: "winrm", Context: "current-user"})
 	if err != nil {
@@ -230,7 +247,7 @@ func TestSleepingDeploymentQueuesUntilCheckIn(t *testing.T) {
 func TestQueuedDeploymentSurvivesDispatchRecovery(t *testing.T) {
 	m, store, path := deploymentTestManager(t)
 	delete(m.agents, "source")
-	m.offlineAgents["source"] = AgentInfo{ID: "source", OS: "windows", ConnectionState: "sleeping", SleepSupported: true, Sleep: SleepPolicy{IntervalSeconds: 15}, SleepLostAfter: time.Now().Add(time.Minute)}
+	m.offlineAgents["source"] = AgentInfo{ID: "source", OS: "windows", ArtifactIdentity: ArtifactIdentity{UndertowVersion: "test"}, ConnectionState: "sleeping", SleepSupported: true, Sleep: SleepPolicy{IntervalSeconds: 15}, SleepLostAfter: time.Now().Add(time.Minute)}
 	m.SetDeploymentMethodExecutor(deploymentExecutorStub{})
 	record, err := m.createDeployment(context.Background(), createDeploymentRequest{SourceAgentID: "source", Target: "ws07", ArtifactID: "build-one", Method: "winrm", Context: "current-user"})
 	if err != nil {

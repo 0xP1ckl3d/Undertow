@@ -19,13 +19,14 @@ import (
 )
 
 type DeploymentArtifact struct {
-	ID             string
-	ProfileID      string
-	Profile        string
-	Platform       string
-	SHA256         string
-	Revoked        bool
-	ServiceCapable bool
+	ID              string
+	ProfileID       string
+	Profile         string
+	Platform        string
+	SHA256          string
+	UndertowVersion string
+	Revoked         bool
+	ServiceCapable  bool
 }
 
 type DeploymentStartRequest struct {
@@ -129,6 +130,19 @@ func (m *Manager) deploymentStore() (*OperationsStore, error) {
 	return store, nil
 }
 
+func validateDeploymentSourceVersion(source AgentInfo, artifact DeploymentArtifact) error {
+	if source.UndertowVersion == "" {
+		return errors.New("source agent has not reported its Undertow version; update or reconnect the source before starting Jump")
+	}
+	if artifact.UndertowVersion == "" {
+		return errors.New("selected artifact has no Undertow version metadata")
+	}
+	if source.UndertowVersion != artifact.UndertowVersion {
+		return fmt.Errorf("source agent runs Undertow %s but selected artifact uses %s; update the source agent before starting Jump", source.UndertowVersion, artifact.UndertowVersion)
+	}
+	return nil
+}
+
 func (m *Manager) createDeployment(ctx context.Context, req createDeploymentRequest) (DeploymentRecord, error) {
 	target, err := normalizeDeploymentTarget(req.Target)
 	if err != nil {
@@ -161,6 +175,9 @@ func (m *Manager) createDeployment(ctx context.Context, req createDeploymentRequ
 	}
 	if artifact.Platform != "windows" || artifact.Revoked {
 		return DeploymentRecord{}, errors.New("select an active Windows artifact")
+	}
+	if err := validateDeploymentSourceVersion(previous, artifact); err != nil {
+		return DeploymentRecord{}, err
 	}
 	if req.Method == "service-control" && !artifact.ServiceCapable {
 		return DeploymentRecord{}, errors.New("Service Control requires a service-capable Windows artifact")
@@ -199,7 +216,7 @@ func (m *Manager) prepareDeployment(id string) (DeploymentRecord, error) {
 	if record.State != "created" {
 		return DeploymentRecord{}, ErrDeploymentConflict
 	}
-	_, _, sourceReady := m.deploymentSource(record.SourceAgentID)
+	sourceInfo, _, sourceReady := m.deploymentSource(record.SourceAgentID)
 	m.mu.RLock()
 	lookup := m.deploymentArtifactLookup
 	m.mu.RUnlock()
@@ -212,6 +229,9 @@ func (m *Manager) prepareDeployment(id string) (DeploymentRecord, error) {
 	artifact, err := lookup(record.ArtifactID)
 	if err != nil || artifact.ID == "" || artifact.Revoked || artifact.Platform != "windows" || artifact.SHA256 != record.ArtifactSHA256 {
 		return DeploymentRecord{}, errors.New("selected Windows artifact is unavailable or changed")
+	}
+	if err := validateDeploymentSourceVersion(sourceInfo, artifact); err != nil {
+		return DeploymentRecord{}, err
 	}
 	if record.Method == "service-control" && !artifact.ServiceCapable {
 		return DeploymentRecord{}, errors.New("Service Control requires a service-capable Windows artifact")
@@ -320,7 +340,7 @@ func (m *Manager) startDeployment(ctx context.Context, id string, request Deploy
 	if record.State != "prepared" {
 		return ErrDeploymentConflict
 	}
-	_, source, sourceReady := m.deploymentSource(record.SourceAgentID)
+	sourceInfo, source, sourceReady := m.deploymentSource(record.SourceAgentID)
 	m.mu.RLock()
 	lookup := m.deploymentArtifactLookup
 	m.mu.RUnlock()
@@ -330,6 +350,9 @@ func (m *Manager) startDeployment(ctx context.Context, id string, request Deploy
 	artifact, err := lookup(record.ArtifactID)
 	if err != nil || artifact.ID == "" || artifact.Revoked || artifact.Platform != "windows" || artifact.SHA256 != record.ArtifactSHA256 {
 		return errors.New("selected Windows artifact is unavailable or changed")
+	}
+	if err := validateDeploymentSourceVersion(sourceInfo, artifact); err != nil {
+		return err
 	}
 	if record.Context == "named-account" {
 		return errors.New("named-account deployments require a future credential integration")
@@ -422,6 +445,28 @@ func (m *Manager) dispatchQueuedDeployment(agentID string, stream *mux.Mux, job 
 	record, err := store.Deployment(request.DeploymentID)
 	if err != nil || record.SourceAgentID != agentID || record.JobID != job.info.ID || record.State != "dispatching" {
 		m.failQueuedDeploymentJob(job, "queued deployment record is no longer dispatching")
+		return
+	}
+	sourceInfo, _, sourceReady := m.deploymentSource(agentID)
+	m.mu.RLock()
+	lookup := m.deploymentArtifactLookup
+	m.mu.RUnlock()
+	if !sourceReady || lookup == nil {
+		failure := "queued deployment source or artifact catalog is unavailable"
+		_ = m.AdvanceDeployment(record.ID, DeploymentProgress{State: "failed", Progress: "Queued deployment validation failed", Failure: failure, JobID: job.info.ID})
+		m.failQueuedDeploymentJob(job, failure)
+		return
+	}
+	artifact, lookupErr := lookup(record.ArtifactID)
+	if lookupErr != nil || artifact.ID == "" || artifact.Revoked || artifact.Platform != "windows" || artifact.SHA256 != record.ArtifactSHA256 {
+		failure := "selected Windows artifact is unavailable or changed"
+		_ = m.AdvanceDeployment(record.ID, DeploymentProgress{State: "failed", Progress: "Queued deployment validation failed", Failure: failure, JobID: job.info.ID})
+		m.failQueuedDeploymentJob(job, failure)
+		return
+	}
+	if versionErr := validateDeploymentSourceVersion(sourceInfo, artifact); versionErr != nil {
+		_ = m.AdvanceDeployment(record.ID, DeploymentProgress{State: "failed", Progress: "Queued deployment source is incompatible", Failure: versionErr.Error(), JobID: job.info.ID})
+		m.failQueuedDeploymentJob(job, versionErr.Error())
 		return
 	}
 	plan, err := executor.Preflight(ctx, record, DeploymentStartRequest{Delivery: request.Delivery, InstallPath: request.InstallPath})
