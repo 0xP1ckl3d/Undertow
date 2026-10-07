@@ -10,8 +10,38 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/coder/websocket"
 	"undertow/internal/control"
 )
+
+func TestGUITerminalStartKeepsSelectedProcessAndArguments(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		json string
+		want []string
+	}{
+		{name: "default", json: `{"type":"start","argv":[]}`},
+		{name: "PowerShell", json: `{"type":"start","argv":["pwsh.exe","-NoProfile"]}`, want: []string{"pwsh.exe", "-NoProfile"}},
+		{name: "custom path", json: `{"type":"start","argv":["C:\\Program Files\\Custom Shell\\shell.exe","argument with spaces"]}`, want: []string{`C:\Program Files\Custom Shell\shell.exe`, "argument with spaces"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request, err := parseGUITerminalStart(websocket.MessageText, []byte(test.json))
+			if err != nil || len(request.Argv) != len(test.want) || request.Cols != 100 || request.Rows != 30 {
+				t.Fatalf("request=%+v err=%v", request, err)
+			}
+			for i, arg := range test.want {
+				if request.Argv[i] != arg {
+					t.Fatalf("argv=%q want=%q", request.Argv, test.want)
+				}
+			}
+		})
+	}
+	for _, data := range []string{`{"type":"input","data":"id"}`, `{"type":"start","argv":{}}`, strings.Repeat("x", 8193)} {
+		if _, err := parseGUITerminalStart(websocket.MessageText, []byte(data)); err == nil {
+			t.Fatalf("accepted invalid start %q", data[:min(len(data), 60)])
+		}
+	}
+}
 
 func TestGUIMutationRequiresLaunchSessionOriginAndCSRF(t *testing.T) {
 	client := &liveClientConsole{request: func(context.Context, string, string, any) ([]byte, error) { return []byte(`{"ok":true}`), nil }}

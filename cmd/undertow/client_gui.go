@@ -596,7 +596,16 @@ func (g *guiServer) terminal(w http.ResponseWriter, r *http.Request) {
 		_ = conn.Write(ctx, websocket.MessageText, mustGUIJSON(map[string]string{"type": "error", "data": "preferences unavailable"}))
 		return
 	}
-	session, err := control.OpenClientInteractive(control.WithActionClaims(ctx, claims), clientSession, r.PathValue("id"), pivot.InteractiveRequest{Cols: 100, Rows: 30})
+	messageType, startData, err := conn.Read(ctx)
+	if err != nil {
+		return
+	}
+	request, err := parseGUITerminalStart(messageType, startData)
+	if err != nil {
+		_ = conn.Write(ctx, websocket.MessageText, mustGUIJSON(map[string]string{"type": "error", "data": err.Error()}))
+		return
+	}
+	session, err := control.OpenClientInteractive(control.WithActionClaims(ctx, claims), clientSession, r.PathValue("id"), request)
 	if err != nil {
 		_ = conn.Write(ctx, websocket.MessageText, mustGUIJSON(map[string]string{"type": "error", "data": err.Error()}))
 		return
@@ -656,6 +665,20 @@ func (g *guiServer) terminal(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+}
+
+func parseGUITerminalStart(messageType websocket.MessageType, data []byte) (pivot.InteractiveRequest, error) {
+	if messageType != websocket.MessageText || len(data) > 8192 {
+		return pivot.InteractiveRequest{}, errors.New("invalid shell start request")
+	}
+	var message struct {
+		Type string   `json:"type"`
+		Argv []string `json:"argv"`
+	}
+	if json.Unmarshal(data, &message) != nil || message.Type != "start" || len(message.Argv) > 32 {
+		return pivot.InteractiveRequest{}, errors.New("invalid shell start request")
+	}
+	return pivot.InteractiveRequest{Argv: message.Argv, Cols: 100, Rows: 30}, nil
 }
 
 func mustGUIJSON(value any) []byte { data, _ := json.Marshal(value); return data }
