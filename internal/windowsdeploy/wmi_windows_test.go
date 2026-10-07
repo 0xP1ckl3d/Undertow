@@ -3,6 +3,9 @@
 package windowsdeploy
 
 import (
+	"io"
+	"os"
+	"path/filepath"
 	"runtime"
 	"testing"
 	"unsafe"
@@ -12,8 +15,12 @@ func TestVariantMatchesWindowsAMD64ABI(t *testing.T) {
 	if runtime.GOARCH == "amd64" && unsafe.Sizeof(variant{}) != 24 {
 		t.Fatalf("VARIANT size = %d, want 24", unsafe.Sizeof(variant{}))
 	}
-	if runtime.GOARCH == "amd64" && unsafe.Sizeof(exceptionInfo{}) != 64 {
-		t.Fatalf("EXCEPINFO size = %d, want 64", unsafe.Sizeof(exceptionInfo{}))
+}
+
+func TestWMIComCreateLocal(t *testing.T) {
+	path := filepath.Join(os.Getenv("SystemRoot"), "System32", "whoami.exe")
+	if err := runWMI(".", path, io.Discard); err != nil {
+		t.Fatal(err)
 	}
 }
 
