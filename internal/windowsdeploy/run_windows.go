@@ -20,7 +20,7 @@ func run(ctx context.Context, method, target, path, executionContext, shortID st
 	case "winrm":
 		err = runWinRM(ctx, target, path, "T"+shortID, output)
 	case "wmi":
-		err = runWMI(target, path, output)
+		err = runWMI(ctx, target, path, "T"+shortID, output)
 	case "service-control":
 		err = runService(ctx, target, path, "S"+shortID, output)
 	case "scheduled-task":

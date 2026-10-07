@@ -3,7 +3,6 @@
 package windowsdeploy
 
 import (
-	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -19,8 +18,16 @@ func TestVariantMatchesWindowsAMD64ABI(t *testing.T) {
 
 func TestWMIComCreateLocal(t *testing.T) {
 	path := filepath.Join(os.Getenv("SystemRoot"), "System32", "whoami.exe")
-	if err := runWMI(".", path, io.Discard); err != nil {
+	if _, err := runWMIProcess(".", quoteWindowsArgument(path)); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestWindowsCommandLineQuotesInstallPath(t *testing.T) {
+	command := windowsCommandLine(`C:\Windows\System32\schtasks.exe`, "/TR", `C:\Program Data\Undertow\agent.exe`)
+	want := `C:\Windows\System32\schtasks.exe /TR "C:\Program Data\Undertow\agent.exe"`
+	if command != want {
+		t.Fatalf("command line = %q, want %q", command, want)
 	}
 }
 
