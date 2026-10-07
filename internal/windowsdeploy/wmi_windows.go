@@ -70,6 +70,53 @@ type dispatchParams struct {
 	namedCount uint32
 }
 
+type exceptionInfo struct {
+	code         uint16
+	reserved     uint16
+	source       *uint16
+	description  *uint16
+	helpFile     *uint16
+	helpContext  uint32
+	reservedData uintptr
+	deferredFill uintptr
+	scode        uint32
+}
+
+func (e *exceptionInfo) clear() {
+	for _, value := range []*uint16{e.source, e.description, e.helpFile} {
+		if value != nil {
+			procSysFreeString.Call(uintptr(unsafe.Pointer(value)))
+		}
+	}
+}
+
+func (e *exceptionInfo) detail() string {
+	description := ""
+	if e.description != nil {
+		description = windows.UTF16PtrToString(e.description)
+	}
+	source := ""
+	if e.source != nil {
+		source = windows.UTF16PtrToString(e.source)
+	}
+	code := e.scode
+	if code == 0 {
+		code = uint32(e.code)
+	}
+	switch {
+	case description != "" && source != "" && code != 0:
+		return fmt.Sprintf("%s: %s (0x%08x)", source, description, code)
+	case description != "" && code != 0:
+		return fmt.Sprintf("%s (0x%08x)", description, code)
+	case description != "":
+		return description
+	case code != 0:
+		return fmt.Sprintf("underlying HRESULT 0x%08x", code)
+	default:
+		return ""
+	}
+}
+
 func failedHRESULT(value uintptr) bool { return int32(value) < 0 }
 
 func hresultError(operation string, value uintptr) error {
@@ -133,12 +180,19 @@ func (d *dispatch) invoke(name string, flags uint16, values ...any) (variant, er
 		params.namedCount = 1
 	}
 	var result variant
+	var exception exceptionInfo
 	var argError uint32
-	hr, _, _ := syscall.SyscallN(d.vtbl.invoke, uintptr(unsafe.Pointer(d)), uintptr(id), uintptr(unsafe.Pointer(&iidNull)), 0, uintptr(flags), uintptr(unsafe.Pointer(&params)), uintptr(unsafe.Pointer(&result)), 0, uintptr(unsafe.Pointer(&argError)))
+	hr, _, _ := syscall.SyscallN(d.vtbl.invoke, uintptr(unsafe.Pointer(d)), uintptr(id), uintptr(unsafe.Pointer(&iidNull)), 0, uintptr(flags), uintptr(unsafe.Pointer(&params)), uintptr(unsafe.Pointer(&result)), uintptr(unsafe.Pointer(&exception)), uintptr(unsafe.Pointer(&argError)))
 	runtime.KeepAlive(args)
 	if failedHRESULT(hr) {
+		detail := exception.detail()
+		exception.clear()
+		if detail != "" {
+			return variant{}, fmt.Errorf("%w: %s", hresultError("invoke COM member "+name, hr), detail)
+		}
 		return variant{}, hresultError("invoke COM member "+name, hr)
 	}
+	exception.clear()
 	return result, nil
 }
 

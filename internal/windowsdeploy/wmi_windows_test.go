@@ -12,6 +12,9 @@ func TestVariantMatchesWindowsAMD64ABI(t *testing.T) {
 	if runtime.GOARCH == "amd64" && unsafe.Sizeof(variant{}) != 24 {
 		t.Fatalf("VARIANT size = %d, want 24", unsafe.Sizeof(variant{}))
 	}
+	if runtime.GOARCH == "amd64" && unsafe.Sizeof(exceptionInfo{}) != 64 {
+		t.Fatalf("EXCEPINFO size = %d, want 64", unsafe.Sizeof(exceptionInfo{}))
+	}
 }
 
 func TestWMIComConnectLocal(t *testing.T) {
