@@ -7,7 +7,6 @@ go 1.25.0
 require (
 	github.com/Microsoft/go-winio v0.6.2
 	github.com/coder/websocket v1.8.14
-	github.com/go-ole/go-ole v1.3.0
 	github.com/hashicorp/yamux v0.1.2
 	github.com/quic-go/quic-go v0.58.0
 	github.com/tetratelabs/wazero v1.12.0

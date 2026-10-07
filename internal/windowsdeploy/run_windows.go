@@ -10,12 +10,8 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
-	"runtime"
 	"strings"
 	"time"
-
-	"github.com/go-ole/go-ole"
-	"github.com/go-ole/go-ole/oleutil"
 )
 
 func run(ctx context.Context, method, target, path, executionContext, shortID string, output io.Writer) error {
@@ -171,97 +167,4 @@ func waitForLaunch(ctx context.Context) error {
 	case <-timer.C:
 		return nil
 	}
-}
-
-func runWMI(target, path string, output io.Writer) error {
-	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
-	if err := ole.CoInitializeEx(0, ole.COINIT_MULTITHREADED); err != nil && !isOLECode(err, 1) {
-		return fmt.Errorf("initialize COM: %w", err)
-	}
-	defer ole.CoUninitialize()
-	locatorUnknown, err := oleutil.CreateObject("WbemScripting.SWbemLocator")
-	if err != nil {
-		return fmt.Errorf("create WMI locator: %w", err)
-	}
-	defer locatorUnknown.Release()
-	locator, err := locatorUnknown.QueryInterface(ole.IID_IDispatch)
-	if err != nil {
-		return fmt.Errorf("open WMI locator: %w", err)
-	}
-	defer locator.Release()
-	serviceValue, err := oleutil.CallMethod(locator, "ConnectServer", target, `root\cimv2`)
-	if err != nil {
-		return fmt.Errorf("connect remote WMI: %w", err)
-	}
-	defer serviceValue.Clear()
-	service := serviceValue.ToIDispatch()
-	securityValue, err := oleutil.GetProperty(service, "Security_")
-	if err != nil {
-		return fmt.Errorf("open WMI security settings: %w", err)
-	}
-	defer securityValue.Clear()
-	security := securityValue.ToIDispatch()
-	if _, err := oleutil.PutProperty(security, "ImpersonationLevel", 3); err != nil {
-		return fmt.Errorf("set WMI impersonation: %w", err)
-	}
-	if _, err := oleutil.PutProperty(security, "AuthenticationLevel", 6); err != nil {
-		return fmt.Errorf("set WMI authentication: %w", err)
-	}
-	classValue, err := oleutil.CallMethod(service, "Get", "Win32_Process")
-	if err != nil {
-		return fmt.Errorf("open Win32_Process: %w", err)
-	}
-	defer classValue.Clear()
-	class := classValue.ToIDispatch()
-	methodsValue, err := oleutil.GetProperty(class, "Methods_")
-	if err != nil {
-		return fmt.Errorf("open WMI methods: %w", err)
-	}
-	defer methodsValue.Clear()
-	methodValue, err := oleutil.CallMethod(methodsValue.ToIDispatch(), "Item", "Create")
-	if err != nil {
-		return fmt.Errorf("open Win32_Process.Create: %w", err)
-	}
-	defer methodValue.Clear()
-	inDefinitionValue, err := oleutil.GetProperty(methodValue.ToIDispatch(), "InParameters")
-	if err != nil {
-		return fmt.Errorf("open WMI input parameters: %w", err)
-	}
-	defer inDefinitionValue.Clear()
-	inValue, err := oleutil.CallMethod(inDefinitionValue.ToIDispatch(), "SpawnInstance_")
-	if err != nil {
-		return fmt.Errorf("create WMI input parameters: %w", err)
-	}
-	defer inValue.Clear()
-	if _, err := oleutil.PutProperty(inValue.ToIDispatch(), "CommandLine", `"`+path+`"`); err != nil {
-		return fmt.Errorf("set WMI command line: %w", err)
-	}
-	outValue, err := oleutil.CallMethod(service, "ExecMethod_", "Win32_Process", "Create", inValue.ToIDispatch())
-	if err != nil {
-		return fmt.Errorf("execute Win32_Process.Create: %w", err)
-	}
-	defer outValue.Clear()
-	out := outValue.ToIDispatch()
-	returnValue, err := oleutil.GetProperty(out, "ReturnValue")
-	if err != nil {
-		return fmt.Errorf("read WMI return value: %w", err)
-	}
-	defer returnValue.Clear()
-	if returnValue.Val != 0 {
-		return fmt.Errorf("Win32_Process.Create returned %d", returnValue.Val)
-	}
-	processID, err := oleutil.GetProperty(out, "ProcessId")
-	if err == nil {
-		defer processID.Clear()
-		fmt.Fprintf(output, "WMI process created with PID %d\n", processID.Val)
-	} else {
-		fmt.Fprintln(output, "WMI process created")
-	}
-	return nil
-}
-
-func isOLECode(err error, code uintptr) bool {
-	var oleErr *ole.OleError
-	return errors.As(err, &oleErr) && oleErr.Code() == code
 }
