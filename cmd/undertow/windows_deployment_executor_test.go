@@ -202,3 +202,13 @@ func TestWindowsDeploymentNativeCommandRejectsShellMetacharacters(t *testing.T) 
 		t.Fatal("native command accepted shell metacharacters")
 	}
 }
+
+func TestDeploymentJobFailureFitsPersistedStatusLimit(t *testing.T) {
+	failure := deploymentJobFailure("", strings.Repeat("diagnostic", 200))
+	if len(failure) != 1024 {
+		t.Fatalf("failure length=%d, want 1024", len(failure))
+	}
+	if !strings.HasPrefix(failure, "Source-agent Job failed: ") || !strings.HasSuffix(failure, "diagnostic") {
+		t.Fatalf("unexpected bounded failure %q", failure)
+	}
+}

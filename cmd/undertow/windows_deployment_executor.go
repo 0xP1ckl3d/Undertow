@@ -148,17 +148,7 @@ func (e *windowsDeploymentExecutor) monitor(deploymentID string, jobID string, r
 			_ = report(control.DeploymentProgress{State: "waiting", Progress: "Native Windows method completed; waiting for target enrolment", JobID: job.ID})
 			return
 		case "failed":
-			failure := strings.TrimSpace(job.OutputError)
-			if failure == "" {
-				failure = strings.TrimSpace(job.Output)
-			}
-			if failure == "" {
-				failure = "The source-agent Job failed without diagnostic output."
-			}
-			if len(failure) > 1024 {
-				failure = failure[len(failure)-1024:]
-			}
-			_ = report(control.DeploymentProgress{State: "failed", Progress: "Windows method failed", Failure: "Source-agent Job failed: " + failure, JobID: jobID})
+			_ = report(control.DeploymentProgress{State: "failed", Progress: "Windows method failed", Failure: deploymentJobFailure(job.OutputError, job.Output), JobID: jobID})
 			return
 		case "cancelled":
 			_ = report(control.DeploymentProgress{State: "failed", Progress: "Windows method cancelled", Failure: "The linked source-agent Job was cancelled.", JobID: jobID})
@@ -168,6 +158,22 @@ func (e *windowsDeploymentExecutor) monitor(deploymentID string, jobID string, r
 			return
 		}
 	}
+}
+
+func deploymentJobFailure(outputError, output string) string {
+	const prefix = "Source-agent Job failed: "
+	failure := strings.TrimSpace(outputError)
+	if failure == "" {
+		failure = strings.TrimSpace(output)
+	}
+	if failure == "" {
+		failure = "The source-agent Job failed without diagnostic output."
+	}
+	limit := 1024 - len(prefix)
+	if len(failure) > limit {
+		failure = failure[len(failure)-limit:]
+	}
+	return prefix + failure
 }
 
 func trimDeploymentError(err error) string {
