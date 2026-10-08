@@ -10,7 +10,6 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
-	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -363,43 +362,13 @@ func windowsCommandLine(program string, arguments ...string) string {
 	return strings.Join(parts, " ")
 }
 
-func waitWMI(ctx context.Context, delay time.Duration) error {
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
-}
+func wmiLaunchCommand(path string) string { return windowsCommandLine(path) }
 
-func runWMI(ctx context.Context, target, path, taskName string, output io.Writer) error {
-	const scheduler = `C:\Windows\System32\schtasks.exe`
-	create := windowsCommandLine(scheduler, "/Create", "/TN", taskName, "/SC", "ONCE", "/ST", "00:00", "/TR", path, "/IT", "/RL", "HIGHEST", "/F")
-	pid, err := runWMIProcess(target, create)
+func runWMI(_ context.Context, target, path, _ string, output io.Writer) error {
+	pid, err := runWMIProcess(target, wmiLaunchCommand(path))
 	if err != nil {
-		return fmt.Errorf("start target-local task registration through WMI: %w", err)
+		return fmt.Errorf("launch through WMI: %w", err)
 	}
-	fmt.Fprintf(output, "WMI started target-local task registration %s with PID %d\n", taskName, pid)
-	if err := waitWMI(ctx, 2*time.Second); err != nil {
-		return err
-	}
-	run := windowsCommandLine(scheduler, "/Run", "/TN", taskName)
-	pid, err = runWMIProcess(target, run)
-	if err != nil {
-		return fmt.Errorf("start target-local task through WMI: %w", err)
-	}
-	fmt.Fprintf(output, "WMI started target-local task %s with PID %d\n", taskName, pid)
-	if err := waitWMI(ctx, 2*time.Second); err != nil {
-		return err
-	}
-	remove := windowsCommandLine(scheduler, "/Delete", "/TN", taskName, "/F")
-	pid, err = runWMIProcess(target, remove)
-	if err != nil {
-		fmt.Fprintf(output, "WMI task cleanup could not be started: %v\n", err)
-	} else {
-		fmt.Fprintf(output, "WMI started cleanup for task %s with PID %d\n", taskName, pid)
-	}
+	fmt.Fprintf(output, "WMI created target process with PID %d\n", pid)
 	return nil
 }

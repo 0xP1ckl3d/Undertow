@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"unsafe"
 )
@@ -28,6 +29,19 @@ func TestWindowsCommandLineQuotesInstallPath(t *testing.T) {
 	want := `C:\Windows\System32\schtasks.exe /TR "C:\Program Data\Undertow\agent.exe"`
 	if command != want {
 		t.Fatalf("command line = %q, want %q", command, want)
+	}
+}
+
+func TestWMILaunchCommandIsDirect(t *testing.T) {
+	const path = `C:\Windows\Temp\agent.exe`
+	command := wmiLaunchCommand(path)
+	if command != path {
+		t.Fatalf("WMI launch command = %q, want %q", command, path)
+	}
+	for _, forbidden := range []string{"schtasks", "cmd.exe", "powershell"} {
+		if strings.Contains(strings.ToLower(command), forbidden) {
+			t.Fatalf("WMI launch command contains %q: %s", forbidden, command)
+		}
 	}
 }
 

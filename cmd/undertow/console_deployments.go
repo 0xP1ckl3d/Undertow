@@ -34,6 +34,19 @@ func deploymentPrerequisites(method, context string) string {
 	}
 }
 
+func deploymentLaunchContext(method, context string) string {
+	switch {
+	case context == "local-system":
+		return "LocalSystem"
+	case method == "scheduled-task":
+		return "interactive current user"
+	case context == "current-user":
+		return "management identity"
+	default:
+		return context
+	}
+}
+
 func runConsoleDeployment(ctx context.Context, output io.Writer, call consoleCaller, args []string, selectedAgentID string) error {
 	if len(args) == 0 {
 		return errors.New("use jumps [SOURCE_AGENT]; jump create [SOURCE_AGENT] TARGET ARTIFACT_ID METHOD CONTEXT; jump show|prepare|start|link")
@@ -113,7 +126,7 @@ func runConsoleDeployment(ctx context.Context, output io.Writer, call consoleCal
 		if operator == "" {
 			operator = record.RequestedFrom
 		}
-		fmt.Fprintf(output, "ID: %s\nState: %s\nSource: %s\nTarget: %s\nArtifact: %s (%s)\nProfile: %s (%s)\nMethod: %s\nContext: %s\nOperator: %s\nCreated: %s\nUpdated: %s\nProgress: %s\n", record.ID, record.State, record.SourceAgentID, record.Target, record.ArtifactID, record.ArtifactSHA256, record.Profile, record.ProfileID, record.Method, record.Context, operator, record.CreatedAt.Local().Format("2006-01-02 15:04:05"), record.UpdatedAt.Local().Format("2006-01-02 15:04:05"), record.Progress)
+		fmt.Fprintf(output, "ID: %s\nState: %s\nSource: %s\nTarget: %s\nArtifact: %s (%s)\nProfile: %s (%s)\nMethod: %s\nLaunch context: %s\nOperator: %s\nCreated: %s\nUpdated: %s\nProgress: %s\n", record.ID, record.State, record.SourceAgentID, record.Target, record.ArtifactID, record.ArtifactSHA256, record.Profile, record.ProfileID, record.Method, deploymentLaunchContext(record.Method, record.Context), operator, record.CreatedAt.Local().Format("2006-01-02 15:04:05"), record.UpdatedAt.Local().Format("2006-01-02 15:04:05"), record.Progress)
 		fmt.Fprintf(output, "Prerequisites: %s\n", deploymentPrerequisites(record.Method, record.Context))
 		if record.Account != "" {
 			fmt.Fprintf(output, "Account: %s\n", record.Account)

@@ -89,8 +89,8 @@ A queued Job that uses the source identity survives a server restart. A queued J
 
 | Method | Context | Target prerequisites | Launch behavior |
 | --- | --- | --- | --- |
-| **WinRM** | Current user | WinRM enabled; the selected identity authorized for the WS-Management session and `ADMIN$` | A native WSMan session invokes `Win32_Process.Create` for the staged agent. No remote shell or task is created. |
-| **WMI** | Current user | Remote WMI/DCOM access and `ADMIN$` for the selected identity | Native COM calls `Win32_Process.Create` to register, run, and remove a target-local one-shot task. It does not use the removed `wmic.exe` tool. |
+| **WinRM** | Management identity | WinRM enabled; the selected identity authorized for the WS-Management session and `ADMIN$` | A native WSMan session invokes `Win32_Process.Create` for the staged agent. No remote shell or task is created. |
+| **WMI** | Management identity | Remote WMI/DCOM access and `ADMIN$` for the selected identity | Native COM invokes `Win32_Process.Create` for the staged agent. No shell or Scheduled Task is created, and the removed `wmic.exe` tool is not used. |
 | **Service Control** | LocalSystem | Remote Service Control Manager access and `ADMIN$`; service-capable artifact | Creates and starts a demand-start LocalSystem service. The service and binary remain after success. |
 | **Scheduled Task** | Current user or LocalSystem | Remote Task Scheduler access and `ADMIN$` | Creates, runs, and removes a one-shot task. Current-user context requires a resolvable domain identity and an interactive session on the target. |
 
