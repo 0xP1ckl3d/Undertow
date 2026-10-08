@@ -78,6 +78,43 @@ func TestCreateDeploymentRejectsSourceArtifactVersionMismatch(t *testing.T) {
 	}
 }
 
+func TestCustomArtifactDeploymentSkipsBuildVersionAndCompletesOnLaunch(t *testing.T) {
+	m, store, _ := deploymentTestManager(t)
+	defer store.Close()
+	m.agents["source"].inventory.ArtifactIdentity.UndertowVersion = "older"
+	m.SetDeploymentArtifactLookup(func(id string) (DeploymentArtifact, error) {
+		if id == "custom-one" {
+			return DeploymentArtifact{ID: id, Profile: "Approved utility", Platform: "windows", SHA256: "def", ServiceCapable: true, Custom: true}, nil
+		}
+		return DeploymentArtifact{}, nil
+	})
+	record, err := m.createDeployment(context.Background(), createDeploymentRequest{
+		SourceAgentID: "source", Target: "ws02", ArtifactID: "custom-one", Method: "service-control", Context: "local-system",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !record.CustomArtifact || record.Profile != "Approved utility" || record.ProfileID != "" {
+		t.Fatalf("custom Jump record: %+v", record)
+	}
+	if _, err := m.prepareDeployment(record.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ChangeDeployment(record.ID, func(item *DeploymentRecord) error { item.State = "dispatching"; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.AdvanceDeployment(record.ID, DeploymentProgress{State: "waiting", Progress: "Method Job accepted", JobID: "job-custom"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.AdvanceDeployment(record.ID, DeploymentProgress{State: "completed", Progress: "Custom artifact launch completed", JobID: "job-custom"}); err != nil {
+		t.Fatal(err)
+	}
+	completed, err := store.Deployment(record.ID)
+	if err != nil || completed.State != "completed" || completed.CompletedAt == nil || completed.ResultAgentID != "" {
+		t.Fatalf("completed custom Jump: %+v err=%v", completed, err)
+	}
+}
+
 func TestDeploymentStageOneAndUniqueEnrollment(t *testing.T) {
 	m, store, _ := deploymentTestManager(t)
 	defer store.Close()

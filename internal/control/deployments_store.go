@@ -17,6 +17,7 @@ type DeploymentRecord struct {
 	ProfileID          string     `json:"profile_id"`
 	Profile            string     `json:"profile"`
 	ArtifactSHA256     string     `json:"artifact_sha256"`
+	CustomArtifact     bool       `json:"custom_artifact,omitempty"`
 	Method             string     `json:"method"`
 	Context            string     `json:"context"`
 	Account            string     `json:"account,omitempty"`

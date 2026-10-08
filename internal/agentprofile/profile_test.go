@@ -3,8 +3,11 @@ package agentprofile
 import (
 	"bytes"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +18,98 @@ import (
 	"undertow/internal/deployment"
 	"undertow/internal/security"
 )
+
+func TestImportCustomArtifactCanBeHosted(t *testing.T) {
+	dir := t.TempDir()
+	store, err := OpenStore(filepath.Join(dir, "store"), filepath.Join(dir, "templates"), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := []byte("custom Windows executable bytes")
+	digest := sha256.Sum256(payload)
+	artifact, err := store.ImportCustom("Approved support tool", "windows", "amd64", "support-tool.exe", int64(len(payload)), hex.EncodeToString(digest[:]), true, bytes.NewReader(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !artifact.Custom || artifact.Label != "Approved support tool" || artifact.Profile != artifact.Label || artifact.ProfileID != "" || artifact.UndertowVersion != "" || !artifact.ServiceCapable {
+		t.Fatalf("custom artifact metadata: %+v", artifact)
+	}
+	if artifact.Filename != "support-tool.exe" || artifact.StoredFilename == artifact.Filename || filepath.Ext(artifact.StoredFilename) != ".exe" {
+		t.Fatalf("custom artifact filenames: %+v", artifact)
+	}
+	stored, err := os.ReadFile(store.ArtifactPath(artifact))
+	if err != nil || !bytes.Equal(stored, payload) {
+		t.Fatalf("stored bytes=%q err=%v", stored, err)
+	}
+	if _, err := store.Host(artifact.ID); err != nil {
+		t.Fatal(err)
+	}
+	token, err := store.HostedToken(artifact.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hosted, file, err := store.OpenHosted(token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	served, err := io.ReadAll(file)
+	if err != nil || hosted.ID != artifact.ID || !bytes.Equal(served, payload) {
+		t.Fatalf("hosted artifact=%+v bytes=%q err=%v", hosted, served, err)
+	}
+}
+
+func TestImportCustomArtifactAllowsRepeatedOriginalFilename(t *testing.T) {
+	dir := t.TempDir()
+	store, err := OpenStore(filepath.Join(dir, "store"), filepath.Join(dir, "templates"), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := []byte("same named tool")
+	digest := sha256.Sum256(payload)
+	hash := hex.EncodeToString(digest[:])
+	first, err := store.ImportCustom("First tool", "windows", "amd64", "tool.exe", int64(len(payload)), hash, false, bytes.NewReader(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.ImportCustom("Second tool", "windows", "amd64", "tool.exe", int64(len(payload)), hash, false, bytes.NewReader(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.StoredFilename == second.StoredFilename || first.Filename != second.Filename {
+		t.Fatalf("repeated filenames: first=%+v second=%+v", first, second)
+	}
+}
+
+func TestImportCustomArtifactRejectsInvalidInput(t *testing.T) {
+	dir := t.TempDir()
+	store, err := OpenStore(filepath.Join(dir, "store"), filepath.Join(dir, "templates"), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := []byte("custom bytes")
+	digest := sha256.Sum256(payload)
+	hash := hex.EncodeToString(digest[:])
+	tests := []struct {
+		name, label, platform, arch, filename, hash string
+		service                                     bool
+	}{
+		{name: "label", platform: "windows", arch: "amd64", filename: "tool.exe", hash: hash},
+		{name: "path", label: "tool", platform: "windows", arch: "amd64", filename: `..\\tool.exe`, hash: hash},
+		{name: "extension", label: "tool", platform: "windows", arch: "amd64", filename: "tool.bin", hash: hash},
+		{name: "target", label: "tool", platform: "plan9", arch: "amd64", filename: "tool", hash: hash},
+		{name: "service", label: "tool", platform: "linux", arch: "amd64", filename: "tool", hash: hash, service: true},
+		{name: "hash", label: "tool", platform: "windows", arch: "amd64", filename: "tool.exe", hash: strings.Repeat("0", 64)},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := store.ImportCustom(test.label, test.platform, test.arch, test.filename, int64(len(payload)), test.hash, test.service, bytes.NewReader(payload))
+			if err == nil {
+				t.Fatal("invalid custom artifact was accepted")
+			}
+		})
+	}
+}
 
 func testProfile() Profile {
 	return Profile{ID: "profile-1", Name: "office", Created: time.Now().UTC(), UndertowVersion: "test",

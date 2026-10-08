@@ -13,8 +13,9 @@ import (
 	"strings"
 )
 
-// Payloads are built deployment binaries. Connected agents have a separate
-// command namespace, even though older consoles used "agent" for both.
+// Payload artifacts include built Undertow agents and operator-uploaded files.
+// Connected agents have a separate command namespace, even though older
+// consoles used "agent" for both.
 func isPayloadSubcommand(value string) bool {
 	switch value {
 	case "profile", "profiles", "build", "list", "artifacts", "show", "host", "hosted", "url", "download", "unhost", "revoke", "delete", "deploy-script", "retrieval-host", "host-agent", "agent-hosts", "unhost-agent", "verify-script-agent", "deploy-script-agent":
@@ -421,7 +422,7 @@ func printPayloadList(ctx context.Context, out io.Writer, call consoleCaller, ho
 	sort.Slice(artifacts, func(i, j int) bool { return artifacts[i].Created.After(artifacts[j].Created) })
 	count := 0
 	if !hostedOnly {
-		fmt.Fprintln(out, "Payload ID (use with payload show/host)  Profile name  Target  Download  Enrollment")
+		fmt.Fprintln(out, "Payload ID (use with payload show/host)  Profile or label  Target  Download  Enrollment")
 	}
 	for _, a := range artifacts {
 		if hostedOnly && !a.Hosted {
@@ -433,7 +434,11 @@ func printPayloadList(ctx context.Context, out io.Writer, call consoleCaller, ho
 			if err != nil {
 				return fmt.Errorf("could not retrieve URL for payload %s: %w", a.ID, err)
 			}
-			fmt.Fprintf(out, "Payload ID: %s  Profile: %s  Target: %s/%s\n", a.ID, a.Profile, a.Platform, a.Architecture)
+			kind := "Profile"
+			if a.Custom {
+				kind = "Custom label"
+			}
+			fmt.Fprintf(out, "Payload ID: %s  %s: %s  Target: %s/%s\n", a.ID, kind, a.Profile, a.Platform, a.Architecture)
 			printPayloadDownload(out, hosted)
 			if a.Revoked {
 				fmt.Fprintln(out, "Enrollment: revoked; downloaded copies cannot start new sessions.")
@@ -447,6 +452,9 @@ func printPayloadList(ctx context.Context, out io.Writer, call consoleCaller, ho
 		}
 		if a.Revoked {
 			enrollment = "revoked"
+		}
+		if a.Custom {
+			enrollment = "n/a"
 		}
 		fmt.Fprintf(out, "%-38s  %-20s  %-13s  %-10s  %s\n", a.ID, a.Profile, a.Platform+"/"+a.Architecture, download, enrollment)
 	}
@@ -528,12 +536,26 @@ func runPayloadAction(ctx context.Context, out io.Writer, call consoleCaller, ac
 		if _, err := call(ctx, http.MethodDelete, path, nil); err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "Payload %s file deleted from the server. Deployed copies retain enrollment and can reconnect. Revoke enrollment explicitly to block them.\n", a.ID)
+		if a.Custom {
+			fmt.Fprintf(out, "Custom artifact %s file and catalog record deleted from the server.\n", a.ID)
+		} else {
+			fmt.Fprintf(out, "Payload %s file deleted from the server. Deployed copies retain enrollment and can reconnect. Revoke enrollment explicitly to block them.\n", a.ID)
+		}
 	}
 	return nil
 }
 
 func printPayloadDetails(out io.Writer, a artifactInfo, hosted *hostedArtifactInfo) {
+	if a.Custom {
+		fmt.Fprintf(out, "Payload ID: %s (custom artifact; use with payload commands)\nLabel: %s\nTarget: %s/%s\nServer file: %s (stored on the Undertow server)\nSHA-256: %s\n", a.ID, a.Label, a.Platform, a.Architecture, a.ServerPath, a.SHA256)
+		if hosted == nil {
+			fmt.Fprintf(out, "Download: not hosted. Run payload host %s to enable an HTTPS URL.\n", a.ID)
+		} else {
+			printPayloadDownload(out, *hosted)
+		}
+		fmt.Fprintln(out, "Enrollment: not applicable; custom artifacts contain no Undertow enrollment credential.")
+		return
+	}
 	agentIdentity := "assigned when each process starts; see agents after connection"
 	if a.ProfileFormatVersion < 4 {
 		agentIdentity = "legacy fixed identity; rebuild this payload before using copies on multiple hosts"

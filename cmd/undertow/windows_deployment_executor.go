@@ -127,15 +127,19 @@ func (e *windowsDeploymentExecutor) Start(ctx context.Context, record control.De
 		}
 		return err
 	}
-	progress := control.DeploymentProgress{State: "waiting", Progress: "Native Windows method Job accepted; waiting for target enrolment", JobID: job.ID, TransferID: transferID, InstallPath: plan.InstallPath, ServiceName: serviceName, TaskName: taskName}
+	progressText := "Native Windows method Job accepted; waiting for target enrolment"
+	if record.CustomArtifact {
+		progressText = "Native Windows method Job accepted; waiting for launch result"
+	}
+	progress := control.DeploymentProgress{State: "waiting", Progress: progressText, JobID: job.ID, TransferID: transferID, InstallPath: plan.InstallPath, ServiceName: serviceName, TaskName: taskName}
 	if err := report(progress); err != nil {
 		return err
 	}
-	go e.monitor(record.ID, job.ID, report)
+	go e.monitor(record.ID, job.ID, record.CustomArtifact, report)
 	return nil
 }
 
-func (e *windowsDeploymentExecutor) monitor(deploymentID string, jobID string, report func(control.DeploymentProgress) error) {
+func (e *windowsDeploymentExecutor) monitor(deploymentID string, jobID string, customArtifact bool, report func(control.DeploymentProgress) error) {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 	for range ticker.C {
@@ -145,7 +149,11 @@ func (e *windowsDeploymentExecutor) monitor(deploymentID string, jobID string, r
 		}
 		switch job.State {
 		case "completed":
-			_ = report(control.DeploymentProgress{State: "waiting", Progress: "Native Windows method completed; waiting for target enrolment", JobID: job.ID})
+			if customArtifact {
+				_ = report(control.DeploymentProgress{State: "completed", Progress: "Custom artifact launch completed", JobID: job.ID})
+			} else {
+				_ = report(control.DeploymentProgress{State: "waiting", Progress: "Native Windows method completed; waiting for target enrolment", JobID: job.ID})
+			}
 			return
 		case "failed":
 			_ = report(control.DeploymentProgress{State: "failed", Progress: "Windows method failed", Failure: deploymentJobFailure(job.OutputError, job.Output), JobID: jobID})

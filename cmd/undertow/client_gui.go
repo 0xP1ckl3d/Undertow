@@ -308,6 +308,7 @@ func (g *guiServer) handler() http.Handler {
 	mux.HandleFunc("DELETE /api/profiles/{name}", g.remote(http.MethodDelete, func(r *http.Request) string { return "/v1/agent-profiles/" + url.PathEscape(r.PathValue("name")) }))
 	mux.HandleFunc("GET /api/artifacts", g.remote(http.MethodGet, func(*http.Request) string { return "/v1/agent-artifacts" }))
 	mux.HandleFunc("POST /api/artifacts", g.remote(http.MethodPost, func(*http.Request) string { return "/v1/agent-artifacts" }))
+	mux.HandleFunc("POST /api/artifacts/upload", g.uploadCustomArtifact)
 	mux.HandleFunc("GET /api/artifacts/{id}", g.remote(http.MethodGet, func(r *http.Request) string { return "/v1/agent-artifacts/" + url.PathEscape(r.PathValue("id")) }))
 	mux.HandleFunc("DELETE /api/artifacts/{id}", g.remote(http.MethodDelete, func(r *http.Request) string { return "/v1/agent-artifacts/" + url.PathEscape(r.PathValue("id")) }))
 	mux.HandleFunc("GET /api/agent-hosts", g.remote(http.MethodGet, func(*http.Request) string { return "/v1/agent-hosts" }))

@@ -1,6 +1,6 @@
 # Windows Jump
 
-**Jump** uses an existing Windows agent to place and start an existing Undertow Windows artifact on another Windows host. It keeps one server-owned record for the complete operation and reuses Undertow's authenticated agent channel, Transfers, Jobs, History, enrolment, and Topology data.
+**Jump** uses an existing Windows agent to place and start an existing Windows artifact on another Windows host. The artifact can be an Undertow build or a custom executable uploaded through Payloads. Jump keeps one server-owned record for the complete operation and reuses Undertow's authenticated agent channel, Transfers, Jobs, History, enrolment, and Topology data.
 
 Jump does not create a new build, enable an artifact host, or make the target retrieve a payload. The server streams the selected artifact through the source agent to the target's administrative share and verifies its SHA-256 before the selected Windows management method starts it.
 
@@ -10,7 +10,7 @@ You need:
 
 - A Windows source agent that is connected or intentionally sleeping within its expected check-in window. A lost agent cannot be used for a new Jump.
 - Retained source inventory from a current agent build.
-- An active, non-revoked Windows artifact built by the same Undertow version as the source agent. Service Control also requires an artifact marked as service capable.
+- An active Windows artifact. Undertow builds must be non-revoked and use the same Undertow version as the source agent. A custom upload has no Undertow build version. Service Control requires either an Undertow build or a custom upload explicitly marked as service compatible.
 - A target hostname or IPv4 address reachable from the source host.
 - Access from the source host to the target administrative share and the selected management interface, using either the source agent identity or supplied Windows credentials.
 
@@ -24,10 +24,10 @@ Password authentication lets Windows select Kerberos or NTLM according to the ta
 
 1. Open **Jump** and choose the source Windows agent.
 2. Enter the target hostname or IPv4 address.
-3. Select an existing Windows artifact. The selected profile and SHA-256 appear below it.
+3. Select an existing Windows artifact. A built artifact shows its profile; a custom artifact shows its label. Both show their SHA-256.
 4. Choose **WinRM**, **WMI**, **Service Control**, or **Scheduled Task**, then choose an allowed execution context.
 5. Select **Create jump**. This records the request and does not contact the target.
-6. Select **Prepare jump**. Undertow validates the source inventory, source and artifact version, artifact state and hash, and method compatibility. Preparation does not contact the target.
+6. Select **Prepare jump**. Undertow validates the source inventory, artifact state and hash, Undertow build-version compatibility where applicable, and method compatibility. Preparation does not contact the target.
 7. Review the method prerequisites. Keep **Source agent identity**, select **Supplied username and password**, or select **Supplied username and NT hash** for a compatible method. Leave the install path blank for a generated path under `C:\Windows\Temp`, or enter an absolute Windows `.exe` path.
 8. Select **Start jump**. If the source agent is sleeping, the linked Job remains queued until its next authenticated check-in.
 
@@ -77,11 +77,11 @@ The console reads the selected secret file for this request and does not place t
 | `created` | The server recorded the request. No target action has started. A preparation failure leaves the record here so the cause can be corrected and Prepare retried. |
 | `prepared` | Source and artifact checks passed. A Start preflight failure leaves the record here. |
 | `dispatching` | Start has claimed the record. The source may be transferring and launching now, or its durable Job may be queued for the next check-in. |
-| `waiting` | The method Job was accepted. Undertow is waiting for matching agent enrolment, or the launch outcome is explicitly uncertain and needs review. |
-| `completed` | A matching resulting agent enrolled and was linked to the Jump record. |
+| `waiting` | The method Job was accepted. For an Undertow build, Undertow is waiting for matching agent enrolment. An interrupted launch may also remain here with an explicitly uncertain outcome. |
+| `completed` | A matching Undertow agent enrolled and was linked, or a custom artifact's native launch Job completed successfully. |
 | `failed` | A definite failure occurred after dispatch began. The record and linked Job retain the reason. |
 
-Start can claim a prepared record only once. A duplicate Start returns a conflict and does not launch another copy. Prepare and Start both revalidate mutable inputs, including artifact availability, revocation, hash, version compatibility, and source readiness.
+Start can claim a prepared record only once. A duplicate Start returns a conflict and does not launch another copy. Prepare and Start both revalidate mutable inputs, including artifact availability, revocation where applicable, hash, Undertow build-version compatibility where applicable, and source readiness.
 
 A queued Job that uses the source identity survives a server restart. A queued Job with supplied credentials retains its metadata but fails after restart because its in-memory password or NT hash is deliberately cleared. If the server restarts after dispatch began and cannot prove whether execution reached the target, the record is marked failed with an explicit uncertainty warning. If the source check-in ends during execution, the record remains waiting with an uncertain outcome so a late enrolment can still correlate. Undertow does not silently replay an uncertain action.
 
@@ -114,7 +114,7 @@ If launch fails before it is accepted, Undertow attempts to remove the staged bi
 
 ## Enrolment correlation and Topology
 
-Once the method Job is accepted, the Jump waits for enrolment. Undertow links a new agent automatically only when all of these are true:
+For an Undertow build, the Jump waits for enrolment after the method Job succeeds. Undertow links a new agent automatically only when all of these are true:
 
 - It reports the exact selected artifact.
 - Its first connection is after the Jump entered `waiting`.
@@ -122,6 +122,8 @@ Once the method Job is accepted, the Jump waits for enrolment. Undertow links a 
 - Exactly one waiting Jump matches.
 
 If a callback is late or ambiguous, use **Link resulting agent** in the GUI or `jump link JUMP_ID AGENT_ID`. Manual linking still requires a connected, inventory-ready Windows agent with the selected artifact and a matching target. Completion records the `deployed_from` relationship. Topology displays that deployment relationship while preserving the agent's observed relay lineage.
+
+A custom artifact has no Undertow enrollment credential or artifact identity to correlate. Its Jump completes when the linked method Job reports a successful native launch. The completed record retains its Job, Transfer, path, and service or task identifier, but has no resulting agent relationship.
 
 ## HTTP API
 

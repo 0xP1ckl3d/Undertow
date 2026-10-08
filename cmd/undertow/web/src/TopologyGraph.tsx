@@ -22,10 +22,16 @@ function DeviceIcon({node}:{node:TopologyNode}) {
   return <Network size={28}/>;
 }
 
-function sessionUptime(value?:string) {
-  if(!value)return 'Unknown';
-  const seconds=Math.max(0,Math.floor((Date.now()-Date.parse(value))/1000));
-  if(!Number.isFinite(seconds))return 'Unknown';
+function validTimestamp(value?:string) {
+  if(!value||value.startsWith('0001-'))return null;
+  const timestamp=Date.parse(value);
+  return Number.isFinite(timestamp)?timestamp:null;
+}
+
+function sessionUptime(value:string) {
+  const started=validTimestamp(value);
+  if(started===null)return 'Unknown';
+  const seconds=Math.max(0,Math.floor((Date.now()-started)/1000));
   if(seconds<60)return `${seconds}s`;
   if(seconds<3600)return `${Math.floor(seconds/60)}m`;
   if(seconds<86400)return `${Math.floor(seconds/3600)}h ${Math.floor(seconds%3600/60)}m`;
@@ -60,14 +66,14 @@ function GraphDetails({node,edge,localClient,topology,onMouseEnter,onMouseLeave}
       if(node.kind==='client')rows.push(['Internal path',node.internal?'Enabled':'Disabled']);
       if(node.kind==='client')rows.push(['Internet VPN',node.vpn?'Enabled':'Disabled']);
       if(node.kind==='client')rows.push(['Accepted routes',String(node.accepted_count||0)]);
-      if(node.connected&&node.active)rows.push(['Session uptime',sessionUptime(node.connected)]);
+      if(node.kind!=='network'&&node.active&&validTimestamp(node.connected)!==null)rows.push(['Session uptime',sessionUptime(node.connected!)]);
       if(node.carrier)rows.push(['Carrier',node.carrier]);
       if(node.kind==='agent'&&node.relay_bind)rows.push(['Relay listener',node.relay_bind]);
       if(node.remote)rows.push(['Remote',node.remote]);
       if(node.kind==='agent')rows.push(['Observed public IP',node.public_ip||'Not observed from this connection']);
       if(node.session_id)rows.push([node.kind==='agent'&&!node.active?'Last session':'Session',String(node.session_id)]);
       if(node.rtt_ns)rows.push(['RTT',`${Math.round(node.rtt_ns/1e6)} ms`]);
-      if(node.last_seen)rows.push(['Last seen',new Date(node.last_seen).toLocaleString()]);
+      if(node.kind!=='network'&&validTimestamp(node.last_seen)!==null)rows.push(['Last seen',new Date(node.last_seen!).toLocaleString()]);
     }
   }else if(edge){
     rows.push(['Connection',edge.kind.replaceAll('_',' ')]);
@@ -84,7 +90,7 @@ function GraphDetails({node,edge,localClient,topology,onMouseEnter,onMouseLeave}
     if(edge.accepted_by?.length)rows.push(['Accepted by',edge.accepted_by.map(id=>topology.nodes.find(node=>node.id===id)?.label||id).join(', ')]);
     if(edge.session_id)rows.push(['Session',String(edge.session_id)]);
     if(edge.rtt_ns)rows.push(['RTT',`${Math.round(edge.rtt_ns/1e6)} ms`]);
-    if(edge.last_seen)rows.push(['Last seen',new Date(edge.last_seen).toLocaleString()]);
+    if(validTimestamp(edge.last_seen)!==null)rows.push(['Last seen',new Date(edge.last_seen!).toLocaleString()]);
   }
   return <div className="graph-inspector" onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave}><strong>{node?.label||'Connection details'}</strong><dl>{rows.map(([label,value],i)=><div key={label+i}><dt>{label}</dt><dd>{value}</dd></div>)}</dl></div>;
 }

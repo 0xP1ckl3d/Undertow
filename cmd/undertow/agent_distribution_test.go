@@ -295,6 +295,101 @@ func TestAgentDistributionAPIAndRetrieval(t *testing.T) {
 	}
 }
 
+func TestCustomArtifactUploadProtocolAndHosting(t *testing.T) {
+	dir := t.TempDir()
+	store, err := agentprofile.OpenStore(filepath.Join(dir, "store"), filepath.Join(dir, "templates"), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := control.NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	manager.SetServerInfo(control.ServerInfo{Listeners: []control.ListenerInfo{{Transport: "websocket", Listen: "127.0.0.1:443"}}})
+	d := &agentDistribution{store: store, manager: manager}
+	call := func(method, path string, body any) *httptest.ResponseRecorder {
+		t.Helper()
+		var data []byte
+		if body != nil {
+			data, _ = json.Marshal(body)
+		}
+		request := httptest.NewRequest(method, path, bytes.NewReader(data))
+		response := httptest.NewRecorder()
+		d.ServeHTTP(response, request)
+		return response
+	}
+	payload := bytes.Repeat([]byte("custom-artifact"), 100000)
+	digest := sha256.Sum256(payload)
+	begin := call(http.MethodPost, "/v1/agent-artifact-uploads", customArtifactUploadRequest{
+		Label: "Approved utility", Platform: "windows", Architecture: "amd64", Filename: "utility.exe",
+		Size: int64(len(payload)), SHA256: hex.EncodeToString(digest[:]), ServiceCapable: true,
+	})
+	if begin.Code != http.StatusCreated {
+		t.Fatalf("begin upload: %d %s", begin.Code, begin.Body.String())
+	}
+	var session struct {
+		ID        string `json:"id"`
+		ChunkSize int    `json:"chunk_size"`
+	}
+	if err := json.Unmarshal(begin.Body.Bytes(), &session); err != nil || session.ID == "" || session.ChunkSize != customArtifactChunkSize {
+		t.Fatalf("upload session=%+v err=%v", session, err)
+	}
+	for offset := 0; offset < len(payload); offset += session.ChunkSize {
+		end := min(offset+session.ChunkSize, len(payload))
+		chunk := call(http.MethodPut, "/v1/agent-artifact-uploads/"+session.ID, map[string]any{"offset": offset, "data": payload[offset:end]})
+		if chunk.Code != http.StatusOK {
+			t.Fatalf("upload chunk at %d: %d %s", offset, chunk.Code, chunk.Body.String())
+		}
+	}
+	complete := call(http.MethodPost, "/v1/agent-artifact-uploads/"+session.ID+"/complete", map[string]any{})
+	if complete.Code != http.StatusCreated {
+		t.Fatalf("complete upload: %d %s", complete.Code, complete.Body.String())
+	}
+	var artifact artifactInfo
+	if err := json.Unmarshal(complete.Body.Bytes(), &artifact); err != nil {
+		t.Fatal(err)
+	}
+	if !artifact.Custom || artifact.Label != "Approved utility" || !artifact.ServiceCapable || artifact.Size != int64(len(payload)) || artifact.SHA256 != hex.EncodeToString(digest[:]) {
+		t.Fatalf("custom artifact response: %+v", artifact)
+	}
+	stored, err := os.ReadFile(artifact.ServerPath)
+	if err != nil || !bytes.Equal(stored, payload) {
+		t.Fatalf("stored custom artifact bytes=%d err=%v", len(stored), err)
+	}
+	hosted := call(http.MethodPost, "/v1/agent-artifacts/"+artifact.ID+"/host", nil)
+	if hosted.Code != http.StatusOK || !strings.Contains(hosted.Body.String(), `"custom":true`) {
+		t.Fatalf("host custom artifact: %d %s", hosted.Code, hosted.Body.String())
+	}
+}
+
+func TestCustomArtifactUploadRejectsIncompleteData(t *testing.T) {
+	dir := t.TempDir()
+	store, err := agentprofile.OpenStore(filepath.Join(dir, "store"), filepath.Join(dir, "templates"), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := &agentDistribution{store: store}
+	payload := []byte("complete payload")
+	digest := sha256.Sum256(payload)
+	metadata, _ := json.Marshal(customArtifactUploadRequest{Label: "Tool", Platform: "linux", Architecture: "amd64", Filename: "tool", Size: int64(len(payload)), SHA256: hex.EncodeToString(digest[:])})
+	begin := httptest.NewRecorder()
+	d.ServeHTTP(begin, httptest.NewRequest(http.MethodPost, "/v1/agent-artifact-uploads", bytes.NewReader(metadata)))
+	var session struct {
+		ID string `json:"id"`
+	}
+	if begin.Code != http.StatusCreated || json.Unmarshal(begin.Body.Bytes(), &session) != nil {
+		t.Fatalf("begin upload: %d %s", begin.Code, begin.Body.String())
+	}
+	chunkData, _ := json.Marshal(map[string]any{"offset": 0, "data": payload[:4]})
+	chunk := httptest.NewRecorder()
+	d.ServeHTTP(chunk, httptest.NewRequest(http.MethodPut, "/v1/agent-artifact-uploads/"+session.ID, bytes.NewReader(chunkData)))
+	complete := httptest.NewRecorder()
+	d.ServeHTTP(complete, httptest.NewRequest(http.MethodPost, "/v1/agent-artifact-uploads/"+session.ID+"/complete", strings.NewReader(`{}`)))
+	if chunk.Code != http.StatusOK || complete.Code != http.StatusBadRequest || !strings.Contains(complete.Body.String(), "incomplete") {
+		t.Fatalf("chunk=%d complete=%d body=%s", chunk.Code, complete.Code, complete.Body.String())
+	}
+	if artifacts := store.Artifacts(); len(artifacts) != 0 {
+		t.Fatalf("incomplete upload created artifacts: %+v", artifacts)
+	}
+}
+
 func TestAgentDistributionHostOnlyUsesCarrierListenerPort(t *testing.T) {
 	manager := control.NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
 	manager.SetServerInfo(control.ServerInfo{Transport: "quic", Fingerprint: strings.Repeat("a", 64), Domain: "t.undertow.invalid", WebSocketPath: "/undertow", Listeners: []control.ListenerInfo{

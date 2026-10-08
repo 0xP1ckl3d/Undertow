@@ -27,6 +27,7 @@ type Artifact struct {
 	Platform             string    `json:"platform"`
 	Architecture         string    `json:"architecture"`
 	Filename             string    `json:"filename"`
+	StoredFilename       string    `json:"stored_filename,omitempty"`
 	Size                 int64     `json:"size"`
 	SHA256               string    `json:"sha256"`
 	Created              time.Time `json:"created"`
@@ -36,7 +37,11 @@ type Artifact struct {
 	Revoked              bool      `json:"revoked,omitempty"`
 	Deleted              bool      `json:"deleted,omitempty"`
 	ServiceCapable       bool      `json:"service_capable,omitempty"`
+	Custom               bool      `json:"custom,omitempty"`
+	Label                string    `json:"label,omitempty"`
 }
+
+const MaxCustomArtifactSize int64 = 512 << 20
 
 type persisted struct {
 	Profiles             map[string]Profile  `json:"profiles"`
@@ -147,7 +152,7 @@ func OpenStore(root, templates, version string) (*Store, error) {
 		s.state.EnrollmentSecrets = map[string]string{}
 	}
 	for id, a := range s.state.Artifacts {
-		if id != a.ID || !safeArtifactFilename(a.Filename) {
+		if id != a.ID || !safeArtifactFilename(a.Filename) || a.StoredFilename != "" && !safeArtifactFilename(a.StoredFilename) {
 			return nil, errors.New("invalid agent artifact record")
 		}
 		if a.Hosted && s.state.RetrievalTokens[id] == "" {
@@ -179,6 +184,31 @@ func OpenStore(root, templates, version string) (*Store, error) {
 
 func safeArtifactFilename(name string) bool {
 	return name != "" && name != "." && name != ".." && filepath.Base(name) == name && !strings.ContainsAny(name, "/\\:")
+}
+
+func validateCustomArtifact(label, platform, arch, filename string, size int64, serviceCapable bool) error {
+	label = strings.TrimSpace(label)
+	if label == "" || len(label) > 80 || strings.ContainsAny(label, "\r\n\x00") {
+		return errors.New("custom artifact label must be one line and 80 characters or fewer")
+	}
+	if !safeArtifactFilename(filename) || len(filename) > 128 || strings.ContainsAny(filename, "\r\n\x00") {
+		return errors.New("invalid custom artifact filename")
+	}
+	switch platform + "/" + arch {
+	case "windows/amd64", "windows/arm64", "linux/amd64", "linux/arm64":
+	default:
+		return errors.New("choose a supported custom artifact platform and architecture")
+	}
+	if platform == "windows" && !strings.HasSuffix(strings.ToLower(filename), ".exe") {
+		return errors.New("Windows custom artifacts must use an .exe filename")
+	}
+	if serviceCapable && platform != "windows" {
+		return errors.New("only a Windows custom artifact can be marked service capable")
+	}
+	if size <= 0 || size > MaxCustomArtifactSize {
+		return errors.New("custom artifact must be between 1 byte and 512 MiB")
+	}
+	return nil
 }
 
 func (s *Store) save() error {
@@ -437,6 +467,65 @@ func (s *Store) Build(name, platform, arch string, requestedFilename ...string) 
 	return a, nil
 }
 
+// ImportCustom adds operator supplied bytes to the artifact catalog. Custom
+// artifacts have no Undertow enrollment secret or embedded profile.
+func (s *Store) ImportCustom(label, platform, arch, filename string, size int64, expectedSHA256 string, serviceCapable bool, source io.Reader) (Artifact, error) {
+	label = strings.TrimSpace(label)
+	if err := validateCustomArtifact(label, platform, arch, filename, size, serviceCapable); err != nil {
+		return Artifact{}, err
+	}
+	expectedSHA256 = strings.ToLower(strings.TrimSpace(expectedSHA256))
+	if len(expectedSHA256) != 64 {
+		return Artifact{}, errors.New("custom artifact SHA-256 is required")
+	}
+	if _, err := hex.DecodeString(expectedSHA256); err != nil {
+		return Artifact{}, errors.New("invalid custom artifact SHA-256")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	id, err := ID()
+	if err != nil {
+		return Artifact{}, err
+	}
+	storedFilename := id + strings.ToLower(filepath.Ext(filename))
+	path := filepath.Join(s.root, "artifacts", storedFilename)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if err != nil {
+		return Artifact{}, err
+	}
+	remove := true
+	defer func() {
+		_ = file.Close()
+		if remove {
+			_ = os.Remove(path)
+		}
+	}()
+	hash := sha256.New()
+	written, copyErr := io.Copy(io.MultiWriter(file, hash), io.LimitReader(source, size+1))
+	if copyErr != nil || written != size {
+		return Artifact{}, errors.New("custom artifact upload was incomplete")
+	}
+	if err := file.Sync(); err != nil {
+		return Artifact{}, err
+	}
+	if err := file.Close(); err != nil {
+		return Artifact{}, err
+	}
+	actualSHA256 := hex.EncodeToString(hash.Sum(nil))
+	if actualSHA256 != expectedSHA256 {
+		return Artifact{}, errors.New("custom artifact SHA-256 mismatch")
+	}
+	a := Artifact{ID: id, Profile: label, Platform: platform, Architecture: arch, Filename: filename, StoredFilename: storedFilename, Size: size, SHA256: actualSHA256, Created: time.Now().UTC(), ServiceCapable: serviceCapable, Custom: true, Label: label}
+	s.state.Artifacts[id] = a
+	if err := s.save(); err != nil {
+		delete(s.state.Artifacts, id)
+		return Artifact{}, err
+	}
+	remove = false
+	return a, nil
+}
+
 func (s *Store) Artifacts() []Artifact {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -473,11 +562,18 @@ func (s *Store) EnrollmentArtifact(id string) (Artifact, error) {
 
 // ArtifactPath is the server-side file path, never an endpoint installation path.
 func (s *Store) ArtifactPath(a Artifact) string {
-	path := filepath.Join(s.root, "artifacts", a.Filename)
+	path := filepath.Join(s.root, "artifacts", artifactStoredFilename(a))
 	if absolute, err := filepath.Abs(path); err == nil {
 		return absolute
 	}
 	return path
+}
+
+func artifactStoredFilename(a Artifact) string {
+	if a.StoredFilename != "" {
+		return a.StoredFilename
+	}
+	return a.Filename
 }
 
 func (s *Store) ArtifactEnrollmentScoped(id string) bool {
@@ -509,7 +605,7 @@ func (s *Store) setHosted(id string, hosted bool) (Artifact, error) {
 		return Artifact{}, os.ErrNotExist
 	}
 	if hosted {
-		if err := VerifyFile(filepath.Join(s.root, "artifacts", a.Filename), a.SHA256); err != nil {
+		if err := VerifyFile(s.ArtifactPath(a), a.SHA256); err != nil {
 			return Artifact{}, err
 		}
 	}
@@ -624,7 +720,7 @@ func (s *Store) DeleteArtifact(id string) error {
 		}
 		return err
 	}
-	err := os.Remove(filepath.Join(s.root, "artifacts", a.Filename))
+	err := os.Remove(s.ArtifactPath(a))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
@@ -648,7 +744,7 @@ func (s *Store) OpenHosted(token string) (Artifact, *os.File, error) {
 	if !found || !a.Hosted || len(token) != 48 {
 		return Artifact{}, nil, os.ErrNotExist
 	}
-	f, err := os.Open(filepath.Join(s.root, "artifacts", a.Filename))
+	f, err := os.Open(s.ArtifactPath(a))
 	if err != nil {
 		return Artifact{}, nil, err
 	}

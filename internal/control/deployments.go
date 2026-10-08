@@ -28,6 +28,7 @@ type DeploymentArtifact struct {
 	UndertowVersion string
 	Revoked         bool
 	ServiceCapable  bool
+	Custom          bool
 }
 
 type DeploymentStartRequest struct {
@@ -162,6 +163,9 @@ func (m *Manager) deploymentStore() (*OperationsStore, error) {
 }
 
 func validateDeploymentSourceVersion(source AgentInfo, artifact DeploymentArtifact) error {
+	if artifact.Custom {
+		return nil
+	}
 	if source.UndertowVersion == "" {
 		return errors.New("source agent has not reported its Undertow version; update or reconnect the source before starting Jump")
 	}
@@ -223,7 +227,7 @@ func (m *Manager) createDeployment(ctx context.Context, req createDeploymentRequ
 	if source == "" {
 		source = "server_console"
 	}
-	record := DeploymentRecord{ID: hex.EncodeToString(key[:]), SourceAgentID: req.SourceAgentID, Target: target, ArtifactID: artifact.ID, ProfileID: artifact.ProfileID, Profile: artifact.Profile, ArtifactSHA256: artifact.SHA256, Method: req.Method, Context: req.Context, Account: req.Account, OperatorID: actor.OperatorID, OperatorName: actor.DisplayName, RequestedFrom: source, CreatedAt: now, UpdatedAt: now, State: "created", Progress: "Deployment request recorded"}
+	record := DeploymentRecord{ID: hex.EncodeToString(key[:]), SourceAgentID: req.SourceAgentID, Target: target, ArtifactID: artifact.ID, ProfileID: artifact.ProfileID, Profile: artifact.Profile, ArtifactSHA256: artifact.SHA256, CustomArtifact: artifact.Custom, Method: req.Method, Context: req.Context, Account: req.Account, OperatorID: actor.OperatorID, OperatorName: actor.DisplayName, RequestedFrom: source, CreatedAt: now, UpdatedAt: now, State: "created", Progress: "Deployment request recorded"}
 	store, err := m.deploymentStore()
 	if err != nil {
 		return DeploymentRecord{}, err
@@ -312,7 +316,7 @@ func (m *Manager) AdvanceDeployment(id string, update DeploymentProgress) error 
 		if item.State != "dispatching" && item.State != "waiting" {
 			return ErrDeploymentConflict
 		}
-		if update.State != "waiting" && update.State != "failed" {
+		if update.State != "waiting" && update.State != "completed" && update.State != "failed" {
 			return ErrDeploymentConflict
 		}
 		if update.State == "waiting" && update.Failure != "" {
@@ -339,10 +343,13 @@ func (m *Manager) AdvanceDeployment(id string, update DeploymentProgress) error 
 		if update.State == "waiting" && item.WaitingAt == nil {
 			item.WaitingAt = &now
 		}
-		if update.State == "failed" {
-			if update.Failure == "" {
-				return errors.New("failed deployment needs an error")
-			}
+		if update.State == "failed" && update.Failure == "" {
+			return errors.New("failed deployment needs an error")
+		}
+		if update.State == "completed" && update.Failure != "" {
+			return errors.New("completed deployment cannot contain a failure")
+		}
+		if update.State == "completed" || update.State == "failed" {
 			item.CompletedAt = &now
 		}
 		return nil

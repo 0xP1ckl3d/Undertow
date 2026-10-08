@@ -126,7 +126,11 @@ func runConsoleDeployment(ctx context.Context, output io.Writer, call consoleCal
 		if operator == "" {
 			operator = record.RequestedFrom
 		}
-		fmt.Fprintf(output, "ID: %s\nState: %s\nSource: %s\nTarget: %s\nArtifact: %s (%s)\nProfile: %s (%s)\nMethod: %s\nLaunch context: %s\nOperator: %s\nCreated: %s\nUpdated: %s\nProgress: %s\n", record.ID, record.State, record.SourceAgentID, record.Target, record.ArtifactID, record.ArtifactSHA256, record.Profile, record.ProfileID, record.Method, deploymentLaunchContext(record.Method, record.Context), operator, record.CreatedAt.Local().Format("2006-01-02 15:04:05"), record.UpdatedAt.Local().Format("2006-01-02 15:04:05"), record.Progress)
+		artifactLabel := fmt.Sprintf("Profile: %s (%s)", record.Profile, record.ProfileID)
+		if record.CustomArtifact {
+			artifactLabel = "Custom label: " + record.Profile
+		}
+		fmt.Fprintf(output, "ID: %s\nState: %s\nSource: %s\nTarget: %s\nArtifact: %s (%s)\n%s\nMethod: %s\nLaunch context: %s\nOperator: %s\nCreated: %s\nUpdated: %s\nProgress: %s\n", record.ID, record.State, record.SourceAgentID, record.Target, record.ArtifactID, record.ArtifactSHA256, artifactLabel, record.Method, deploymentLaunchContext(record.Method, record.Context), operator, record.CreatedAt.Local().Format("2006-01-02 15:04:05"), record.UpdatedAt.Local().Format("2006-01-02 15:04:05"), record.Progress)
 		fmt.Fprintf(output, "Prerequisites: %s\n", deploymentPrerequisites(record.Method, record.Context))
 		if record.Account != "" {
 			fmt.Fprintf(output, "Account: %s\n", record.Account)

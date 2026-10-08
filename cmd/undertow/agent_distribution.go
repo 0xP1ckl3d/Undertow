@@ -32,6 +32,8 @@ type agentDistribution struct {
 	retrievalPath string
 	hostsMu       sync.RWMutex
 	agentHosts    map[string]*agentPayloadHost
+	uploadsMu     sync.Mutex
+	customUploads map[string]*customArtifactUpload
 }
 
 var retrievalPathPattern = regexp.MustCompile(`^/(?:[A-Za-z0-9_-]+/)*$`)
@@ -316,6 +318,8 @@ func (d *agentDistribution) apply(c agentruntime.Config, req profileRequest) (ag
 func (d *agentDistribution) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	switch {
+	case path == "/v1/agent-artifact-uploads" || strings.HasPrefix(path, "/v1/agent-artifact-uploads/"):
+		d.handleCustomArtifactUpload(w, r, path)
 	case path == "/v1/payload-retrieval-host" && r.Method == http.MethodGet:
 		distributionJSON(w, http.StatusOK, map[string]string{"host": d.store.PayloadRetrievalHost()})
 	case path == "/v1/payload-retrieval-host" && r.Method == http.MethodPut:
