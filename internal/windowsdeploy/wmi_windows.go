@@ -368,7 +368,8 @@ func waitWMI(ctx context.Context, delay time.Duration) error {
 
 func runWMI(ctx context.Context, target, path, taskName string, output io.Writer) error {
 	const scheduler = `C:\Windows\System32\schtasks.exe`
-	create := windowsCommandLine(scheduler, "/Create", "/TN", taskName, "/SC", "ONCE", "/ST", "00:00", "/TR", path, "/IT", "/RL", "HIGHEST", "/F")
+	launch := windowsCommandLine(path, "_jump-launch")
+	create := windowsCommandLine(scheduler, "/Create", "/TN", taskName, "/SC", "ONCE", "/ST", "00:00", "/TR", launch, "/IT", "/RL", "HIGHEST", "/F")
 	pid, err := runWMIProcess(target, create)
 	if err != nil {
 		return fmt.Errorf("start target-local task registration through WMI: %w", err)
