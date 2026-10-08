@@ -14,6 +14,20 @@ flowchart LR
   B --> Target["Deeper network target"]
 ```
 
+## Start a relay from the GUI
+
+A relay is a child-agent connection path, not a route for your workstation or a forward to a client service. Read [GUI topology](gui.md#read-the-topology) for graph controls and path colours.
+
+1. Open **Relays**, select a connected or intentionally sleeping parent, and choose **TCP**. The parent must allow `relay`.
+2. Enter a numeric IPv4 bind/port on the parent, e.g. `10.20.1.15:8443`, then **Start relay**. Empty bind uses `0.0.0.0:8443` on all IPv4 interfaces. A sleeping parent shows pending work until its callback. Check that the listener becomes active.
+3. Establish inbound reachability from the child network. A local bind does not prove firewall access; follow [Windows inbound permission](#windows-inbound-permission-and-port-scope) below.
+4. Click **Create child payload** on the listener. Give the profile a name and **Child reachable relay address**, e.g. `10.20.1.15:8443`. Never dial `0.0.0.0`. Create the profile and build for the child's OS/architecture.
+5. Download/deliver the artifact, or enable delivery on the same parent under **Payloads → Artifacts → Host through an agent**. Follow [Agent-hosted payloads](agent-distribution.md#host-a-payload-through-a-connected-agent). Run the helper or binary on the child; generating it does not launch it.
+6. When the child calls back, open **Topology** or **Agents**. It has its own identity and workspace. Accept the **child's** network under Routes for deeper access.
+7. Stop the listener from Relays or its Topology context menu when no longer needed, reviewing the confirmation. This removes its saved configuration and can interrupt child connections.
+
+An active or restoring listener and connected children keep a check-in parent connected. Saved listeners reopen after that same parent reconnects; a failed rebind appears in diagnostics and requires attention. Agent-hosted artifact delivery tokens do not survive that reconnect and must be enabled again. For Windows pipes, use the [SMB relay GUI workflow](smb-named-pipe-relays.md#use-the-browser-gui).
+
 ## Enable a relay only where needed
 
 Relays have **zero listeners by default**. In the server or connected client console, select the parent agent:

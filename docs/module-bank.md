@@ -1,11 +1,11 @@
 # Local module bank
 
-Use the module bank when you have a compiled tool and want to run it by name in the **server or VPN client console**. Undertow loads packaged BOFs, native modules, WASM modules, and .NET Framework assemblies from `modules/` when that console process starts. These are local, session-scoped commands. Loading reads each artifact into the console process; Undertow sends its bytes to the selected agent only when you run the command.
+Use the module bank to run compiled tools from **Modules** in the [GUI](gui.md#run-tools-from-modules) or by name in the server/client console. Both preload BOFs, native modules, WASM, and .NET Framework assemblies from the local `modules/` directory. Loading reads an artifact locally; Undertow sends it to the selected agent only when you run it. Each client has its own bank. Terminal registrations last for that console session; GUI imports and references can be restored after client restart.
 
 | I want to... | Start here |
 | --- | --- |
-| Run a packaged tool | In the console, type `modules`, `help NAME`, `use NUMBER`, then `NAME` as shown below. |
-| Add a tool I already compiled | Put its artifact and optional JSON sidecar on the **console host** under `modules/`, then start or reattach the console. |
+| Run a packaged tool | Open an agent's Modules tab, read the tool's help, and choose Stream foreground or Run background; terminal equivalents appear below. |
+| Add a tool I already compiled | GUI Modules → Load file, or place artifact and optional sidecar under `modules/` on the console host. |
 | Build a new tool | Follow the [WASM](wasm-development.md), [native Windows module](native-modules.md), [BOF](bof-compatibility.md), or [.NET assembly](assembly-modules.md) guide, then add the resulting file here. |
 
 The repository ships runnable files in `modules/assembly/`, `modules/bof/`, `modules/native/`, and `modules/wasm/`. To add your own, copy a compatible `.o`, `.module`, or `.wasm` file anywhere below `modules/`, or a managed `.exe`/`.dll` under `modules/assembly/`, then start or reattach a console. Other `.exe` and `.dll` files under `modules/` are ignored. You may also set `UNDERTOW_MODULES_DIR` to an absolute directory before starting the console. Without that variable, Undertow looks for `modules/` in the current working directory, beside the Undertow executable, then in its parent directory (the usual `bin/undertow.exe` layout). The artifact stays on the **console host**, not on the agent; no agent redeployment is needed for a new module file.
@@ -20,6 +20,18 @@ undertow[TALON]> module-wininfo
 undertow[TALON]> wasm-triage --background
 undertow[TALON]> job output 1
 ```
+
+## Use the GUI module bank
+
+1. Open **Agents → your agent → Modules**, or sidebar **Modules** and select **Target agent**.
+2. Search/filter the bank, select a command, and read its **Usage**, **Target**, and help. An incompatibility message explains a platform or capability mismatch.
+3. Supply arguments. BOF sidecars can provide named typed fields; otherwise use **Arguments** with quotes for values containing spaces. Optional WASM stdin and native data can be chosen as files.
+4. Select **Stream foreground** for live output and Console history, or **Run background** for retained output in Jobs. Use **Stop foreground run** to cancel a live stream. Loading alone never starts remote work.
+5. For a new tool, **Load file**, select runtime and artifact, optionally command name/sidecar/BOF format, then **Load into client bank**. **Unload from this client** removes the entry. Imports are cached in `gui-modules/` beside the GUI database; references are stored in that database. Moving/removing source files used by a reference can cause a restoration issue.
+
+Foreground BOF file callbacks provide **Received files** download links for ten minutes. Background files stay in their Job and can be downloaded from its detail. See [BOF file callbacks](bof-compatibility.md#in-memory-file-callbacks). The [GUI guide](gui.md#run-tools-from-modules) includes a screenshot of the Modules workspace.
+
+The GUI bank and a separately attached terminal console maintain their own registrations. A tool loaded into one is not automatically registered in the other; both can preload the same packaged directory. If the bank shows preload issues, expand them to inspect the rejected filename and reason.
 
 ## Shipped modules
 

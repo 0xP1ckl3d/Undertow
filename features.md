@@ -1,8 +1,52 @@
 # Undertow feature catalogue
 
+The [GUI user guide](docs/gui.md) is the everyday operator guide. This catalogue indexes implemented capabilities and retains terminal examples. Bootstrap the first Team Leader before starting a fresh server. Every client needs an operator account as well as enrollment; interactive starts prompt for missing account values, while noninteractive starts need explicit account flags or environment values. See [Getting started](docs/getting-started.md) and [Operator accounts](docs/operator-authentication.md).
+
 Undertow runs on **Linux and Windows**. The commands below use `undertow` as the executable name; substitute `./bin/undertow` on Linux or `.\bin\undertow.exe` in Windows PowerShell. Replace `SERVER_IP`, `FINGERPRINT`, `AGENT_ID`, and example network addresses with values from your deployment. A line labeled **Server** runs on the Undertow server host; **Agent** runs on a host inside the target network; **VPN client** runs on the host whose applications will use the tunnel; **Other internal host** is a machine reached through the agent. In a terminal, `undertow server` and `undertow client` open their consoles automatically.
 
 The fastest internal-only setup needs no server route configuration: start the server and agent, connect a client with `--internal`, then use `agents`, `use 1`, `routes`, and `route accept CIDR` in the **VPN client** console. Use `route add CIDR` there for a known network that was not reported. The server needs `--tun` only if applications on the server host itself need routed access through an agent.
+
+## Find each capability
+
+| Capability | GUI location or command-line path | Guide |
+| --- | --- | --- |
+| Build, initialise, start roles | OS terminal startup flags | [Getting started](docs/getting-started.md) · [CLI](docs/cli-reference.md) |
+| Enrollment and server identity pinning | Client startup and payload profiles | [Authentication](docs/getting-started.md#enrollment-choices) |
+| Operator accounts and roles | Settings → Identity; console `operators` | [Operator accounts](docs/operator-authentication.md) |
+| Operator-only access | Client `--operator-only` | [Client modes](docs/networking-modes.md#choose-a-client-mode) |
+| Topology and detailed telemetry | Topology; Overview; Settings → Status; console `show` | [GUI topology](docs/gui.md#read-the-topology) · [CLI telemetry](docs/cli-reference.md#operator-commands) |
+| Nicknames, archives, retained agents | Agent Rename/Overview; Settings → Agents | [Agent selection](docs/gui.md#choose-and-identify-an-agent) · [Cleanup](docs/gui.md#settings-history-and-cleanup) |
+| Built-in host and file operations | Agent Host/Console | [Host operations](docs/console.md#built-in-agent-host-operations) |
+| One-shot OS execution | Agent Console `exec` | [Execution](docs/gui.md#run-a-command-in-console) |
+| Interactive processes | Agent Live shell; terminal `shell` | [Live shell](docs/gui.md#open-a-live-shell) |
+| Background work and full output | Agent/sidebar Jobs; console `job` | [Jobs](docs/gui.md#start-and-follow-background-jobs) |
+| Memory-backed Bash/PowerShell scripts | Console `run-script` | [Scripts](docs/console.md#server-console) |
+| Packaged/imported tools and help | Agent/sidebar Modules; console `load`, `modules`, named commands | [Module bank](docs/module-bank.md) |
+| WASM, native, BOF, .NET runtimes | Modules or Console `run-*` | [WASM](docs/wasm-development.md) · [Native](docs/native-modules.md) · [BOF](docs/bof-compatibility.md) · [.NET](docs/assembly-modules.md) |
+| Files emitted by BOFs | Received files in Modules/Console/Job detail; terminal `job file` | [BOF files](docs/bof-compatibility.md#in-memory-file-callbacks) |
+| Directory browsing and verified transfers | Agent Files; sidebar Transfers; console `upload`/`download` | [Files](docs/gui.md#browse-and-transfer-files) |
+| Display enumeration and captures | Agent Screenshots; console `screens`/`screenshot` | [Screenshots](docs/gui.md#capture-and-view-screenshots) |
+| Internet VPN and global internal routing | Settings → Client; console `vpn`/`internal` | [Modes](docs/networking-modes.md) |
+| Accepted/custom client routes and toggles | Routes or Overview; console `route` | [Routing](docs/gui.md#reach-a-remote-network-from-your-machine) |
+| Server routes and server-host TUN | Routes → Server configured routes; server `--tun` | [Server routing](docs/networking-modes.md) |
+| TCP/UDP/ICMP access and multiple agents | Route selection and ordinary client applications | [Scenarios](docs/scenarios.md) |
+| Server-local TCP forwarding without TUN | Server `--forward LOCAL=REMOTE --via-agent ID` | [Server forward](docs/scenarios.md#3-forward-one-local-tcp-port-without-a-tun) |
+| Agent listeners to client TCP services | Forwards; console `forward` | [Remote forwarding](docs/remote-port-forwarding.md) |
+| TCP/SMB child-agent relays | Relays; console `relay` | [Relays](docs/topology-and-relays.md) · [SMB](docs/smb-named-pipe-relays.md) |
+| Profiles, builds, downloads, custom uploads | Payloads; console `payload` for build/management | [Deployment](docs/agent-distribution.md#build-and-deliver-from-the-gui) |
+| Server/parent-hosted delivery and helpers | Payloads → Artifacts; console `payload host*` | [Delivery](docs/agent-distribution.md) |
+| Retrieval host/path and URL rotation | Payloads → Retrieval settings; console `payload retrieval-*` | [Retrieval settings](docs/agent-distribution.md#build-and-deliver-from-the-gui) |
+| Windows Jump and enrollment correlation | Jump; agent Create from this agent; console `jump` | [Windows Jump](docs/windows-deployments.md) |
+| Capability policy | Payload profiles; manual agent `--deny` | [Capabilities](#granular-agent-capabilities) |
+| Continuous/check-in policy | Overview; Payload profiles; console `agent sleep` | [Connection rhythm](docs/gui.md#understand-agent-connection-rhythm) |
+| DNS/QUIC/WebSocket listeners | Settings → Carriers; console `transports` | [Carriers](docs/networking-modes.md#choose-another-carrier) |
+| Carrier identities and reconnect tuning | CLI `--deployment-profile`; payload profile fields | [Deployment profiles](docs/deployment-profiles.md) |
+| Shared/direct messages and assignments | Team; console `team` | [Team](docs/gui.md#team-conversations-and-assignments) |
+| Audit, retained results, worker/lifecycle logs | History; result views; Settings → Logs; `agent events` | [History](docs/gui.md#settings-history-and-cleanup) |
+| Detach, attach, stop, shutdown, revoke | Terminal lifecycle; Overview; artifact controls | [Lifecycle](docs/cli-reference.md#foreground-and-background-lifecycle) · [Payload effects](docs/agent-distribution.md#inspect-and-manage-lifecycle) |
+| Doctor, probes, examples, BOF inspection, JSON | OS terminal commands and probe flags | [CLI](docs/cli-reference.md) · [BOF inspection](docs/bof-compatibility.md#inspect-and-run) |
+
+Operational records are shared on the server. Route choices, module banks, graph layout, and bounded Console history belong to each client. Direct conversations are limited to their two participants. Read [Data ownership and cleanup](docs/gui.md#settings-history-and-cleanup) when planning handoffs.
 
 ## Roles and identity
 
@@ -27,7 +71,7 @@ Server: sudo undertow agent list
 
 ### Client role
 
-A privileged client creates its own TUN/Wintun, connects independently of agents, and routes traffic from its own applications. Choose `--vpn`, `--internal`, or both; at least one is required.
+A client hosts the GUI and console and connects independently of agents. Operator-only mode needs no tunnel or elevation. Routing modes create a privileged TUN/Wintun for this machine's applications: choose `--vpn`, `--internal`, or both.
 
 ```text
 VPN client: sudo undertow client --internal --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify
@@ -88,7 +132,7 @@ VPN client: sudo undertow client --internal --transport quic --server SERVER_IP:
 
 ## Configured payload delivery
 
-The server release includes thin-agent templates. A profile captures carrier and policy settings; each `payload build` creates an immutable Windows or Linux agent with a distinct identity and enrollment secret. `payload host` creates a private HTTPS retrieval URL for a headless endpoint. `payload deploy-script` prints a SHA-256-verifying installer for PowerShell or a POSIX shell. The packaged agent starts without command-line connection settings or local runtime state. See the [first-run workflow](docs/getting-started.md#3-build-host-and-deploy-a-headless-windows-agent) and [payload deployment](docs/agent-distribution.md).
+The server release includes thin-agent templates. A profile captures carrier and policy settings; each `payload build` creates an immutable Windows or Linux artifact with its own enrollment secret. Each running copy creates an independent agent identity. `payload host` creates a private HTTPS retrieval URL for a headless endpoint. `payload deploy-script` prints a SHA-256-verifying installer for PowerShell or a POSIX shell. The packaged agent starts without command-line connection settings or local runtime state. See the [first-run workflow](docs/getting-started.md#3-build-host-and-deploy-a-headless-windows-agent) and [payload deployment](docs/agent-distribution.md).
 
 `payload download PAYLOAD_ID [OUTPUT]` is the alternate delivery path: it copies the built binary to the current console host over the authenticated control connection and verifies its SHA-256. It works before hosting and refuses to replace a file. A connected VPN client can manage profiles and builds, including downloading payloads. `payload unhost`, `payload revoke`, and `payload delete` separately disable public retrieval, future enrollment, and the server artifact. `agent events`, `session kill`, and `agent shutdown` cover a connected agent's lifecycle.
 
@@ -304,7 +348,7 @@ VPN client console: shell powershell.exe -NoProfile
 
 ### Long-running jobs
 
-Jobs run while the operator uses or detaches the console. They have unique IDs, agent association, start/end times, running/completed/failed/cancelled state, and exit status. Output stays in memory through 256 KiB, then spills to a server file up to configurable per-job and total limits. `job output` previews it, `job save` downloads the full output, and `job delete` removes a finished record and its output. A VPN client sees its own jobs; the server operator can see all. Command jobs use the `interactive` agent capability; background script, WASM, native, and BOF jobs use their respective capabilities.
+Jobs run while the operator uses or detaches the console. They have unique IDs, agent association, start/end times, running/completed/failed/cancelled state, and exit status. Output stays in memory through 256 KiB, then spills to a server file up to configurable per-job and total limits. `job output` previews it, `job save` downloads the full output, and `job delete` removes a finished record and its output. Authenticated connected clients can inspect the shared job records; the server operator can also see all. Command jobs use the `interactive` agent capability; background script, WASM, native, and BOF jobs use their respective capabilities.
 
 ```text
 VPN client console: use 1

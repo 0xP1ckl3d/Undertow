@@ -4,6 +4,17 @@ Use this guide when choosing what traffic the **client** should send through Und
 
 Use **QUIC on UDP/443** for these examples. The server also listens on WebSocket TCP/443 and DNS UDP/53 by default. Open UDP/443 in the server firewall. Run commands from each host's Undertow directory; `./bin/undertow` is the built Linux binary. On Windows, use `.\bin\undertow.exe`. Replace `SERVER_IP`, `FINGERPRINT`, and the example network with your values.
 
+## Choose a client mode
+
+| Mode | What changes on the client machine |
+| --- | --- |
+| `--operator-only` | GUI and console agent operations without a TUN device, route installation, or routing elevation |
+| `--internal` | Creates a tunnel for agent networks; normal Internet routing stays in place |
+| `--vpn` | Routes IPv4 Internet traffic through the server; agent routes can also be explicitly accepted |
+| `--vpn --internal` | Combines Internet egress, accepted agent routes, and global server internal routes |
+
+The GUI is enabled by default for all modes. Host commands, live shells, files, screenshots, modules, Jobs, payload management, and Jump do not require an accepted route: they travel over the authenticated control connection. Use a routing client for local application access and client-service forwards. Every client needs an operator account as well as transport enrollment.
+
 ## One-time setup
 
 On **SERVER**, build the operator binary and agent templates, then generate an identity and enrollment token:
@@ -11,9 +22,22 @@ On **SERVER**, build the operator binary and agent templates, then generate an i
 ```sh
 sh tools/build-release.sh bin
 ./bin/undertow init
+./bin/undertow operators bootstrap
 ```
 
-Record the printed `FINGERPRINT`. Securely copy `token.key` to each **CLIENT** and **AGENT**. Keep `identity.key` on **SERVER**. The commands below use the default key filenames, so no key flags are needed. The server generates a temporary self-signed TLS certificate for QUIC and WebSocket. For an IP address and that certificate, peers need `--tls-insecure-skip-verify`; they still verify the separate pinned Undertow `--fingerprint`.
+Record the printed `FINGERPRINT`. Bootstrap prompts for the first Team Leader ID and password; it runs only once against an empty account database. Securely copy `token.key` to each **CLIENT** and **AGENT** and keep `identity.key` on **SERVER**. The examples use default key filenames. Client terminal starts prompt for operator credentials; background starts need explicit `--operator ID --operator-password-file PATH` or environment equivalents. See [Operator authentication](operator-authentication.md).
+
+The server generates temporary self-signed TLS for QUIC/WebSocket. For these certificates, peers use `--tls-insecure-skip-verify` while checking the separately pinned Undertow `--fingerprint`.
+
+## Accept and manage routes in the GUI
+
+Open the client's printed GUI URL, then **Routes**. Select an agent under **Routes accepted by this client**, choose **Advertised** and its actual CIDR, then **Accept and install route**. For a reachable but unadvertised subnet, use **Custom CIDR**. Overview also offers acceptance.
+
+Check **Saved local routes** for **Installed**, then test a real host/service from an application on **that client machine**. **Disable** withdraws the route while saving the choice, **Enable** restores it, and **Remove** deletes it. Routes on other clients do not install on yours. Operator-only clients can inspect but cannot install routes.
+
+**Settings → Client** changes Internet egress and global internal routing on a client with a tunnel. VPN off removes Internet routes but keeps explicit accepted agent routes. Internal off changes global server routing for new flows; it does not disable explicit accepted routes. Existing flows keep their path. Settings persist over carrier reconnects within the worker; restart uses startup flags.
+
+An enabled route holds a check-in agent connected even when idle. The [GUI routing guide](gui.md#reach-a-remote-network-from-your-machine) includes the route-toggle animation and explains installed, saved, and shared state. Use **Routes → Server configured routes → Add server route** to define a shared server path separately from client acceptance. The terminal workflows below remain available.
 
 ## Internet through the server: client `--vpn`
 

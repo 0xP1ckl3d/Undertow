@@ -1,5 +1,7 @@
 # BOF compatibility
 
+For everyday execution, follow [GUI Modules](gui.md#run-tools-from-modules) and the [packaged BOF catalogue](module-bank.md#bofs-windows-amd64-agents). This guide covers compatible objects, argument encoding, terminal commands, runtime limits, and file callbacks.
+
 Undertow can run a compatible, already compiled Beacon Object File (BOF) directly as an AMD64 COFF `.o` file. This complements portable [WASM modules](wasm-development.md) and Undertow [native `.module` DLLs](native-modules.md). New Undertow native modules use `undertow_native_v1` and `run-native`; existing BOFs use the conventional `go` and Beacon ABI with `run-bof`. No `nativepack` conversion is needed.
 
 For repeated use, put the `.o` and its optional help/argument sidecar in the local [module bank](module-bank.md). The console preloads packaged BOFs as commands such as `bof-winver` and `bof-ldapsearch`. You can also use `load bof FILE [NAME] [--format FORMAT]` during a session.

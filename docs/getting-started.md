@@ -1,6 +1,6 @@
 # Getting started: server → client → Windows agent
 
-This is a first-run path for a reachable **Linux server**, a **Linux VPN client**, and a **Windows agent** on a network the client wants to reach. Run each block on the named machine. Replace `SERVER_IP`, `FINGERPRINT`, `10.20.0.0/16`, and `10.20.1.25` with values from your deployment. Commands assume you are in the Undertow repository. Go 1.25 or newer is needed to build; the server and client need elevated privileges for listeners/TUN/routes. Permit UDP/443 and TCP/443 to the server.
+This first-run path connects a reachable **Linux server**, a **Linux operator client**, and a **Windows agent** on a remote network. You will use the GUI for deployment and everyday work, with terminal equivalents alongside it. Run each block on the named machine. Replace `SERVER_IP`, `FINGERPRINT`, `10.20.0.0/16`, and `10.20.1.25` with your values. Commands assume the Undertow repository and Go 1.25 or newer. Server listeners and client TUN/routes need elevation. Permit UDP/443 and TCP/443 to the server, and UDP/53 if using its DNS listener.
 
 ## 1. Initialize and start the server
 
@@ -12,12 +12,12 @@ sh tools/build-release.sh bin
 umask 077
 printf '%s\n' 'REPLACE_WITH_A_UNIQUE_LONG_PASSWORD' > leader.password
 ./bin/undertow operators bootstrap --operations-db operations.db --id leader --display-name 'Team Leader' --password-file leader.password
-sudo ./bin/undertow server --tun
+sudo ./bin/undertow server
 ```
 
-The release build creates the operator binary **and thin-agent templates** used by `payload build`. Save the fingerprint printed by `init`. It also creates `token.key`, the default enrollment secret. The last command opens the server console. Its `status` command should show QUIC UDP/443 and HTTPS/WebSocket TCP/443 (and direct DNS UDP/53). The HTTPS listener is needed to host payloads. `--tun` lets applications on the **server itself** use agent routes; the separate client creates its own TUN. The server can omit `--tun` when its own applications need no agent route.
+The release build creates the operator binary **and thin-agent templates** used to build payloads. Save the fingerprint printed by `init`. It also creates `token.key`, the enrollment secret. The last command opens the server console. Its `status` should show QUIC UDP/443, HTTPS/WebSocket TCP/443, and direct DNS UDP/53. HTTPS is needed for hosted payload delivery. This walkthrough routes applications on a separate client, so the server needs no TUN. Add `--tun` only if applications on the **server itself** need agent routes.
 
-Copy `token.key` securely into the Linux client's Undertow directory. Create a private copy of the operator password file there for the first connection. Keep `identity.key`, `control.key`, and `operations.db` on the server. A detached server can start with `server --tun --background`; use `sudo ./bin/undertow server attach` to reopen its console. See [Operator authentication](operator-authentication.md) for account management and password rotation.
+Copy `token.key` securely into the Linux client's Undertow directory. Create a private copy of the operator password file there for the first connection. Keep `identity.key`, `control.key`, and `operations.db` on the server. A detached server can start with `server --background`; use `sudo ./bin/undertow server attach` to reopen its console. See [Operator authentication](operator-authentication.md) for account management and password rotation.
 
 ## 2. Connect the client and accept the server fingerprint
 
@@ -25,16 +25,28 @@ On the **Linux client**:
 
 ```sh
 sh tools/build-release.sh bin
-sudo ./bin/undertow client --vpn --internal --transport quic --server SERVER_IP:443 --token-file token.key --fingerprint FINGERPRINT --tls-insecure-skip-verify --operator leader --operator-password-file leader.password
+sudo ./bin/undertow client --internal --transport quic --server SERVER_IP:443 --token-file token.key --fingerprint FINGERPRINT --tls-insecure-skip-verify --operator leader --operator-password-file leader.password
 ```
 
 Get `FINGERPRINT` from the server through a trusted channel. Pass an explicit pin each time you start the client. The default TLS certificate is self-signed, hence `--tls-insecure-skip-verify`; Undertow still checks its separate identity fingerprint. If you cannot transfer the fingerprint first, substitute `--trust-on-first-use` for `--fingerprint FINGERPRINT`. After an authenticated connection, Undertow writes `server.fingerprint`; compare the saved value with the server's fingerprint before relying on it. Subsequent connections can load that saved pin automatically. The client creates its own `client.key`.
 
-The command opens the **client console** and prints a loopback URL for the optional [browser GUI](gui.md). `--vpn` routes this client's IPv4 Internet traffic through the server; `--internal` enables routes through agents. Use either flag alone if you need only one path. In another client terminal, `curl -4 https://api.ipify.org` should show the server's public IP when VPN is active. `status` on either host should show the connected client. Type `background` to detach while it runs, `sudo ./bin/undertow client attach` to return, and `quit` in the client console to stop it and remove owned routes. Add `--no-gui` for terminal-only operation.
+Open the printed **GUI available:** URL in a browser **on the client machine**, copying the whole URL including its `#` suffix. Open **Settings → Status** to confirm your session and **Settings → Identity** to confirm the authenticated Team Leader. Keep the client worker running while using the GUI.
+
+`--internal` enables remote-network routing while preserving your normal Internet route. Add `--vpn` for server IPv4 Internet egress; verify it from another client terminal with `curl -4 https://api.ipify.org`. If you only need host operations, substitute `--operator-only` and omit `sudo`; that mode creates no TUN and cannot complete the routing step below.
+
+The terminal console remains available. `background` detaches it, `sudo ./bin/undertow client attach` returns, and `quit` stops the client and removes owned routes. Closing the browser leaves the worker running. Recover the GUI link with `sudo ./bin/undertow client gui` in an OS terminal. Use `--no-gui` for terminal-only operation.
 
 ## 3. Build, host, and deploy a headless Windows agent
 
-In the **server console**:
+In the **client GUI**:
+
+1. Open **Payloads → Profiles → New**. Name the profile `office`, choose **QUIC**, and enter `SERVER_IP` in **Server host or IP**. The GUI adds the listener port; use an address the Windows endpoint can reach.
+2. Keep the listener's self-signed TLS option selected for this setup. Leave the sleep interval at zero for an immediately available first agent, then click **Create profile**.
+3. Open **Build payload**, select `office` and **Windows · x64**, and click **Build payload**. Templates remain on the server; your client does not compile the agent.
+4. In **Artifacts**, select the new build and click **Host on HTTPS listener**. Check its download URL and SHA-256. The endpoint must reach HTTPS as well as its QUIC callback address.
+5. Under **Deploy helper**, select **PowerShell**, click **Generate preview**, review the script, then **Download script**. Generating it does not run anything on the endpoint.
+
+**Terminal equivalent**, in the server or authenticated client console:
 
 ```text
 payload profile create office server=SERVER_IP:443 transport=quic
@@ -45,7 +57,7 @@ payload deploy-script PAYLOAD_ID powershell
 
 Replace `PAYLOAD_ID` with the **24-character payload ID** from `payload build`. Each running copy creates its own **32-character agent ID** when it connects. The profile stores the server address and carrier; the build stamps an enrollment credential and server fingerprint into the executable. The server file path printed by the build is storage on the server, not a Windows install path. `payload host` creates an opaque HTTPS URL. Keep the URL private. `payload show PAYLOAD_ID` and `payload url PAYLOAD_ID` recover the details.
 
-Save the PowerShell text printed by the last command as `deploy.ps1` on the **Windows host**. Run it there:
+Copy the downloaded helper to the **Windows host** as `deploy.ps1`, or save the PowerShell text printed by the console under that name. Run it there:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\deploy.ps1 -Destination .\worker.exe
@@ -53,11 +65,15 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\deploy.ps1 -Destinatio
 
 The script downloads, verifies SHA-256, installs, and launches the binary hidden. The packaged agent needs **no connection arguments**, console window, Administrator rights, or inbound port. Its executable contains an enrollment credential, so protect both the executable and deploy script. Each running copy gets a distinct agent ID. The [payload guide](agent-distribution.md) covers manual download, profiles, hosted URL rotation, and lifecycle commands.
 
-**Alternate delivery:** if you need to wrap the executable or deliver it through your own channel, run `payload download PAYLOAD_ID ./staging/worker.exe` in either the server console or an authenticated client console. This retrieves the built binary over the control connection, verifies its SHA-256, and saves it locally even if it has never been hosted. The output file must not already exist. See [payload deployment](agent-distribution.md#profile--build--host--run) for details.
+**Alternate delivery:** select **Download verified binary** in the artifact detail, or run `payload download PAYLOAD_ID ./staging/worker.exe` in either console. This retrieves the binary over the control connection and verifies SHA-256 even if it has never been hosted. Deliver it through your own channel and run it without connection arguments. The console output file must not already exist. See [Payload deployment](agent-distribution.md#build-and-deliver-from-the-gui).
 
 ## 4. Run a command and a module
 
-Back in the **server or client console**:
+In the **GUI**, open **Agents**, select the Windows record, and read **Overview** for hostname, ID, platform, carrier, and capabilities. Open **Host → Identity → Run** for your first built-in operation. Open **Console** and type `exec cmd.exe /c whoami` for a one-shot OS command.
+
+Next, open the agent's **Modules** tab, select `module-wininfo`, read its help, and click **Stream foreground**. Output appears there and in Console history. If it is absent, check the client module-bank path as described below. The [GUI guide](gui.md) continues with live shells, files, Jobs, screenshots, and other workflows.
+
+**Terminal equivalent**, in the server or client console:
 
 ```text
 agents
@@ -73,7 +89,9 @@ Use the number shown by `agents`, or select by hostname or agent ID; numbers can
 
 ## 5. Route client traffic through the agent
 
-In the **client console**, select the Windows agent and inspect its reported networks:
+In **GUI Routes**, choose the agent under **Routes accepted by this client**, select **Advertised**, choose its actual remote CIDR, and click **Accept and install route**. Overview also offers acceptance. Check **Saved local routes** for **Installed** and **Topology** for the accepted path. For a known reachable but unadvertised network, choose **Custom CIDR**.
+
+**Terminal equivalent**, in the client console:
 
 ```text
 agents
@@ -83,14 +101,21 @@ route accept 10.20.0.0/16
 routes
 ```
 
-Accept a CIDR actually shown by `routes`. If the agent can reach a network it does not report, use `route add 10.20.0.0/16` instead. The route belongs to **this client** and persists in `client-routes.json` across reconnects. Test a real service from a separate client terminal, for example `curl http://10.20.1.25/`; check the public IP again to confirm the VPN path. `route del 10.20.0.0/16` removes the client route. If applications on the **server** also need the network, select the agent in the server console and run `route add 10.20.0.0/16` there.
+Accept a CIDR actually shown by the agent. The route belongs to **this client** and persists in `client-routes.json` across reconnects. Test from a separate client terminal, for example `curl http://10.20.1.25/` or `ping 10.20.1.25`. If you added `--vpn`, check public egress too. In Routes, **Disable** turns a saved route off and **Enable** restores it; **Remove** or console `route del 10.20.0.0/16` deletes it. An enabled route keeps a check-in agent connected while applications may need it. Server-host access needs server `--tun` and its own configured route.
 
 If no agent appears, check `status` and `agent events AGENT_ID` in the server console, the Windows process, and outbound UDP/443. If route acceptance fails, pick a reported subnet that does not overlap the client's local networks. `help`, `help route`, and `payload` provide context-specific guidance.
+
+## Finish your first session
+
+Download any Job output or screenshots you need to keep. Remove the test route in **Routes**, then use **Agents → your agent → Overview → Agent lifecycle → Shut down agent** if this was a temporary deployment. Confirm the shutdown and remove the delivered executable from the endpoint through your normal cleanup process. In **Payloads → Artifacts**, unhost the download when no longer needed; unhosting stops delivery without stopping an already running process.
+
+Closing the browser leaves the client running. Type `quit` in its terminal console to stop it, and `stop` in the server console when you are finished with the server. The [GUI cleanup guide](gui.md#settings-history-and-cleanup) explains session kill, shutdown, archive, and retained state.
 
 ## Continue from here
 
 | Goal | Guide |
 | --- | --- |
+| Learn every GUI page and agent tab | [GUI user guide](gui.md) |
 | Other VPN modes and carrier choices | [Networking modes](networking-modes.md) and [scenarios](scenarios.md) |
 | Profiles, downloads, hosting, and shutdown | [Payload deployment](agent-distribution.md) |
 | Shells, files, jobs, forwards, and console commands | [Console guide](console.md) |
@@ -104,7 +129,7 @@ If no agent appears, check `status` and `agent events AGENT_ID` in the server co
 
 - **Server:** the reachable carrier listeners and local operator API. It creates the server identity and accepts agent and VPN client sessions. Use `--tun` only when applications on the server host itself need routes through an agent; VPN Internet egress uses server sockets.
 - **Agent:** a connector on the internal network. It opens TCP, UDP, and ICMP operations for the server. It needs no root/Administrator privilege, virtual adapter, route changes, or inbound port.
-- **Client:** a separate, elevated process that creates its own TUN/Wintun. `--vpn` changes Internet routes; `--internal` alone adds only internal routes through agents; both flags combine them.
+- **Client:** hosts your GUI and console. Routing modes create their own elevated TUN/Wintun: `--vpn` changes Internet routes, `--internal` adds internal paths, and both combine them. `--operator-only` needs no TUN or elevation but cannot install routes.
 - **Operator commands:** `status`, `agent list/show/select`, `route add/del/list`, and `session kill` run on the server host against a token protected loopback API.
 
 The key distinction is **which machine's traffic changes**. An agent exposes destinations reachable *from the agent host* and leaves that host's normal networking alone. A client routes applications *on the client host* into the tunnel for its selected prefixes. Starting a client does not expose its local network as an agent; starting an agent does not give its own host VPN Internet egress. Internal access needs a connected agent and a route to it.

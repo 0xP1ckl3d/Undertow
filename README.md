@@ -10,19 +10,21 @@
                  ▀
 ```
 
-**Undertow is a remote access and network tunneling toolkit.** It connects an operator to remote hosts and networks through an authenticated server, outbound agents, and an optional VPN client. From the server or client console, you can run commands and modules on an agent, transfer files, reach internal services, and route traffic from your own machine through the server or an agent.
+**Undertow is a remote access and network tunneling toolkit.** It connects an operator to remote hosts and networks through an authenticated server, outbound agents, and an operator client. Its browser GUI is the primary workspace for commands, live shells, modules, files, screenshots, deployments, and network routing. The server and client consoles remain available for command-line workflows.
 
 An agent runs on a host that can reach the network you need. It connects out to Undertow and uses ordinary sockets to reach targets, so it needs no inbound port, virtual adapter, elevated privileges, or changes to that host's routes. The optional client runs on your own machine and creates a tunnel for your applications. Use `--internal` for networks reachable through agents, `--vpn` for IPv4 Internet access through the server, or both together. The server can also create its own tunnel with `--tun` when applications on the server host need agent routes.
 
 Undertow carries the same encrypted sessions over QUIC, HTTPS/WebSocket, or direct DNS. Agents can connect directly or through another agent acting as a relay. It runs on Linux and Windows; see the [platform and mode details](docs/cli-reference.md) for specific requirements.
 
-**New to Undertow?** Follow [Getting started](docs/getting-started.md). It walks through server initialization, a VPN client, a headless Windows agent, the first command and module, and an internal route.
+**New to Undertow?** Follow [Getting started](docs/getting-started.md). It walks through server initialization, your client connection, a headless Windows agent, the first command and module, and an internal route. Then use the [GUI user guide](docs/gui.md) to learn the workspace and everyday workflows.
 
 Client sessions use server-managed [operator accounts](docs/operator-authentication.md). Bootstrap the first Team Leader before starting a fresh server; the console and GUI inherit the authenticated account from the client connection.
 
 Browse the [documentation home](docs/README.md) to find guides by task.
 
-The client also serves an optional local [browser operator workspace](docs/gui.md) by default. It shows live topology and agent workspaces while the terminal console remains fully usable; pass `--no-gui` for terminal-only operation.
+The client serves the GUI locally by default; open its printed URL in a browser on that machine. Use `--operator-only` for agent operations without a tunnel, or a routing mode when your own applications need remote networks. Pass `--no-gui` for terminal-only operation.
+
+[![Undertow GUI showing agents, relay connections, an accepted network, and deployment relationships](assets/topology.png)](assets/topology.png)
 
 ## What can it do?
 
@@ -30,7 +32,8 @@ The client also serves an optional local [browser operator workspace](docs/gui.m
 | --- | --- | --- |
 | Reach a service on a remote internal network | An outbound agent and an accepted route from the server or client; TCP, UDP, and ICMP traffic can use the agent's network | [Getting started](docs/getting-started.md#5-route-client-traffic-through-the-agent) · [Routing scenarios](docs/scenarios.md) |
 | Route your laptop's traffic | `client --internal` for agent networks, `client --vpn` for server Internet egress, or both | [Networking modes](docs/networking-modes.md) |
-| Work on a remote host | Interactive shell, one-shot commands, built-in host operations, file transfer, and background jobs | [Console guide](docs/console.md) |
+| Work on a remote host | Interactive shell, one-shot commands, built-in host operations, file transfer, screenshots, and background jobs | [GUI user guide](docs/gui.md) · [Console guide](docs/console.md) |
+| Coordinate operators | Authenticated accounts, shared and direct messages, assignments, and audit history | [GUI Team](docs/gui.md#team-conversations-and-assignments) · [Operator accounts](docs/operator-authentication.md) |
 | Jump from one Windows host to another | Queue a verified artifact transfer and launch through WinRM, WMI, Service Control, or Scheduled Task, with durable Job output and enrolment correlation | [Windows Jump](docs/windows-deployments.md) |
 | Expose a local service through an agent | Let a remote host reach one or several TCP services running on your client | [Remote port forwarding](docs/remote-port-forwarding.md) |
 | Run specialized tools | Stream scripts, run WASM modules, or run Windows native modules, BOFs, and .NET Framework assemblies through the agent | [Module bank](docs/module-bank.md) |
@@ -79,10 +82,10 @@ flowchart LR
 ```
 
 - **Server:** accepts and authenticates client and agent sessions, hosts deployment payloads, and coordinates commands and routes. Its own `--tun` is optional.
-- **Agent:** reaches targets from its host and runs the operations you allow. A configured payload can run headlessly with its connection settings and identity embedded.
-- **Client:** runs on the machine whose applications should use the tunnel. It owns its VPN and internal routes; an agent does not change the client machine's routes by itself.
+- **Agent:** reaches targets from its host and runs the operations you allow. A configured payload runs headlessly with embedded connection settings and an enrollment credential; each running process creates its own identity.
+- **Client:** hosts your GUI and console. Operator-only mode needs no tunnel; routing modes own this machine's VPN and internal routes. An agent does not change client routes by itself.
 
-The server and client each have an interactive console. Once an agent connects, select it to run a command, open a shell, inspect its networks, or use a module. See the [full first-run workflow](docs/getting-started.md) for commands on each host, including the server fingerprint check.
+Once an agent connects, select it under **Agents** or double-click it in **Topology** to open its workspace. Choose its tabs to inspect the host, run a command, open a live shell, or use a tool. Both terminal consoles also select and operate agents. See the [first-run workflow](docs/getting-started.md), including the server fingerprint check.
 
 ## Build and start
 
@@ -92,6 +95,7 @@ Go 1.25 or newer is required. Build the operator binary **and agent templates** 
 # Linux
 sh tools/build-release.sh bin
 ./bin/undertow init
+./bin/undertow operators bootstrap
 sudo ./bin/undertow server --tun
 ```
 
@@ -100,7 +104,7 @@ sudo ./bin/undertow server --tun
 .\tools\build-release.ps1
 ```
 
-The release scripts produce `undertow` (or `undertow.exe`) and Windows/Linux agent templates in `bin/`. The server's `--tun` is needed when applications **on the server** must use routes through an agent; the client creates its own tunnel. Follow [Getting started](docs/getting-started.md) before connecting a client or deploying an agent: it covers enrollment, fingerprint verification, privileges, payload hosting, and a working end-to-end example.
+The release scripts produce `undertow` (or `undertow.exe`) and Windows/Linux agent templates in `bin/`. Bootstrap prompts for the first Team Leader and is required once before a fresh server starts. The server's `--tun` is needed when applications **on the server** use agent routes; otherwise omit it. Follow [Getting started](docs/getting-started.md) for enrollment, operator login, fingerprint verification, payload delivery, and an end-to-end GUI workflow.
 
 ## Reference
 

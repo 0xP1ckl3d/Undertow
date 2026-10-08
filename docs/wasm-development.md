@@ -1,5 +1,7 @@
 # Developing Undertow WASM modules
 
+To run an existing tool, follow [GUI Modules](gui.md#run-tools-from-modules) and the [module bank](module-bank.md). This guide explains how to build a WASM module, use Undertow's host API, and test it before adding it to the bank.
+
 Undertow runs a `wasip1/wasm` module in memory on the selected agent. The agent receives the compiled bytes through the Undertow session, instantiates them with wazero, and discards the instance when it exits. The target needs no Go toolchain, interpreter, module file, or native executable loader. Every module, including the [packaged examples](../modules/wasm/README.md), gets the same host imports. Host operations run with the operating system privileges of the agent process.
 
 For repeated use, place a `.wasm` file and optional help sidecar in the local [module bank](module-bank.md). The console preloads packaged WASM modules as commands such as `wasm-triage`; `load wasm FILE [NAME]` registers one during a session.

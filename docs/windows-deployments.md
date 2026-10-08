@@ -23,6 +23,7 @@ Password authentication lets Windows select Kerberos or NTLM according to the ta
 ### Browser GUI
 
 1. Open **Jump** and choose the source Windows agent.
+   You can also open a Windows workspace and select **Create from this agent** to preselect its source.
 2. Enter the target hostname or IPv4 address.
 3. Select an existing Windows artifact. A built artifact shows its profile; a custom artifact shows its label. Both show their SHA-256.
 4. Choose **WinRM**, **WMI**, **Service Control**, or **Scheduled Task**, then choose an allowed execution context.
@@ -32,6 +33,8 @@ Password authentication lets Windows select Kerberos or NTLM according to the ta
 8. Select **Start jump**. If the source agent is sleeping, the linked Job remains queued until its next authenticated check-in.
 
 The detail view shows the current state, progress or error text, source agent, build and profile, requesting operator, timestamps, install path, Transfer, Job, service or task identifier, and resulting agent. The Job contains method output; the Transfer shows delivery and hash verification. Opening the Jump page or a record never starts an operation.
+
+Use the linked **Job** and **Transfers** controls for detailed progress/output, and open the resulting agent after enrollment. The deployment relationship appears separately from its live carrier/relay path in [Topology](gui.md#read-the-topology). If no artifact is available yet, create or upload one in [Payloads](agent-distribution.md#build-and-deliver-from-the-gui) before creating the Jump.
 
 ### Console
 

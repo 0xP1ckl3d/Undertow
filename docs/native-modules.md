@@ -1,5 +1,7 @@
 # Developing Undertow native modules
 
+To run an existing tool, follow [GUI Modules](gui.md#run-tools-from-modules) and the [module bank](module-bank.md). This guide explains how to build and validate a `.module` artifact, with terminal commands for development.
+
 Native modules complement [WASM modules](wasm-development.md). WASM uses portable `wasip1/wasm` code and `undertow_host_v1` imports. Native modules target a specific OS and architecture, use ordinary platform APIs, and use `undertow_native_v1` only for Undertow output, arguments, cancellation, and run information. [BOF compatibility](bof-compatibility.md) is a third extension path for existing AMD64 COFF `.o` files with the Beacon ABI; those run with `run-bof`, while Undertow `.module` DLLs run with `run-native`. Native code has the agent process's privileges and shares its address space; use modules you trust. A native crash can terminate the agent process.
 
 For repeated use, place a `.module` file and optional help sidecar in the local [module bank](module-bank.md). The console preloads packaged native modules as commands such as `module-wininfo`; `load module FILE [NAME]` registers one during a session.

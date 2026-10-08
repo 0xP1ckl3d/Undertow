@@ -29,6 +29,16 @@ For a terminal start, omit the account flags to be prompted for both values. The
 
 Connection enrollment (`--auth token|password|none`, `--token-file`, and `--password-file`) still controls the existing transport handshake. Operator credentials are a separate check after that handshake. The server rejects disabled accounts and wrong passwords before registering a client session. Agents do not use operator accounts. `--auth none` does not bypass operator authentication for clients.
 
+## Manage accounts in the GUI
+
+1. Connect as Team Leader and open **Settings → Identity**. Authenticated name, ID, and role appear at the top; there is no separate GUI account.
+2. Under **Create account**, enter unique ID, display name, **Operator** or **Team Leader**, and a 12–72 byte password, then **Create**. Provide credentials through your normal private provisioning process. The person connects their own client and opens its local GUI link.
+3. Use **Promote** or **Demote** to change role. Both roles operate agents; Team Leaders additionally manage accounts.
+4. **Disable** blocks login temporarily; **Enable** restores it. **Reset password** opens a field; enter the replacement and **Save new password**.
+5. **Revoke** permanently retires an account. Review its confirmation: the ID cannot be reused. Record and audit attribution remain.
+
+Role, state, or password changes close that account's client sessions, which can interrupt streams and forwards. The final active Team Leader cannot be disabled, revoked, or demoted. Regular Operators see their own identity without account-management controls.
+
 ## Account management
 
 Authenticated operator identities are also used for [team conversations and assignments](gui.md#team-conversations-and-assignments). The server binds the sender and task actor to the current client session. Team messages are shared with authenticated operators; direct messages are limited to their two participants, including when a Team Leader is otherwise able to manage accounts. Assignment status can be changed by its creator, assignee, or a Team Leader. The terminal client exposes the same operations with [`team`](console.md#team-coordination).

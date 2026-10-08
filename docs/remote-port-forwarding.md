@@ -17,7 +17,17 @@ Follow [Getting started](getting-started.md) to connect a server, agent, and VPN
 sudo ./bin/undertow client --internal --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify
 ```
 
-The client needs its normal elevated TUN/Wintun setup, but you do **not** need to accept an agent route or start the server with `--tun` just to forward a service. The client must remain connected while the forward is in use. Replace `SERVER_IP` and `FINGERPRINT` with your deployment values; the example uses the default `token.key` in the client working directory and the server's default self-signed TLS certificate. See [networking modes](networking-modes.md) if you use another carrier.
+Use a routing client with its elevated TUN/Wintun setup; the current operator-only worker does not serve incoming client-forward streams. You do **not** need an accepted agent route or server `--tun`. Keep the client connected while forwarding. Replace placeholders; the example uses default `token.key` and self-signed TLS. Interactive startup prompts for operator credentials, or pass `--operator ID --operator-password-file PATH`. Bootstrap an account first as in [Getting started](getting-started.md); see [Networking modes](networking-modes.md) for other carriers.
+
+## Use the GUI
+
+1. On the **client host**, start your service in a separate terminal, e.g. `python3 -m http.server 8080 --bind 127.0.0.1`, and test `curl http://127.0.0.1:8080/` locally.
+2. Open **Forwards** in the [GUI](gui.md), select the agent, enter **Agent bind address** `0.0.0.0:18080` and **Client target address** `127.0.0.1:8080`, then **Start forward**. Use a specific agent IPv4 address to limit the listening interface. The target must be numeric IPv4 loopback.
+3. Check **Client forwards** for the mapping and **Active** state. A sleeping agent shows **Pending check-in** until it opens the listener, then remains connected while the forward is active.
+4. From another host that reaches the agent, test `curl http://AGENT_IP:18080/`. Allow that TCP port through the agent's inbound firewall.
+5. Add another row for each additional TCP port or agent. Use **Cancel** for pending work or **Stop**, then **Stop forward** in the confirmation, to remove a mapping.
+
+Closing the browser or detaching the console leaves the forward running. Its client worker and local service must stay running. Client-session loss closes the forward; it is not automatically restored after reconnect. No accepted route is required. **Relays** instead accepts child Undertow agents, while **Routes** carries your applications toward an agent's networks. These are separate features.
 
 ## Expose one client service
 

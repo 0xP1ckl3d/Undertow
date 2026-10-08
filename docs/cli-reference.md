@@ -2,7 +2,7 @@
 
 Operator authentication is required for every client connection. Bootstrap the first Team Leader on the server with `undertow operators bootstrap --operations-db operations.db --id ID --display-name NAME --password-file PATH` before starting the server. Client startup accepts `--operator ID` or `UNDERTOW_OPERATOR_ID`, and `--operator-password-file PATH` or `UNDERTOW_OPERATOR_PASSWORD`; an interactive terminal prompts for missing values. Account state and password hashes persist in `--operations-db`; see [Operator authentication](operator-authentication.md) for roles, management, and session behavior.
 
-Use this page for terminal flags, startup options, diagnostics, and scripting. For day-to-day operations, start in the [server or client console](console.md): select an agent, configure routes, manage payloads, and run tools there. The [Getting started](getting-started.md) guide gives the full first-run workflow.
+Use this page for flags, startup options, diagnostics, and scripting. For everyday operations, start with the [GUI user guide](gui.md); use the [console guide](console.md) for terminal command workflows. [Getting started](getting-started.md) covers the first installation and connection.
 
 For task-focused detail, see [payload deployment](agent-distribution.md), [Windows Jump](windows-deployments.md), [networking modes](networking-modes.md), the [module bank](module-bank.md), and the [BOF](bof-compatibility.md), [native](native-modules.md), [WASM](wasm-development.md), and [.NET assembly](assembly-modules.md) guides.
 
@@ -100,6 +100,7 @@ Creates or reuses an Ed25519 server key at `identity.key`, creates or reuses a r
 | `--job-output-dir PATH` | `jobs-output` | Saved output from agent jobs. |
 | `--job-output-limit-mib N` | `512` | Maximum saved output per job, in MiB. |
 | `--job-output-total-mib N` | `4096` | Maximum saved output across jobs, in MiB. |
+| `--operations-db PATH` | `operations.db` | Operator accounts, audit, retained agent records, Jobs, screenshots, transfers, team data, and saved relay policies; bootstrap against this same database. |
 | `--probe-echo` | Off | Echo diagnostic probes; normal streams are disabled. |
 
 The server may require privilege to bind UDP/53 or create a proxy interface. TCP/443 and UDP/443 coexist. `--listen` with several selected transports is ambiguous and rejected; use the per-transport flags. If any requested listener cannot start, the server exits instead of silently omitting it. A second positional `server` is an error. For real deployments, use token or password enrollment. `--auth none` opens agent enrollment, while client sessions still require operator credentials; the server prints a warning at startup.
@@ -137,11 +138,12 @@ For a child agent, explicitly start a relay listener on its selected parent in t
 
 ## `client`
 
-`undertow client (--vpn | --internal | --vpn --internal) --server HOST:PORT [FLAGS]`
+`undertow client (--operator-only | --vpn | --internal | --vpn --internal) --server HOST:PORT [FLAGS]`
 
-Run on the elevated **VPN client** host. Choose at least one of `--vpn` and `--internal`:
+Run on your **operator client** host. Choose `--operator-only` for host operations without a TUN device or elevation. For routing, run elevated with `--vpn`, `--internal`, or both. Operator-only cannot be combined with routing flags:
 
 ```sh
+undertow client --operator-only --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify --operator alice --operator-password-file alice.password
 sudo undertow client --vpn --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify --operator alice --operator-password-file alice.password
 sudo undertow client --internal --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify --operator alice --operator-password-file alice.password
 sudo undertow client --vpn --internal --transport quic --server SERVER_IP:443 --fingerprint FINGERPRINT --tls-insecure-skip-verify --operator alice --operator-password-file alice.password

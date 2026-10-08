@@ -1,5 +1,7 @@
 # .NET Framework assemblies
 
+To load and run a tool from the browser, follow [GUI Modules](gui.md#run-tools-from-modules) and the [module bank](module-bank.md). This guide explains supported assembly formats, entry points, dependencies, and execution limits.
+
 Undertow supports a fourth module type: a managed Windows .NET Framework 4.x assembly. It complements portable WASM, Undertow native `.module` DLLs, and BOF `.o` objects. The first assembly runtime targets **Windows amd64 agents** and accepts pure-IL AnyCPU or x64 `.exe` and `.dll` PE assemblies. x86-only, mixed-mode, .NET 6+, and single-file .NET applications are outside this subset.
 
 The agent needs the .NET Framework 4.x CLR. Undertow embeds a dedicated x64 managed worker in the agent binary. For each run it writes that fixed worker executable to a unique temporary directory, starts it directly, sends the assembly bytes and UTF-8 arguments over stdin, and removes the worker directory when it exits. The operator's assembly is loaded with `Assembly.Load(byte[])` and is never written to the agent filesystem. PowerShell is not used for assembly execution. The worker uses the agent's Windows identity and permissions. Dependencies must already be resolvable by the installed CLR; Undertow does not package companion DLLs.
