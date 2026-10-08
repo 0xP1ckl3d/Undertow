@@ -45,12 +45,6 @@ func main() {
 		}
 		return
 	}
-	if handled, err := launchJumpAgent(); handled {
-		if err != nil {
-			os.Exit(1)
-		}
-		return
-	}
 	if len(os.Args) != 1 {
 		os.Exit(2)
 	}
