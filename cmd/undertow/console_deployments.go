@@ -19,7 +19,7 @@ import (
 func deploymentPrerequisites(method, context string) string {
 	switch method {
 	case "winrm":
-		return "WinRM and WinRS enabled; selected Windows identity authorized for the remote session and ADMIN$"
+		return "WinRM and WSMan enabled; selected Windows identity authorized for the management session and ADMIN$"
 	case "wmi":
 		return "remote WMI process creation allowed; selected Windows identity has target ADMIN$ write access"
 	case "service-control":

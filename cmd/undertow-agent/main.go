@@ -25,13 +25,6 @@ func main() {
 		}
 		return
 	}
-	if launched, err := launchJumpAgent(); launched {
-		if err != nil {
-			_, _ = fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-		return
-	}
 	if len(os.Args) > 1 && os.Args[1] == "_jump" {
 		var err error
 		args := os.Args[2:]

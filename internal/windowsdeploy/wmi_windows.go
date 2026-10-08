@@ -194,6 +194,14 @@ func variantInt(value *variant) (int64, error) {
 	}
 }
 
+func variantString(value *variant) (string, error) {
+	defer clearVariant(value)
+	if value.vt != vtBSTR || value.value == 0 {
+		return "", fmt.Errorf("COM member returned non-string type %d", value.vt)
+	}
+	return windows.UTF16PtrToString((*uint16)(unsafe.Pointer(uintptr(value.value)))), nil
+}
+
 func createDispatch(progID string) (*dispatch, error) {
 	wide, err := windows.UTF16PtrFromString(progID)
 	if err != nil {

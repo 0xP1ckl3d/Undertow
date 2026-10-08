@@ -74,22 +74,12 @@ func removeTargetFile(target, path string) error {
 	return err
 }
 
-const winRMLaunchMarker = "Undertow WinRM launch accepted"
-
-func winRMArguments(target, path string) []string {
-	return []string{"-r:" + target, path, "_jump-launch"}
-}
-
 func runWinRM(ctx context.Context, target, path, _ string, output io.Writer) error {
-	launchContext, cancel := context.WithTimeout(ctx, 45*time.Second)
-	defer cancel()
-	text, err := runCommand(launchContext, output, "winrs.exe", winRMArguments(target, path)...)
-	if !strings.Contains(text, winRMLaunchMarker) {
-		if err != nil {
-			return fmt.Errorf("launch through WinRM: %w", err)
-		}
-		return errors.New("launch through WinRM did not return its confirmation marker")
+	processID, err := runWinRMProcess(target, path)
+	if err != nil {
+		return fmt.Errorf("launch through WinRM WSMan: %w", err)
 	}
+	fmt.Fprintf(output, "WinRM created target process with PID %d\n", processID)
 	return nil
 }
 

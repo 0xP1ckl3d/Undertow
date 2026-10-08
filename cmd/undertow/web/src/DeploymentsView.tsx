@@ -10,7 +10,7 @@ const methodName=(value:string)=>methods.find(method=>method[0]===value)?.[1]||v
 const contextName=(value:string)=>contexts.find(context=>context[0]===value)?.[1]||value;
 const prerequisites=(method:string,context:string)=>{
   switch(method){
-    case 'winrm': return 'WinRM and WinRS must be enabled on the target. The selected Windows identity must be authorized for the remote session and ADMIN$.';
+    case 'winrm': return 'WinRM and WSMan must be enabled on the target. The selected Windows identity must be authorized for the management session and ADMIN$.';
     case 'wmi': return 'Remote WMI and the target firewall rules must permit process creation. The selected Windows identity must be able to write to ADMIN$.';
     case 'service-control': return 'The selected Windows identity must have target Service Control Manager and administrative share access. The selected build must support Windows services; the service runs as LocalSystem.';
     case 'scheduled-task': return context==='local-system'?'The selected Windows identity must have remote Scheduled Task and administrative share access. The one-shot task runs as LocalSystem.':'The selected Windows identity must have remote Scheduled Task and administrative share access, and that same identity needs an interactive session on the target.';
