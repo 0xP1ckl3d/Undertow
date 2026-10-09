@@ -37,7 +37,7 @@ Connection enrollment (`--auth token|password|none`, `--token-file`, and `--pass
 4. **Disable** blocks login temporarily; **Enable** restores it. **Reset password** opens a field; enter the replacement and **Save new password**.
 5. **Revoke** permanently retires an account. Review its confirmation: the ID cannot be reused. Record and audit attribution remain.
 
-Role, state, or password changes close that account's client sessions, which can interrupt streams and forwards. The final active Team Leader cannot be disabled, revoked, or demoted. Regular Operators see their own identity without account-management controls.
+Role, state, or password changes close that account's client sessions, which can interrupt streams and forwards. You cannot demote, disable, or revoke your own account; ask another Team Leader to make those changes. These protections are enforced by the authenticated API as well as the GUI. The final active Team Leader cannot be disabled, revoked, or demoted. Regular Operators see their own identity without account-management controls. Resetting your own password remains available, with a confirmation that your current session will close.
 
 ## Account management
 

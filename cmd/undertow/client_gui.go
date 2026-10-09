@@ -235,6 +235,7 @@ func (g *guiServer) handler() http.Handler {
 	mux.HandleFunc("PUT /api/agents/{id}/nickname", g.remote(http.MethodPut, func(r *http.Request) string { return "/v1/agents/" + url.PathEscape(r.PathValue("id")) + "/nickname" }))
 	mux.HandleFunc("PUT /api/agents/{id}/sleep", g.remote(http.MethodPut, func(r *http.Request) string { return "/v1/agents/" + url.PathEscape(r.PathValue("id")) + "/sleep" }))
 	mux.HandleFunc("PUT /api/agents/{id}/archive", g.remote(http.MethodPut, func(r *http.Request) string { return "/v1/agents/" + url.PathEscape(r.PathValue("id")) + "/archive" }))
+	mux.HandleFunc("POST /api/agents/archive/bulk", g.archivedAgentsBulk)
 	mux.HandleFunc("POST /api/agents/{id}/shutdown", g.remote(http.MethodPost, func(r *http.Request) string { return "/v1/agents/" + url.PathEscape(r.PathValue("id")) + "/shutdown" }))
 	mux.HandleFunc("POST /api/agents/{id}/session/kill", g.killAgentSession)
 	mux.HandleFunc("GET /api/agents/{id}/host-results", g.remote(http.MethodGet, func(r *http.Request) string {
@@ -570,6 +571,11 @@ func (g *guiServer) events(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 	after := control.EventCursor(r.Header.Get("Last-Event-ID"))
 	_ = control.StreamEvents(r.Context(), session, after, func(event control.Event) error {
+		if event.Kind == "agent.deleted" && event.Target != "" {
+			if err := g.store.DeleteAgentRecords([]string{event.Target}); err != nil {
+				return err
+			}
+		}
 		data, err := json.Marshal(event)
 		if err != nil {
 			return err

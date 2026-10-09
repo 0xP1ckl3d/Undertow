@@ -187,8 +187,10 @@ func (c *liveClientConsole) reconcileRouteAvailability(ctx context.Context) erro
 		return err
 	}
 	online := make(map[string]bool, len(status.Agents))
+	archived := make(map[string]bool, len(status.Agents))
 	for _, agent := range status.Agents {
 		online[agent.ID] = agent.Online
+		archived[agent.ID] = agent.Archived
 	}
 	for _, route := range c.routes {
 		if !c.active[route.Prefix] || online[route.AgentID] {
@@ -198,6 +200,13 @@ func (c *liveClientConsole) reconcileRouteAvailability(ctx context.Context) erro
 			return fmt.Errorf("remove unavailable route %s: %w", route.Prefix, err)
 		}
 		delete(c.active, route.Prefix)
+	}
+	for _, route := range append([]control.AcceptedRoute(nil), c.routes...) {
+		if archived[route.AgentID] {
+			if err := c.removeClientRouteLocked(ctx, route.Prefix, route.AgentID); err != nil {
+				return fmt.Errorf("remove archived agent route %s: %w", route.Prefix, err)
+			}
+		}
 	}
 	return nil
 }

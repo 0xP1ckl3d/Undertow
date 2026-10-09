@@ -37,18 +37,15 @@ Keep the URL private: it grants local workspace access. The service binds to num
 | **Agents** | Select a host and use Console, Overview, Files, Jobs, Screenshots, Modules, Host, or Live shell |
 | **Jump** | Prepare and track Windows deployment through an existing agent |
 | **Credentials** | Manage encrypted engagement passwords and NT hashes for authorised operations |
-| **Jobs** | Background work, retained output, and received BOF files |
-| **Transfers** | GUI file-transfer and Jump delivery progress, states, and checksums |
-| **Routes** | Accept networks on this client, toggle saved routes, or manage server routes |
-| **Relays** | Parent listeners for child agents |
-| **Forwards** | Expose this client's TCP services through agent listeners |
-| **Modules** | Browse/load tools, choose a target, and run them |
+| **Networking** | Inner pages for **Routes**, **Relays**, and **Forwards** |
+| **Tools & jobs** | Inner pages for **Jobs**, **Transfers**, and **Modules** |
 | **Payloads** | Profiles, agent builds, custom artifacts, downloads, hosting, and deploy helpers |
 | **Team** | Shared/direct messages and assignments |
-| **History** | Server audit actions and requesting operators |
-| **Settings** | Client modes, carriers, archives, accounts, status, and logs |
+| **Settings** | Client modes, carriers, archives, accounts, connection status, server logs, and **History** |
 
-For a first session, check **Settings → Status**, select an agent, read **Overview**, then run **Host → Identity**. Opening workspaces or reading retained results does not automatically execute commands or capture images.
+Each group remembers the inner page you last used. Links from other pages open their exact destination and select its sidebar group. Password and NT-hash fields start masked; use the eye button to show or hide the text you enter.
+
+For a first session, check **Settings → Connection status**, select an agent, read **Overview**, then run **Host → Identity**. Opening workspaces or reading retained results does not automatically execute commands or capture images.
 
 ## Read the topology
 
@@ -64,7 +61,7 @@ Read the legend: carrier/relay paths connect sessions; green paths show accepted
 
 Agent icons are blue for standard process privileges, red for elevated, and neutral when unknown. The dot and text separately show connected, sleeping, or disconnected. Coarse privilege comes from inventory or a successful retained Privileges result; use **Host → Privileges** for detail.
 
-Only client-accepted routes appear as network paths. Advertisements and server routes do not prove your client has installed a route: check **Routes**. New relay sessions identify their particular TCP/SMB listener; older records without enough information retain their known parent path without guessing.
+Only client-accepted routes appear as network paths. Advertisements and server routes do not prove your client has installed a route: check **Networking → Routes**. New relay sessions identify their particular TCP/SMB listener; older records without enough information retain their known parent path without guessing.
 
 Observed remote addresses can belong to NAT and need not be reachable from your workstation. Agent public IP appears only when the server observed a globally routable source. Set the intended server public address under **Settings → Carriers**; Undertow does not discover it through an external IP service.
 
@@ -125,7 +122,7 @@ The agent Console supports execution, scripts, all four module runtimes, host op
 
 Direct-file paths such as `run-script powershell PATH` are on the **Undertow client host**, not the agent. Dedicated Files/Modules upload controls choose browser files. See [Console guide](console.md) for complete syntax.
 
-For Console Job commands, use the full ID printed by `jobs`, such as `job show JOB_ID` or `job output JOB_ID`. Use the **Jobs** page to download complete output or BOF files. Terminal Job numbers, `job save`, and `job file` are not GUI Console commands.
+For Console Job commands, use the full ID printed by `jobs`, such as `job show JOB_ID` or `job output JOB_ID`. Use **Tools & jobs → Jobs** to download complete output or BOF files. Terminal Job numbers, `job save`, and `job file` are not GUI Console commands.
 
 Sleeping agents run supported foreground requests at their next callback. Keep browser/client open; further commands can be submitted while waiting, with results matched in submission order. These requests do not automatically become Jobs.
 
@@ -155,7 +152,7 @@ An open shell holds the connection even when you are not typing. Linux uses a PT
 2. Click an entry for metadata; open folders by double-click, Enter, or **Open folder**. Use **Parent** to go up and **Previous**/**Next** for directories with more than 200 entries. Symbolic links show metadata but are not opened or downloaded through these controls.
 3. Use **Choose local file**, remote destination, and **Upload** to send a file. Select a regular file and **Download verified file** to retrieve it.
 4. Use **Create folder** for directories; use Console `stat`, `mkdir`, `rm`, or `ls` for other operations.
-5. Open sidebar **Transfers** for progress, operator, agent/path, state, and checksum.
+5. Open **Tools & jobs → Transfers** for progress, operator, agent/path, state, and checksum.
 
 Transfers verify SHA-256 and refuse to overwrite destinations. GUI uploads and downloads are limited to 512 MiB each; terminal transfers remain available. Leave waiting browser requests open for a sleeping agent's callback.
 
@@ -165,7 +162,7 @@ The server stores transfer metadata rather than another copy of the file. Sessio
 
 Windows agents expose **Tokens** for discovery, import, logon and session defaults. **Create a context** stays near the top of that tab, including a stored-password selector. Job, Modules and Shell forms also have a per-operation **Authentication context** control. See [Authentication contexts / tokens](authentication-contexts.md) for selection, lifecycle and multi-operator behaviour. The top-level **Credentials** page manages reusable account material; [Credential Store](credential-store.md) describes ownership, encryption and Jump use.
 
-Open **Agents → your agent → Modules**, or sidebar **Modules** and choose **Target agent**. The bank is local to this client; loading does not execute tools.
+Open **Agents → your agent → Modules**, or **Tools & jobs → Modules** and choose **Target agent**. The bank is local to this client; loading does not execute tools.
 
 1. Search or filter **WASM**, **Native**, **.NET**, or **BOF**.
 2. Read the selected command's usage, help, target platform, and argument schema.
@@ -197,12 +194,12 @@ Tools operate with the agent's OS identity and permissions. Their text output an
 1. Open **Agents → your agent → Jobs**.
 2. In **Start background job**, enter **Program** and add each argument with **+ Argument**. A Windows check uses `cmd.exe`, separate `/c` and `whoami` arguments; Linux uses `/usr/bin/id`.
 3. Click **Start job**. Programs start directly; shell syntax requires an explicitly chosen shell.
-4. Select the record for state, timestamps, exit, and output. Sidebar **Jobs** groups jobs visible to your session; the agent tab filters by host. Use search/state filters.
+4. Select the record for state, timestamps, exit, and output. **Tools & jobs → Jobs** groups jobs visible to your session; the agent tab filters by host. Use search/state filters.
 5. Use **Download full output**, **Cancel job**, or **Delete job and output** as appropriate. Deletion applies to finished work and removes retained output; review its confirmation. BOF files appear under **Received files**.
 
 Jobs continue while you use other tabs or detach the console. A sleeping agent's Job queues, dispatches, and runs on its callback; cancel a queued Job before dispatch if no longer needed. Running Jobs hold a live connection. Finished output survives browser/client restart; connection loss/server restart can interrupt active work.
 
-A disconnected agent's Jobs tab is read-only. Use sidebar **Jobs** to delete its finished records without contacting the agent.
+A disconnected agent's Jobs tab is read-only. Use **Tools & jobs → Jobs** to delete its finished records without contacting the agent.
 
 Large previews show the latest 256 KiB. Completed records and output survive server restarts. Queued requests can wait across a restart, but running work becomes interrupted; review the result before retrying. Server storage limits bound retained output and files, and the server holds up to 512 Job records at a time. See [Job storage flags](cli-reference.md#server). Modules and Jump also create linked Jobs. Terminal equivalents include `job start`, `jobs`, `job output`, `job save`, `job file`, `job cancel`, and `job delete`.
 
@@ -222,7 +219,7 @@ Captures are stored on the server and visible to other operators. The server ret
 A CIDR such as `10.20.0.0/16` describes a destination network. Accepting it selects an agent for those addresses and installs a client-side route.
 
 1. Start a routing client with `--internal`, `--vpn`, or both. Operator-only clients cannot install routes.
-2. Open **Routes → Routes accepted by this client**; choose agent, **Advertised**, and prefix. Use **Custom CIDR** for a known reachable unadvertised network.
+2. Open **Networking → Routes → Routes accepted by this client**; choose agent, **Advertised**, and prefix. Use **Custom CIDR** for a known reachable unadvertised network.
 3. Click **Accept and install route**. Agent Overview also offers advertised-network acceptance.
 4. Check **Saved local routes**: **Installed** confirms local installation; **Pending** needs agent/connection checks. Check Topology's path.
 5. Test from an application or separate terminal **on the client**, e.g. `ping 10.20.1.25` or `curl http://10.20.1.25/`, using a real reachable target.
@@ -234,7 +231,7 @@ The animation toggles a route while ping tests access. The agent opens target so
 
 Choices persist in `client-routes.json` and are reapplied after reconnect, subject to availability and collision checks. **Accepted by connected clients** shows others' choices; it does not install routes on your machine.
 
-To configure a shared server path, use **Routes → Server configured routes**, select the agent and an advertised or custom prefix, then **Add server route**. Check **Active** or **Inactive** in its record; use **Remove** when done. Applications on the server host need server `--tun` to use these paths. Clients using global internal routing can also use them. This is separate from explicitly accepting a route on your own client.
+To configure a shared server path, use **Networking → Routes → Server configured routes**, select the agent and an advertised or custom prefix, then **Add server route**. Check **Active** or **Inactive** in its record; use **Remove** when done. Applications on the server host need server `--tun` to use these paths. Clients using global internal routing can also use them. This is separate from explicitly accepting a route on your own client.
 
 **Settings → Client** controls Internet VPN egress and use of global server routes; explicitly accepted routes are managed separately. See [Networking modes](networking-modes.md) and [Scenarios](scenarios.md).
 
@@ -244,9 +241,9 @@ To configure a shared server path, use **Routes → Server configured routes**, 
 
 **Jump** deploys a Windows artifact through a Windows source agent. Create a source/target record, **Prepare jump**, then **Start jump** after checking prerequisites/context. Creation/preparation do not contact the target; Start queues the actual Job. Follow [Windows Jump](windows-deployments.md) for methods, credentials, progress, cleanup, and enrollment correlation.
 
-**Relays** connects children through a parent already reaching Undertow. Choose parent and **TCP** or **SMB named pipe**, enter bind, and **Start relay**. Use **Create child payload** with the child's reachable parent address. A bound socket does not prove firewall reachability. Follow [Topology and relays](topology-and-relays.md#start-a-relay-from-the-gui) or [SMB relays](smb-named-pipe-relays.md#use-the-browser-gui).
+**Networking → Relays** connects children through a parent already reaching Undertow. Choose parent and **TCP** or **SMB named pipe**, enter bind, and **Start relay**. Use **Create child payload** with the child's reachable parent address. A bound socket does not prove firewall reachability. Follow [Topology and relays](topology-and-relays.md#start-a-relay-from-the-gui) or [SMB relays](smb-named-pipe-relays.md#use-the-browser-gui).
 
-**Forwards** exposes a client service to hosts reaching an agent. Use a routing client; the operator-only worker does not serve incoming forward streams. Choose the agent, **Agent bind address**, and numeric IPv4 loopback **Client target address**, then **Start forward**. For example, agent `0.0.0.0:18080` forwards to client `127.0.0.1:8080`. Sleeping agents show **Pending check-in** until starting. **Cancel** or **Stop** removes it. The forward belongs to your client session. Follow [Remote forwarding](remote-port-forwarding.md#use-the-gui) for setup, tests, multiple ports, and cleanup.
+**Networking → Forwards** exposes a client service to hosts reaching an agent. Use a routing client; the operator-only worker does not serve incoming forward streams. Choose the agent, **Agent bind address**, and numeric IPv4 loopback **Client target address**, then **Start forward**. For example, agent `0.0.0.0:18080` forwards to client `127.0.0.1:8080`. Sleeping agents show **Pending check-in** until starting. **Cancel** or **Stop** removes it. The forward belongs to your client session. Follow [Remote forwarding](remote-port-forwarding.md#use-the-gui) for setup, tests, multiple ports, and cleanup.
 
 ## Understand agent connection rhythm
 
@@ -285,8 +282,9 @@ The board shows the latest 200 assignments; conversations load in pages of 100 w
 | **Carriers** | Shared server public address and DNS/QUIC/WebSocket listeners |
 | **Agents** | Search archived agents, restore one or many, or permanently delete selected records as a Team Leader. **Show archived agents** controls visibility in Agents and Topology on this client. |
 | **Identity** | Authenticated account; Team Leader account creation, roles, enable/disable, reset, and revoke |
-| **Status** | Client mode, carrier, server, and sessions |
-| **Logs** | Recent server diagnostics, **Follow** new lines, **Pause** following; buffers are bounded |
+| **Connection status** | Client mode, carrier, server, and sessions |
+| **History** | Server audit actions, requesting operators, and results |
+| **Server logs** | Local dates/times, buffer count, and update time; **Reload recent**, **Follow**, or **Pause** within the bounded log pane |
 
 Carrier and public-address changes are shared. Under **Settings → Carriers → Server public address**, enter the hostname or IP for new profiles and click **Save address**. The HTTPS retrieval host is separate under **Payloads → Retrieval settings**.
 
@@ -294,9 +292,9 @@ Archiving a lost agent removes routes owned by it; a callback automatically rest
 
 To start a stopped carrier, use **Settings → Carriers → Start listener**. Select QUIC, WebSocket, or DNS, enter the server listen address or leave its default, and choose TLS for QUIC or WebSocket. **Certificate files** takes certificate and key paths on the server. Click **Start listener**, then check the listener and session counts. Make sure the server firewall permits its port; starting a listener does not change existing agents' callback settings.
 
-Use a listener's **Stop** control to close an unused carrier and review the confirmation. A normal stop requires zero sessions; **Review force stop** allows you to confirm disconnecting its peers. This client cannot stop its own carrier: connect through another first. Account changes close affected sessions; the final active Team Leader is protected. See [Operator accounts](operator-authentication.md).
+Use a listener's **Stop** control to close an unused carrier and review the confirmation. A normal stop requires zero sessions; **Review force stop** allows you to confirm disconnecting its peers. This client cannot stop its own carrier: connect through another first. Account changes close affected sessions. You cannot demote, disable, or revoke yourself; the final active Team Leader is also protected. See [Operator accounts](operator-authentication.md).
 
-**History** records actions/results with authenticated account/client attribution. Use Jobs, Transfers, Screenshots, or Host for operational output. Console `agent events` shows recent bounded, in-memory lifecycle events rather than durable audit history.
+**Settings → History** records actions/results with authenticated account/client attribution. Use Jobs, Transfers, Screenshots, or Host for operational output. Console `agent events` shows recent bounded, in-memory lifecycle events rather than durable audit history.
 
 **Overview → Agent lifecycle → Kill current session** closes connectivity and permits reconnect. **Shut down agent** stops the process. Review confirmation; sleeping-agent lifecycle actions queue for their callback. Stopping a relay interrupts children; stopping a forward ends client-service access.
 
@@ -308,7 +306,7 @@ Server state includes records, accounts, payloads, captures, and audit. Client s
 
 | Symptom | Next step |
 | --- | --- |
-| Client **Disconnected** | Check worker and Settings Status/Logs; browser remains available during reconnect |
+| Client **Disconnected** | Check worker and Settings Connection status/Server logs; browser remains available during reconnect |
 | Browser **Session expired** | Local OS terminal `undertow client gui`, then complete fresh link |
 | Sleeping-agent request waiting | Check expected callback; keep foreground request open or use a Job |
 | Check-in agent stays connected | Read reason and finish/close unused dependencies; other operators may remain |

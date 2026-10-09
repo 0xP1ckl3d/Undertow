@@ -109,6 +109,23 @@ func (s *clientGUIStore) AppendConsoleEntry(agentID, source, kind, value string)
 	return err
 }
 
+func (s *clientGUIStore) DeleteAgentRecords(ids []string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, id := range ids {
+		if _, err := tx.Exec("DELETE FROM console_entries WHERE agent_id=?", id); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("DELETE FROM topology_layout WHERE id=?", "agent:"+id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 func (s *clientGUIStore) ModuleRefs() ([]guiModuleRef, error) {
 	rows, err := s.db.Query("SELECT name,kind,path,filename,format FROM gui_modules ORDER BY name")
 	if err != nil {

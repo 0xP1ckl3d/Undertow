@@ -52,7 +52,7 @@ Use a parent hostname or IP that the child can reach over SMB for `PARENT_HOST`;
 
 ## Use the browser GUI
 
-1. In **Relays**, select a connected Windows parent and choose **SMB named pipe**. Enter `\\.\pipe\branch_ops` and click **Start relay**.
+1. In **Networking → Relays**, select a connected Windows parent and choose **SMB named pipe**. Enter `\\.\pipe\branch_ops` and click **Start relay**.
 2. In the new relay row, click **Create child payload**. **Payloads** selects the `Agent relay · SMB named pipe` carrier. Enter a child-reachable UNC path such as `\\PARENT_HOST\pipe\branch_ops`; the parent's local `\\.\pipe\...` path is not copied as a remote address.
 3. Save the profile and build a Windows x64 artifact. In **Payloads → Artifacts → Host through an agent**, select the parent and its named pipe, then enter the parent host that the child can reach over SMB. Click **Enable pipe delivery**. Preview or download the pinned PowerShell helper. You can still download the artifact directly through the operator client for another delivery method.
 4. Once the child connects, inspect **Topology**. The child appears with its own agent ID, `relay-smb` carrier, and the parent as its `Via` path. Open its workspace for normal commands and retained records.

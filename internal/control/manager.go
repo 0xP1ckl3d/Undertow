@@ -441,12 +441,34 @@ func (m *Manager) SetAgentArchived(id string, archived bool) error {
 		m.mu.Unlock()
 		return errors.New("operations store unavailable")
 	}
+	if archived && m.device != nil {
+		for _, route := range m.routes.List() {
+			if route.AgentID == id && route.Active {
+				if err := m.device.DelRoute(route.Prefix.String()); err != nil {
+					m.mu.Unlock()
+					return fmt.Errorf("remove archived agent route %s: %w", route.Prefix, err)
+				}
+			}
+		}
+	}
 	if err := m.operations.SetAgentArchived(id, archived); err != nil {
 		m.mu.Unlock()
 		return err
 	}
 	if archived {
 		m.archivedAgents[id] = true
+		for _, route := range m.routes.List() {
+			if route.AgentID == id {
+				m.routes.Delete(route.Prefix)
+			}
+		}
+		for _, client := range m.clients {
+			for prefix, route := range client.accepted {
+				if route.AgentID == id {
+					delete(client.accepted, prefix)
+				}
+			}
+		}
 	} else {
 		delete(m.archivedAgents, id)
 	}
@@ -1882,6 +1904,7 @@ func (m *Manager) handler(token string) http.Handler {
 		}
 		jsonReply(w, http.StatusOK, map[string]bool{"archived": *request.Archived})
 	})
+	muxer.HandleFunc("POST /v1/agents/archive/bulk", m.archivedAgentsBulkHandler)
 	muxer.HandleFunc("GET /v1/agents/{id}/events", func(w http.ResponseWriter, r *http.Request) {
 		jsonReply(w, http.StatusOK, m.LifecycleEvents(r.PathValue("id")))
 	})

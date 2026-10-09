@@ -296,6 +296,9 @@ func clientRequestAllowed(request *http.Request, clientID uint64) bool {
 		parts := strings.Split(path, "/")
 		return len(parts) == 5 && parts[3] != "" && !strings.ContainsAny(parts[3], "%\\")
 	}
+	if request.Method == http.MethodPost && path == "/v1/agents/archive/bulk" && request.URL.RawQuery == "" {
+		return true
+	}
 	if request.Method == http.MethodGet && request.URL.RawQuery == "" {
 		parts := strings.Split(path, "/")
 		if len(parts) == 4 && parts[1] == "v1" && parts[2] == "agents" && parts[3] != "" && !strings.ContainsAny(parts[3], "%\\") {

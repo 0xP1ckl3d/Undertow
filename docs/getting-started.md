@@ -107,7 +107,7 @@ If no agent appears, check `status` and `agent events AGENT_ID` in the server co
 
 ## Finish your first session
 
-Download any Job output or screenshots you need to keep. Remove the test route in **Routes**, then use **Agents → your agent → Overview → Agent lifecycle → Shut down agent** if this was a temporary deployment. Confirm the shutdown and remove the delivered executable from the endpoint through your normal cleanup process. In **Payloads → Artifacts**, unhost the download when no longer needed; unhosting stops delivery without stopping an already running process.
+Download any Job output or screenshots you need to keep. Remove the test route in **Networking → Routes**, then use **Agents → your agent → Overview → Agent lifecycle → Shut down agent** if this was a temporary deployment. Confirm the shutdown and remove the delivered executable from the endpoint through your normal cleanup process. In **Payloads → Artifacts**, unhost the download when no longer needed; unhosting stops delivery without stopping an already running process.
 
 Closing the browser leaves the client running. Type `quit` in its terminal console to stop it, and `stop` in the server console when you are finished with the server. The [GUI cleanup guide](gui.md#settings-history-and-cleanup) explains session kill, shutdown, archive, and retained state.
 

@@ -1,6 +1,6 @@
 # Local module bank
 
-Use the module bank to run compiled tools from **Modules** in the [GUI](gui.md#run-tools-from-modules) or by name in the server/client console. Both preload BOFs, native modules, WASM, and .NET Framework assemblies from the local `modules/` directory. Loading reads an artifact locally; Undertow sends it to the selected agent only when you run it. Each client has its own bank. Terminal registrations last for that console session; GUI imports and references can be restored after client restart.
+Use the module bank to run compiled tools from **Tools & jobs → Modules** in the [GUI](gui.md#run-tools-from-modules) or by name in the server/client console. Both preload BOFs, native modules, WASM, and .NET Framework assemblies from the local `modules/` directory. Loading reads an artifact locally; Undertow sends it to the selected agent only when you run it. Each client has its own bank. Terminal registrations last for that console session; GUI imports and references can be restored after client restart.
 
 | I want to... | Start here |
 | --- | --- |
@@ -23,7 +23,7 @@ undertow[TALON]> job output 1
 
 ## Use the GUI module bank
 
-1. Open **Agents → your agent → Modules**, or sidebar **Modules** and select **Target agent**.
+1. Open **Agents → your agent → Modules**, or **Tools & jobs → Modules** and select **Target agent**.
 2. Search/filter the bank, select a command, and read its **Usage**, **Target**, and help. An incompatibility message explains a platform or capability mismatch.
 3. Supply arguments. BOF sidecars can provide named typed fields; otherwise use **Arguments** with quotes for values containing spaces. Optional WASM stdin and native data can be chosen as files.
 4. Select **Stream foreground** for live output and Console history, or **Run background** for retained output in Jobs. Use **Stop foreground run** to cancel a live stream. Loading alone never starts remote work.

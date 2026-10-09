@@ -31,13 +31,13 @@ The server generates temporary self-signed TLS for QUIC/WebSocket. For these cer
 
 ## Accept and manage routes in the GUI
 
-Open the client's printed GUI URL, then **Routes**. Select an agent under **Routes accepted by this client**, choose **Advertised** and its actual CIDR, then **Accept and install route**. For a reachable but unadvertised subnet, use **Custom CIDR**. Overview also offers acceptance.
+Open the client's printed GUI URL, then **Networking → Routes**. Select an agent under **Routes accepted by this client**, choose **Advertised** and its actual CIDR, then **Accept and install route**. For a reachable but unadvertised subnet, use **Custom CIDR**. Overview also offers acceptance.
 
 Check **Saved local routes** for **Installed**, then test a real host/service from an application on **that client machine**. **Disable** withdraws the route while saving the choice, **Enable** restores it, and **Remove** deletes it. Routes on other clients do not install on yours. Operator-only clients can inspect but cannot install routes.
 
 **Settings → Client** changes Internet egress and global internal routing on a client with a tunnel. VPN off removes Internet routes but keeps explicit accepted agent routes. Internal off changes global server routing for new flows; it does not disable explicit accepted routes. Existing flows keep their path. Settings persist over carrier reconnects within the worker; restart uses startup flags.
 
-An enabled route holds a check-in agent connected even when idle. The [GUI routing guide](gui.md#reach-a-remote-network-from-your-machine) includes the route-toggle animation and explains installed, saved, and shared state. Use **Routes → Server configured routes → Add server route** to define a shared server path separately from client acceptance. The terminal workflows below remain available.
+An enabled route holds a check-in agent connected even when idle. The [GUI routing guide](gui.md#reach-a-remote-network-from-your-machine) includes the route-toggle animation and explains installed, saved, and shared state. Use **Networking → Routes → Server configured routes → Add server route** to define a shared server path separately from client acceptance. The terminal workflows below remain available.
 
 ## Internet through the server: client `--vpn`
 

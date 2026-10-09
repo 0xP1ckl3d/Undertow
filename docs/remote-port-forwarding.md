@@ -22,12 +22,12 @@ Use a routing client with its elevated TUN/Wintun setup; the current operator-on
 ## Use the GUI
 
 1. On the **client host**, start your service in a separate terminal, e.g. `python3 -m http.server 8080 --bind 127.0.0.1`, and test `curl http://127.0.0.1:8080/` locally.
-2. Open **Forwards** in the [GUI](gui.md), select the agent, enter **Agent bind address** `0.0.0.0:18080` and **Client target address** `127.0.0.1:8080`, then **Start forward**. Use a specific agent IPv4 address to limit the listening interface. The target must be numeric IPv4 loopback.
+2. Open **Networking → Forwards** in the [GUI](gui.md), select the agent, enter **Agent bind address** `0.0.0.0:18080` and **Client target address** `127.0.0.1:8080`, then **Start forward**. Use a specific agent IPv4 address to limit the listening interface. The target must be numeric IPv4 loopback.
 3. Check **Client forwards** for the mapping and **Active** state. A sleeping agent shows **Pending check-in** until it opens the listener, then remains connected while the forward is active.
 4. From another host that reaches the agent, test `curl http://AGENT_IP:18080/`. Allow that TCP port through the agent's inbound firewall.
 5. Add another row for each additional TCP port or agent. Use **Cancel** for pending work or **Stop**, then **Stop forward** in the confirmation, to remove a mapping.
 
-Closing the browser or detaching the console leaves the forward running. Its client worker and local service must stay running. Client-session loss closes the forward; it is not automatically restored after reconnect. No accepted route is required. **Relays** instead accepts child Undertow agents, while **Routes** carries your applications toward an agent's networks. These are separate features.
+Closing the browser or detaching the console leaves the forward running. Its client worker and local service must stay running. Client-session loss closes the forward; it is not automatically restored after reconnect. No accepted route is required. **Networking → Relays** instead accepts child Undertow agents, while **Networking → Routes** carries your applications toward an agent's networks. These are separate features.
 
 ## Expose one client service
 

@@ -83,20 +83,20 @@ func (m *Manager) operatorHTTPHandlers(muxer *http.ServeMux) {
 		}
 		jsonReply(w, http.StatusOK, a)
 	})
-	leader := func(w http.ResponseWriter, r *http.Request) (*OperationsStore, bool) {
+	leader := func(w http.ResponseWriter, r *http.Request) (*OperationsStore, OperatorAccount, bool) {
 		actor := boundActionFromContext(r.Context())
 		a, err := m.ActiveOperator(actor.ClientSessionID)
 		if err != nil || a.Role != TeamLeaderRole {
 			http.Error(w, "Team Leader required", http.StatusForbidden)
-			return nil, false
+			return nil, OperatorAccount{}, false
 		}
 		m.mu.RLock()
 		store := m.operations
 		m.mu.RUnlock()
-		return store, true
+		return store, a, true
 	}
 	muxer.HandleFunc("GET /v1/operators", func(w http.ResponseWriter, r *http.Request) {
-		s, ok := leader(w, r)
+		s, _, ok := leader(w, r)
 		if !ok {
 			return
 		}
@@ -108,7 +108,7 @@ func (m *Manager) operatorHTTPHandlers(muxer *http.ServeMux) {
 		jsonReply(w, 200, a)
 	})
 	muxer.HandleFunc("POST /v1/operators", func(w http.ResponseWriter, r *http.Request) {
-		s, ok := leader(w, r)
+		s, _, ok := leader(w, r)
 		if !ok {
 			return
 		}
@@ -129,7 +129,7 @@ func (m *Manager) operatorHTTPHandlers(muxer *http.ServeMux) {
 		w.WriteHeader(201)
 	})
 	muxer.HandleFunc("PUT /v1/operators/{id}", func(w http.ResponseWriter, r *http.Request) {
-		s, ok := leader(w, r)
+		s, actor, ok := leader(w, r)
 		if !ok {
 			return
 		}
@@ -143,6 +143,10 @@ func (m *Manager) operatorHTTPHandlers(muxer *http.ServeMux) {
 			return
 		}
 		id := r.PathValue("id")
+		if id == actor.ID && ((in.Role != nil && *in.Role != TeamLeaderRole) || (in.Disabled != nil && *in.Disabled)) {
+			http.Error(w, "ask another Team Leader to demote or disable your account", http.StatusForbidden)
+			return
+		}
 		if err := s.UpdateOperator(id, in.Role, in.Disabled, in.Password); err != nil {
 			http.Error(w, err.Error(), 400)
 			return
@@ -151,11 +155,15 @@ func (m *Manager) operatorHTTPHandlers(muxer *http.ServeMux) {
 		time.AfterFunc(time.Second, func() { m.DisconnectOperator(id) })
 	})
 	muxer.HandleFunc("DELETE /v1/operators/{id}", func(w http.ResponseWriter, r *http.Request) {
-		s, ok := leader(w, r)
+		s, actor, ok := leader(w, r)
 		if !ok {
 			return
 		}
 		id := r.PathValue("id")
+		if id == actor.ID {
+			http.Error(w, "ask another Team Leader to revoke your account", http.StatusForbidden)
+			return
+		}
 		if err := s.DeleteOperator(id); err != nil {
 			http.Error(w, err.Error(), 400)
 			return

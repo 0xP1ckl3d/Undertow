@@ -34,6 +34,9 @@ func TestClientArchiveRequestPolicy(t *testing.T) {
 		allowed      bool
 	}{
 		{http.MethodPut, "/v1/agents/agent-a/archive", true},
+		{http.MethodPost, "/v1/agents/archive/bulk", true},
+		{http.MethodGet, "/v1/agents/archive/bulk", false},
+		{http.MethodPost, "/v1/agents/archive/bulk?force=true", false},
 		{http.MethodGet, "/v1/agents/agent-a/archive", false},
 		{http.MethodPut, "/v1/agents/agent-a/archive?force=true", false},
 		{http.MethodPut, "/v1/agents/agent-a/extra/archive", false},

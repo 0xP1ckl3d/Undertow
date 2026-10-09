@@ -6,7 +6,7 @@ These deeper deployment examples use DNS on agents and clients; [Networking mode
 
 These examples assume an initialised server with its first Team Leader bootstrapped as in [Getting started](getting-started.md#1-initialize-and-start-the-server). A fresh server without operator accounts refuses startup. Interactive client examples prompt for operator ID/password; noninteractive or background clients need `--operator ID --operator-password-file PATH` or the documented environment equivalents. Agents use enrollment credentials, not operator accounts.
 
-For GUI operation, open the client URL printed at startup. Use **Agents** for host work, **Routes** to accept the corresponding network, **Forwards** for client-service listeners, and **Modules** for tools. The [GUI guide](gui.md) provides equivalent steps and screenshots. These scenarios keep terminal examples for reproducible layouts, server-only workflows, and verification.
+For GUI operation, open the client URL printed at startup. Use **Agents** for host work, **Networking → Routes** to accept the corresponding network, **Networking → Forwards** for client-service listeners, and **Tools & jobs → Modules** for tools. The [GUI guide](gui.md) provides equivalent steps and screenshots. These scenarios keep terminal examples for reproducible layouts, server-only workflows, and verification.
 
 On the server, run `undertow init`, then `sudo undertow server`. On an internal network host:
 

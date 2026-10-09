@@ -217,6 +217,33 @@ func TestClientSavedRouteCanBeDisabledAndReenabled(t *testing.T) {
 	}
 }
 
+func TestArchivedAgentRemovesSavedClientRoute(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "routes.json")
+	route := control.AcceptedRoute{Prefix: "10.44.0.0/16", AgentID: "agent-a"}
+	if err := saveClientRoutes(path, []control.AcceptedRoute{route}); err != nil {
+		t.Fatal(err)
+	}
+	device := &recordingRouteDevice{}
+	client := &liveClientConsole{device: device, sessionID: 7, routeFile: path, routes: []control.AcceptedRoute{route}, active: map[string]bool{route.Prefix: true}, global: make(map[string]bool)}
+	client.request = func(_ context.Context, method, path string, _ any) ([]byte, error) {
+		switch {
+		case method == http.MethodGet && path == "/v1/status":
+			return json.Marshal(map[string]any{"agents": []map[string]any{{"id": "agent-a", "archived": true, "online": false}}})
+		case method == http.MethodDelete && strings.HasPrefix(path, "/v1/clients/7/routes?"):
+			return nil, nil
+		default:
+			return nil, fmt.Errorf("unexpected request %s %s", method, path)
+		}
+	}
+	if err := client.reconcileRouteAvailability(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := loadClientRoutes(path)
+	if err != nil || len(saved) != 0 || len(client.routes) != 0 || client.active[route.Prefix] || !reflect.DeepEqual(device.deleted, []string{route.Prefix}) {
+		t.Fatalf("archive cleanup: saved=%+v routes=%+v active=%v device=%+v err=%v", saved, client.routes, client.active, device, err)
+	}
+}
+
 func TestSleepingAgentRouteIsSavedPendingThenInstalledOnCallback(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "routes.json")
 	device := &recordingRouteDevice{}
