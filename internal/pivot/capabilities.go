@@ -26,9 +26,49 @@ type Capabilities struct {
 }
 
 type CapabilityReport struct {
-	Supported            []string `json:"supported"`
-	Allowed              []string `json:"allowed"`
+	Supported            []string `json:"supported,omitempty"`
+	Allowed              []string `json:"allowed,omitempty"`
+	Denied               []string `json:"denied,omitempty"`
 	TokenStoreInstanceID string   `json:"token_store_instance_id,omitempty"`
+}
+
+// Inventory has a small control-frame budget. Send one complete capability
+// list, plus a small denied delta if any capabilities are disabled.
+func (r CapabilityReport) CompactForInventory() CapabilityReport {
+	allowed := make(map[string]bool, len(r.Allowed))
+	for _, name := range r.Allowed {
+		allowed[name] = true
+		if !containsCapability(r.Supported, name) {
+			return r
+		}
+	}
+	if len(r.Supported) == len(r.Allowed) {
+		r.Supported = nil
+		return r
+	}
+	for _, name := range r.Supported {
+		if !allowed[name] {
+			r.Denied = append(r.Denied, name)
+		}
+	}
+	r.Allowed = nil
+	return r
+}
+
+func (r *CapabilityReport) ExpandInventory() {
+	if r == nil {
+		return
+	}
+	if len(r.Supported) == 0 && len(r.Allowed) != 0 {
+		r.Supported = append([]string(nil), r.Allowed...)
+	} else if len(r.Denied) != 0 && len(r.Allowed) == 0 {
+		for _, name := range r.Supported {
+			if !containsCapability(r.Denied, name) {
+				r.Allowed = append(r.Allowed, name)
+			}
+		}
+	}
+	r.Denied = nil
 }
 
 func DefaultCapabilities() Capabilities {

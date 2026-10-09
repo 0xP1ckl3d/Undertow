@@ -47,7 +47,7 @@ func SendInventoryWithPolicy(ctx context.Context, streamMux *mux.Mux, explicit [
 		SleepSupported       bool                   `json:"sleep_supported"`
 		SleepProtocolVersion int                    `json:"sleep_protocol_version"`
 		ArtifactIdentity
-	}{Hostname: hostname, OS: runtime.GOOS, Arch: runtime.GOARCH, Privilege: currentPrivilege(), Capabilities: caps.Report(), Sleep: sleep, SleepSupported: true, SleepProtocolVersion: 2, ArtifactIdentity: identity}
+	}{Hostname: hostname, OS: runtime.GOOS, Arch: runtime.GOARCH, Privilege: currentPrivilege(), Capabilities: caps.Report().CompactForInventory(), Sleep: sleep, SleepSupported: true, SleepProtocolVersion: 2, ArtifactIdentity: identity}
 	seen := make(map[string]bool)
 	for _, raw := range explicit {
 		prefix, err := netip.ParsePrefix(raw)

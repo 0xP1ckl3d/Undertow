@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"reflect"
-	"runtime"
 	"sync"
 	"unsafe"
 
@@ -18,7 +17,6 @@ import (
 )
 
 var createProcessWithTokenW = windows.NewLazySystemDLL("advapi32.dll").NewProc("CreateProcessWithTokenW")
-var errSelectedTokenExtendedStartupUnsupported = errors.New("selected-token fallback requires plain startup information")
 
 type tokenProcessCreator func(windows.Token, *uint16, []uint16, bool, uint32, *uint16, *uint16, *windows.StartupInfo, *windows.ProcessInformation) error
 
@@ -28,81 +26,6 @@ func rawCreateProcessAsUser(token windows.Token, application *uint16, commandLin
 }
 
 var createProcessAsUserCall tokenProcessCreator = rawCreateProcessAsUser
-
-func selectedTokenSession(token windows.Token) (uint32, error) {
-	var session, size uint32
-	if err := windows.GetTokenInformation(token, windows.TokenSessionId, (*byte)(unsafe.Pointer(&session)), uint32(unsafe.Sizeof(session)), &size); err != nil {
-		return 0, err
-	}
-	return session, nil
-}
-
-var createProcessAsUserImpersonatedCall tokenProcessCreator = func(token windows.Token, application *uint16, commandLine []uint16, inherit bool, flags uint32, environment *uint16, directory *uint16, startup *windows.StartupInfo, info *windows.ProcessInformation) error {
-	// CreateProcessAsUser checks privileges on the caller's effective token. A
-	// service/admin agent may hold SeImpersonate while an imported LocalSystem
-	// token holds SeAssignPrimaryToken and SeIncreaseQuota. Use that selected
-	// identity only on this locked operation thread, then restore it before any
-	// process I/O or other agent work continues.
-	runtime.LockOSThread()
-	unlock := true
-	defer func() {
-		if unlock {
-			runtime.UnlockOSThread()
-		}
-	}()
-	var prior windows.Token
-	err := windows.OpenThreadToken(windows.CurrentThread(), windows.TOKEN_QUERY|windows.TOKEN_IMPERSONATE, true, &prior)
-	if err != nil && !errors.Is(err, windows.ERROR_NO_TOKEN) {
-		return fmt.Errorf("capture process-launch thread identity: %w", err)
-	}
-	if prior != 0 {
-		defer prior.Close()
-	}
-	result, _, impersonateErr := impersonateLoggedOnUser.Call(uintptr(token))
-	if result == 0 {
-		return fmt.Errorf("activate selected token for process launch: %w", impersonateErr)
-	}
-	// CreateProcessAsUser cannot inherit handles across Terminal Services
-	// sessions. CreateProcessWithToken always launches in the caller's session,
-	// so preserve that same operation behavior by moving only this leased token
-	// duplicate to the agent process session. Imported LocalSystem service tokens
-	// commonly originate in session 0 while an interactive agent does not.
-	var processSession uint32
-	var createErr error
-	if err = windows.ProcessIdToSessionId(uint32(os.Getpid()), &processSession); err != nil {
-		createErr = fmt.Errorf("read agent process session: %w", err)
-	} else {
-		tokenSession, sessionErr := selectedTokenSession(token)
-		if sessionErr != nil {
-			createErr = fmt.Errorf("read selected token session: %w", sessionErr)
-		} else if tokenSession != processSession {
-			if err = windows.SetTokenInformation(token, windows.TokenSessionId, (*byte)(unsafe.Pointer(&processSession)), uint32(unsafe.Sizeof(processSession))); err != nil {
-				createErr = fmt.Errorf("align selected token with agent session: %w", err)
-			}
-		}
-	}
-	if createErr == nil {
-		createErr = rawCreateProcessAsUser(token, application, commandLine, inherit, flags, environment, directory, startup, info)
-	}
-	if prior != 0 {
-		err = windows.SetThreadToken(nil, prior)
-	} else {
-		err = windows.RevertToSelf()
-	}
-	if err != nil {
-		// Keep the OS thread locked so the runtime retires it with this goroutine
-		// instead of returning a contaminated thread to the shared pool.
-		unlock = false
-		if createErr == nil && info.Process != 0 {
-			_ = windows.TerminateProcess(info.Process, 1)
-			_ = windows.CloseHandle(info.Thread)
-			_ = windows.CloseHandle(info.Process)
-			*info = windows.ProcessInformation{}
-		}
-		return fmt.Errorf("restore process-launch thread identity: %w", err)
-	}
-	return createErr
-}
 
 var createProcessWithTokenCall tokenProcessCreator = func(token windows.Token, application *uint16, commandLine []uint16, _ bool, flags uint32, environment *uint16, directory *uint16, startup *windows.StartupInfo, info *windows.ProcessInformation) error {
 	line := append([]uint16(nil), commandLine...)
@@ -118,47 +41,7 @@ var createProcessWithTokenCall tokenProcessCreator = func(token windows.Token, a
 }
 
 func createProcessWithSelectedToken(token windows.Token, application *uint16, commandLine []uint16, inherit bool, flags uint32, environment *uint16, directory *uint16, startup *windows.StartupInfo, info *windows.ProcessInformation) error {
-	// Ask for session-adjustment rights only on this short-lived launch copy.
-	// Candidate, stored, and ordinary operation duplicates retain the minimum
-	// documented access mask, so a token whose DACL denies session adjustment is
-	// still discoverable and usable for impersonation or same-session launches.
-	processToken := token
-	var launchToken windows.Token
-	if windows.DuplicateTokenEx(token, windows.TOKEN_QUERY|windows.TOKEN_DUPLICATE|windows.TOKEN_ASSIGN_PRIMARY|windows.TOKEN_IMPERSONATE|windows.TOKEN_ADJUST_SESSIONID, nil, windows.SecurityImpersonation, windows.TokenPrimary, &launchToken) == nil {
-		processToken = launchToken
-		defer launchToken.Close()
-	}
-	err := createProcessAsUserCall(processToken, application, commandLine, inherit, flags, environment, directory, startup, info)
-	if !errors.Is(err, windows.ERROR_PRIVILEGE_NOT_HELD) {
-		return err
-	}
-	impersonatedErr := createProcessAsUserImpersonatedCall(processToken, application, commandLine, inherit, flags, environment, directory, startup, info)
-	if impersonatedErr == nil {
-		return nil
-	}
-	if flags&windows.EXTENDED_STARTUPINFO_PRESENT != 0 && !inherit {
-		// ConPTY is an extended startup attribute and cannot cross the Secondary
-		// Logon fallback. The interactive caller retries through its pipe-backed
-		// terminal, which still launches under the selected primary token.
-		return errSelectedTokenExtendedStartupUnsupported
-	}
-	// CreateProcessWithTokenW is the documented alternative for callers that
-	// hold SeImpersonatePrivilege but not the privileges required by
-	// CreateProcessAsUserW. Secondary Logon rejects extended startup attributes,
-	// so use the same inheritable stdio handles through a plain STARTUPINFO.
-	// Failure remains explicit; process identity is never substituted with the
-	// agent's own token.
-	fallbackStartup := *startup
-	fallbackStartup.Cb = uint32(unsafe.Sizeof(windows.StartupInfo{}))
-	fallbackFlags := flags &^ windows.EXTENDED_STARTUPINFO_PRESENT
-	if environment == nil {
-		fallbackFlags &^= windows.CREATE_UNICODE_ENVIRONMENT
-	}
-	fallbackErr := createProcessWithTokenCall(processToken, application, commandLine, inherit, fallbackFlags, environment, directory, &fallbackStartup, info)
-	if fallbackErr != nil {
-		return fmt.Errorf("launch with selected token: CreateProcessAsUserW: %v; selected-identity CreateProcessAsUserW: %v; CreateProcessWithTokenW: %w", err, impersonatedErr, fallbackErr)
-	}
-	return nil
+	return launchWithPreparedCaller(token, application, commandLine, inherit, flags, environment, directory, startup, info)
 }
 
 type selectedTokenProcess struct {
@@ -276,6 +159,9 @@ func startOperationCommand(ctx context.Context, command *exec.Cmd) (operationPro
 			return nil, err
 		}
 		return &execOperationProcess{command: command}, nil
+	}
+	if !operationTokenCanLaunch(ctx) {
+		return nil, errors.New("selected authentication context supports impersonation but lacks process-launch token rights")
 	}
 	if len(command.Args) == 0 || command.Path == "" {
 		return nil, errors.New("selected-token process has no executable")

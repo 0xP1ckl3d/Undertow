@@ -21,6 +21,7 @@ type Metadata struct {
 	Domain             string    `json:"domain"`
 	User               string    `json:"user"`
 	TokenType          string    `json:"token_type"`
+	ProcessLaunchReady bool      `json:"process_launch_ready"`
 	ImpersonationLevel string    `json:"impersonation_level"`
 	IntegrityLevel     string    `json:"integrity_level"`
 	SessionID          uint32    `json:"session_id"`

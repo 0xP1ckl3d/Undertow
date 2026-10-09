@@ -895,6 +895,7 @@ func (m *Manager) UpdateInventory(id string, streamMux *mux.Mux, b []byte) {
 	if err := info.Sleep.Validate(); err != nil {
 		return
 	}
+	info.Capabilities.ExpandInventory()
 	if state := m.Get(id); state == streamMux {
 		m.mu.RLock()
 		bound := ""

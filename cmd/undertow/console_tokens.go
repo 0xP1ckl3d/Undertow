@@ -122,7 +122,7 @@ func runConsoleTokens(ctx context.Context, out io.Writer, call consoleCaller, ar
 		fmt.Fprintln(out, "Candidates expire after two minutes or the next discovery.")
 	}
 	for _, m := range items {
-		fmt.Fprintf(out, "%s  %s  domain=%s user=%s type=%s impersonation=%s integrity=%s session=%d elevated=%t elevation=%s source=%s created=%s\n", m.ID, m.Identity, m.Domain, m.User, m.TokenType, m.ImpersonationLevel, m.IntegrityLevel, m.SessionID, m.Elevated, m.ElevationType, m.Source, m.CreatedAt.Format("2006-01-02T15:04:05Z"))
+		fmt.Fprintf(out, "%s  %s  domain=%s user=%s type=%s process_launch_ready=%t impersonation=%s integrity=%s session=%d elevated=%t elevation=%s source=%s created=%s\n", m.ID, m.Identity, m.Domain, m.User, m.TokenType, m.ProcessLaunchReady, m.ImpersonationLevel, m.IntegrityLevel, m.SessionID, m.Elevated, m.ElevationType, m.Source, m.CreatedAt.Format("2006-01-02T15:04:05Z"))
 	}
 	if len(items) == 0 {
 		fmt.Fprintln(out, "No contexts returned.")

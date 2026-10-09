@@ -16,19 +16,47 @@ import (
 
 type WindowsBackend struct{}
 type WindowsToken struct {
-	handle windows.Token
-	source string
+	handle      windows.Token
+	source      string
+	launchReady bool
 }
 
 func (t *WindowsToken) Native() windows.Token { return t.handle }
+func (t *WindowsToken) CanLaunch() bool       { return t.launchReady }
 func (t *WindowsToken) Close() error          { return t.handle.Close() }
+
+const processLaunchAccess = windows.TOKEN_QUERY | windows.TOKEN_DUPLICATE | windows.TOKEN_ASSIGN_PRIMARY | windows.TOKEN_IMPERSONATE | windows.TOKEN_ADJUST_DEFAULT
+const threadTokenAccess = windows.TOKEN_QUERY | windows.TOKEN_DUPLICATE | windows.TOKEN_IMPERSONATE
+
 func (t *WindowsToken) Duplicate() (Token, error) {
 	var h windows.Token
-	err := windows.DuplicateTokenEx(t.handle, windows.TOKEN_QUERY|windows.TOKEN_DUPLICATE|windows.TOKEN_ASSIGN_PRIMARY|windows.TOKEN_IMPERSONATE, nil, windows.SecurityImpersonation, windows.TokenPrimary, &h)
+	ready := t.launchReady
+	var err error
+	if ready {
+		err = windows.DuplicateTokenEx(t.handle, windows.TOKEN_ALL_ACCESS, nil, windows.SecurityImpersonation, windows.TokenPrimary, &h)
+		if err != nil {
+			err = windows.DuplicateTokenEx(t.handle, processLaunchAccess, nil, windows.SecurityImpersonation, windows.TokenPrimary, &h)
+		}
+	} else {
+		err = windows.DuplicateTokenEx(t.handle, threadTokenAccess, nil, windows.SecurityImpersonation, windows.TokenPrimary, &h)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("duplicate authentication token: %w", err)
 	}
-	return &WindowsToken{handle: h, source: t.source}, nil
+	return &WindowsToken{handle: h, source: t.source, launchReady: ready}, nil
+}
+
+func duplicateCandidate(h windows.Token, source string) (*WindowsToken, error) {
+	original := &WindowsToken{handle: h, source: source, launchReady: true}
+	if copied, err := original.Duplicate(); err == nil {
+		return copied.(*WindowsToken), nil
+	}
+	original.launchReady = false
+	copied, err := original.Duplicate()
+	if err != nil {
+		return nil, err
+	}
+	return copied.(*WindowsToken), nil
 }
 func tokenUint(t windows.Token, class uint32) (uint32, error) {
 	var v, n uint32
@@ -106,7 +134,7 @@ func (t *WindowsToken) Metadata() (Metadata, error) {
 	if domain != "" {
 		identity = domain + "\\" + user
 	}
-	return Metadata{Identity: identity, Domain: domain, User: user, TokenType: tokenType, ImpersonationLevel: level, IntegrityLevel: integrity, SessionID: session, Elevated: elevated != 0, ElevationType: elevations[elevation], Source: t.source}, nil
+	return Metadata{Identity: identity, Domain: domain, User: user, TokenType: tokenType, ProcessLaunchReady: t.launchReady, ImpersonationLevel: level, IntegrityLevel: integrity, SessionID: session, Elevated: elevated != 0, ElevationType: elevations[elevation], Source: t.source}, nil
 }
 
 // Discovery uses ordinary process-token access. It does not enable privileges,
@@ -115,12 +143,15 @@ func (WindowsBackend) Discover(ctx context.Context) ([]Token, error) {
 	// Always include the original agent identity before the bounded process
 	// snapshot, even on hosts with hundreds of accessible process tokens.
 	var own windows.Token
-	if err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY|windows.TOKEN_DUPLICATE, &own); err != nil {
+	err := windows.OpenProcessToken(windows.CurrentProcess(), windows.MAXIMUM_ALLOWED, &own)
+	if err != nil {
+		err = windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY|windows.TOKEN_DUPLICATE, &own)
+	}
+	if err != nil {
 		return nil, fmt.Errorf("open agent process token: %w", err)
 	}
-	original := &WindowsToken{handle: own, source: "agent process"}
-	duplicate, err := original.Duplicate()
-	_ = original.Close()
+	duplicate, err := duplicateCandidate(own, "agent process")
+	_ = own.Close()
 	if err != nil {
 		return nil, err
 	}
@@ -138,19 +169,24 @@ func (WindowsBackend) Discover(ctx context.Context) ([]Token, error) {
 		if ctx.Err() != nil {
 			return result, ctx.Err()
 		}
-		process, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, entry.ProcessID)
-		if err == nil {
-			var h windows.Token
-			if entry.ProcessID != uint32(os.Getpid()) && windows.OpenProcessToken(process, windows.TOKEN_QUERY|windows.TOKEN_DUPLICATE, &h) == nil {
-				source := fmt.Sprintf("process:%d (%s)", entry.ProcessID, windows.UTF16ToString(entry.ExeFile[:]))
-				original := &WindowsToken{handle: h, source: source}
-				dup, err := original.Duplicate()
-				_ = h.Close()
-				if err == nil {
-					result = append(result, dup)
+		if entry.ProcessID != uint32(os.Getpid()) {
+			process, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, entry.ProcessID)
+			if err == nil {
+				var h windows.Token
+				openErr := windows.OpenProcessToken(process, windows.MAXIMUM_ALLOWED, &h)
+				if openErr != nil {
+					openErr = windows.OpenProcessToken(process, windows.TOKEN_QUERY|windows.TOKEN_DUPLICATE, &h)
 				}
+				if openErr == nil {
+					source := fmt.Sprintf("process:%d (%s)", entry.ProcessID, windows.UTF16ToString(entry.ExeFile[:]))
+					dup, err := duplicateCandidate(h, source)
+					_ = h.Close()
+					if err == nil {
+						result = append(result, dup)
+					}
+				}
+				_ = windows.CloseHandle(process)
 			}
-			_ = windows.CloseHandle(process)
 		}
 		if len(result) >= Limit {
 			break
@@ -203,7 +239,6 @@ func (WindowsBackend) Logon(ctx context.Context, r LogonRequest) (Token, error) 
 	if result == 0 {
 		return nil, fmt.Errorf("Windows logon failed: %w", err)
 	}
-	original := &WindowsToken{handle: h, source: "logon:" + r.LogonType}
-	defer original.Close()
-	return original.Duplicate()
+	defer h.Close()
+	return duplicateCandidate(h, "logon:"+r.LogonType)
 }

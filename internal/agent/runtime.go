@@ -200,10 +200,15 @@ func Run(ctx context.Context, c Config, ready func() error) error {
 			if c.Packaged {
 				metadata.ReconnectPolicy = "progressive"
 			}
-			inventoryReady := true
 			if err := control.SendInventoryWithPolicy(ctx, streamMux, c.AdvertisedRoutes, caps, metadata, c.Sleep); err != nil {
-				inventoryReady = false
 				log.Printf("inventory: %v", err)
+				streamMux.Close()
+				conn.Close()
+				if !waitReconnect(ctx, deployment.Jitter(reconnectDelayWithProfile(c.Packaged, failures, c.Deployment), c.Deployment.Resolved().Reconnect.JitterPercent)) {
+					return nil
+				}
+				failures++
+				continue
 			}
 			var shutdown func()
 			if c.Packaged {
@@ -263,7 +268,7 @@ func Run(ctx context.Context, c Config, ready func() error) error {
 				}
 				continue
 			}
-			failures = failureIndexAfterSessionWithProfile(failures, time.Since(started), inventoryReady, c.Deployment)
+			failures = failureIndexAfterSessionWithProfile(failures, time.Since(started), true, c.Deployment)
 			log.Print("agent session ended; reconnecting")
 		}
 		if !waitReconnect(ctx, deployment.Jitter(reconnectDelayWithProfile(c.Packaged, failures, c.Deployment), c.Deployment.Resolved().Reconnect.JitterPercent)) {

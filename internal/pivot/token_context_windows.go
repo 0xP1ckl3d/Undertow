@@ -20,6 +20,10 @@ func operationToken(ctx context.Context) windows.Token {
 	}
 	return t.Native()
 }
+func operationTokenCanLaunch(ctx context.Context) bool {
+	t, _ := ctx.Value(tokenLeaseKey{}).(*authcontext.WindowsToken)
+	return t != nil && t.CanLaunch()
+}
 func configureTokenProcess(ctx context.Context, command *exec.Cmd) {
 	if t := operationToken(ctx); t != 0 {
 		if command.SysProcAttr == nil {
