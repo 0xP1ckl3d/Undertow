@@ -127,6 +127,17 @@ func TestWindowsDeploymentPreflightAcceptsOptionalCredentialForms(t *testing.T) 
 	}
 }
 
+func TestWindowsDeploymentPreflightCarriesTokenContext(t *testing.T) {
+	store, artifact := deploymentArtifactStore(t)
+	executor := &windowsDeploymentExecutor{distribution: &agentDistribution{store: store}}
+	id := strings.Repeat("a", 32)
+	record := control.DeploymentRecord{ID: "deployment-one", SourceAgentID: "source", Target: "app01", ArtifactID: artifact.ID, ArtifactSHA256: artifact.SHA256, Method: "wmi", Context: "current-user"}
+	plan, err := executor.Preflight(context.Background(), record, control.DeploymentStartRequest{TokenContextID: id})
+	if err != nil || plan.TokenContextID != id || plan.Credential != nil {
+		t.Fatal("token context was not carried independently", plan, err)
+	}
+}
+
 func TestWindowsDeploymentPreflightAcceptsNTHashForSupportedMethods(t *testing.T) {
 	store, artifact := deploymentArtifactStore(t)
 	executor := &windowsDeploymentExecutor{distribution: &agentDistribution{store: store}}

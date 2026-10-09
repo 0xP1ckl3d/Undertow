@@ -241,21 +241,21 @@ func serveScript(ctx context.Context, stream *mux.Stream) {
 	var writeMu sync.Mutex
 	command.Stdout = framedOutput{stream: stream, mu: &writeMu, kind: InteractiveOutput}
 	command.Stderr = framedOutput{stream: stream, mu: &writeMu, kind: InteractiveStderr}
-	if err := command.Start(); err != nil {
+	process, err := startOperationCommand(commandCtx, command)
+	if err != nil {
 		RejectInteractive(stream, err)
 		return
 	}
 	if err := writeInteractiveFrame(stream, InteractiveReady, nil); err != nil {
 		cancel()
-		_ = command.Wait()
+		_ = process.Wait()
 		return
 	}
-	err = command.Wait()
+	err = process.Wait()
 	code := 0
 	if err != nil {
-		var exit *exec.ExitError
-		if errors.As(err, &exit) {
-			code = exit.ExitCode()
+		if exitCode, ok := operationExitCode(err); ok {
+			code = exitCode
 		} else {
 			code = -1
 			writeMu.Lock()

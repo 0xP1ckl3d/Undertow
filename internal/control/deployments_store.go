@@ -10,6 +10,7 @@ import (
 // DeploymentRecord is the server-owned intent and result of one Windows deployment.
 // It contains identifiers and status only; credentials and artifact bytes live elsewhere.
 type DeploymentRecord struct {
+	TokenContextID     string     `json:"token_context_id,omitempty"`
 	ID                 string     `json:"id"`
 	SourceAgentID      string     `json:"source_agent_id"`
 	Target             string     `json:"target"`

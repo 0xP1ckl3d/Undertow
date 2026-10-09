@@ -26,8 +26,9 @@ type Capabilities struct {
 }
 
 type CapabilityReport struct {
-	Supported []string `json:"supported"`
-	Allowed   []string `json:"allowed"`
+	Supported            []string `json:"supported"`
+	Allowed              []string `json:"allowed"`
+	TokenStoreInstanceID string   `json:"token_store_instance_id,omitempty"`
 }
 
 func DefaultCapabilities() Capabilities {
@@ -90,6 +91,7 @@ func (c Capabilities) Report() CapabilityReport {
 		report.Supported = append(report.Supported, "tokens")
 		if c.TokenContexts {
 			report.Allowed = append(report.Allowed, "tokens")
+			report.TokenStoreInstanceID = agentTokens.InstanceID()
 		}
 	}
 	return report

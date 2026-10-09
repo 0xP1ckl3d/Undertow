@@ -102,7 +102,10 @@ control connection. Profile and payload views never show enrollment secrets.
   jump create [SOURCE_AGENT] TARGET ARTIFACT_ID METHOD CONTEXT
   jump show ID                       Inspect the request, progress, and result.
   jump prepare ID                    Validate the source snapshot and Windows build.
-  jump start ID [INSTALL_PATH] [--username USER (--password-file FILE | --nt-hash-file FILE)]
+  jump start ID [INSTALL_PATH] [--token-context ID|process]
+                                      Use a frozen authentication context for delivery and method execution.
+  jump start ID [INSTALL_PATH] --username USER (--password-file FILE | --nt-hash-file FILE)
+                                      Use separate supplied credentials; cannot be combined with a token context.
   jump link ID AGENT_ID              Associate a matching enrolled agent.
 Methods: winrm, wmi, service-control, scheduled-task.
 Contexts: WinRM and WMI use current-user; Service Control uses local-system;

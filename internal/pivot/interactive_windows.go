@@ -96,9 +96,9 @@ func (p *interactivePipeTerminal) Close() error {
 	return p.output.Close()
 }
 
-type interactiveCommandProcess struct{ command *exec.Cmd }
+type interactiveCommandProcess struct{ process operationProcess }
 
-func (p *interactiveCommandProcess) Wait() error { return p.command.Wait() }
+func (p *interactiveCommandProcess) Wait() error { return p.process.Wait() }
 
 var updateProcThreadAttribute = windows.NewLazySystemDLL("kernel32.dll").NewProc("UpdateProcThreadAttribute")
 var createProcessWithLogonW = windows.NewLazySystemDLL("advapi32.dll").NewProc("CreateProcessWithLogonW")
@@ -225,7 +225,7 @@ func startInteractiveProcess(ctx context.Context, request InteractiveRequest) (i
 	}
 	var processInfo windows.ProcessInformation
 	if token := operationToken(ctx); token != 0 {
-		err = windows.CreateProcessAsUser(token, app, &line[0], nil, nil, false, windows.EXTENDED_STARTUPINFO_PRESENT, nil, nil, &startup.StartupInfo, &processInfo)
+		err = createProcessWithSelectedToken(token, app, line, false, windows.EXTENDED_STARTUPINFO_PRESENT, nil, nil, &startup.StartupInfo, &processInfo)
 	} else {
 		err = windows.CreateProcess(app, &line[0], nil, nil, false, windows.EXTENDED_STARTUPINFO_PRESENT, nil, nil, &startup.StartupInfo, &processInfo)
 	}
@@ -271,7 +271,8 @@ func startPipedInteractiveProcess(ctx context.Context, path string, args []strin
 	configureExecProcess(command)
 	configureTokenProcess(ctx, command)
 	command.Stdin, command.Stdout, command.Stderr = inputRead, outputWrite, outputWrite
-	if err := command.Start(); err != nil {
+	process, err := startOperationCommand(ctx, command)
+	if err != nil {
 		_ = inputRead.Close()
 		_ = inputWrite.Close()
 		_ = outputRead.Close()
@@ -281,7 +282,7 @@ func startPipedInteractiveProcess(ctx context.Context, path string, args []strin
 	_ = inputRead.Close()
 	_ = outputWrite.Close()
 	terminal := &interactivePipeTerminal{input: inputWrite, output: outputRead}
-	return &interactiveCommandProcess{command: command}, terminal, func(uint16, uint16) error { return nil }, nil
+	return &interactiveCommandProcess{process: process}, terminal, func(uint16, uint16) error { return nil }, nil
 }
 
 func startCredentialedPipedProcess(ctx context.Context, path string, args []string, credential *WindowsCredential) (interactiveProcess, io.ReadWriteCloser, func(uint16, uint16) error, error) {

@@ -22,15 +22,16 @@ import (
 const FileDestination = "file.undertow.invalid:0"
 
 type FileMessage struct {
-	AgentID    string             `json:"agent_id,omitempty"`
-	Operation  string             `json:"operation,omitempty"`
-	Path       string             `json:"path,omitempty"`
-	Size       int64              `json:"size,omitempty"`
-	OK         bool               `json:"ok,omitempty"`
-	Error      string             `json:"error,omitempty"`
-	SHA256     string             `json:"sha256,omitempty"`
-	Direct     bool               `json:"direct,omitempty"`
-	Credential *WindowsCredential `json:"credential,omitempty"`
+	TokenContextID string             `json:"token_context_id,omitempty"`
+	AgentID        string             `json:"agent_id,omitempty"`
+	Operation      string             `json:"operation,omitempty"`
+	Path           string             `json:"path,omitempty"`
+	Size           int64              `json:"size,omitempty"`
+	OK             bool               `json:"ok,omitempty"`
+	Error          string             `json:"error,omitempty"`
+	SHA256         string             `json:"sha256,omitempty"`
+	Direct         bool               `json:"direct,omitempty"`
+	Credential     *WindowsCredential `json:"credential,omitempty"`
 }
 
 type TransferProgress struct {
@@ -184,7 +185,7 @@ func transferFileProgress(parent context.Context, session *mux.Mux, agentID, ope
 		case <-done:
 		}
 	}()
-	if err := WriteFileMessage(stream, FileMessage{AgentID: agentID, Operation: operation, Path: remotePath, Size: size, Direct: direct, Credential: credential}); err != nil {
+	if err := WriteFileMessage(stream, FileMessage{TokenContextID: TokenContextID(parent), AgentID: agentID, Operation: operation, Path: remotePath, Size: size, Direct: direct, Credential: credential}); err != nil {
 		return result, err
 	}
 	if operation == "download" || operation == "screenshot" {
@@ -294,6 +295,8 @@ func serveFile(ctx context.Context, stream *mux.Stream, caps Capabilities) {
 	}
 	if request.Operation == "upload" && !caps.Upload {
 		fileError(stream, reader, errors.New("agent upload is disabled"))
+	} else if request.Operation == "upload" && request.Credential != nil && request.TokenContextID != "" && request.TokenContextID != "process" {
+		fileError(stream, reader, errors.New("choose a token context or supplied Jump credentials"))
 	} else if request.Operation == "upload" && request.Credential != nil && !caps.JumpCredentials {
 		fileError(stream, reader, errors.New("agent supplied Jump credentials are disabled"))
 	} else if request.Operation == "upload" && request.Credential != nil && request.Credential.UsesNTHash() && !caps.JumpNTHash {
@@ -303,7 +306,7 @@ func serveFile(ctx context.Context, stream *mux.Stream, caps Capabilities) {
 	} else if request.Operation == "screenshot" && (!caps.Download || !caps.HostOps) {
 		fileError(stream, reader, errors.New("agent screenshot requires download and hostops capabilities"))
 	} else if request.Operation == "upload" && request.Size >= 0 {
-		serveUpload(stream, reader, request)
+		serveUpload(ctx, stream, reader, request)
 	} else if request.Operation == "download" {
 		serveDownload(stream, request)
 	} else if request.Operation == "screenshot" {
@@ -335,7 +338,7 @@ func serveScreenshot(stream *mux.Stream, request FileMessage) {
 	_ = stream.CloseWrite()
 }
 
-func serveUpload(stream *mux.Stream, reader *bufio.Reader, request FileMessage) {
+func serveUpload(ctx context.Context, stream *mux.Stream, reader *bufio.Reader, request FileMessage) {
 	if request.Credential != nil {
 		credential := request.Credential
 		request.Credential = nil
@@ -348,7 +351,19 @@ func serveUpload(stream *mux.Stream, reader *bufio.Reader, request FileMessage) 
 		}
 		return
 	}
+	ctx, release, err := acquireTokenContext(ctx, request.TokenContextID)
+	if err != nil {
+		fileError(stream, reader, err)
+		return
+	}
+	defer release()
+	restore, err := enterTokenThread(ctx)
+	if err != nil {
+		fileError(stream, reader, err)
+		return
+	}
 	serveUploadContent(stream, reader, request)
+	_ = restore()
 }
 
 func serveUploadContent(stream *mux.Stream, reader *bufio.Reader, request FileMessage) {

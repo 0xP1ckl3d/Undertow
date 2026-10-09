@@ -107,6 +107,10 @@ func TestDiscoveryReplacementExpiryAndFailureCleanup(t *testing.T) {
 	if _, err := s.Import(second[0].ID); err == nil {
 		t.Fatal("expired candidate accepted")
 	}
+	expired := s.Candidates()
+	if len(expired) != 1 || expired[0].State != "expired" || expired[0].ExpiresAt.IsZero() {
+		t.Fatal("expired candidate metadata was not retained", expired)
+	}
 	if b.closes.Load() != 2 {
 		t.Fatal("candidate handles not closed", b.closes.Load())
 	}

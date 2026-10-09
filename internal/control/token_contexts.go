@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"undertow/internal/authcontext"
 	"undertow/internal/pivot"
@@ -59,6 +60,42 @@ func readTokenOperationLine(reader *bufio.Reader, selected string) ([]byte, erro
 type tokenDefaultKey struct {
 	session uint64
 	agent   string
+}
+
+type tokenSnapshot struct {
+	storeInstanceID string
+	contexts        []authcontext.Metadata
+	candidates      []authcontext.Metadata
+}
+
+func cloneTokenMetadata(items []authcontext.Metadata) []authcontext.Metadata {
+	return append([]authcontext.Metadata(nil), items...)
+}
+
+func (m *Manager) cachedTokenResponse(agent string) (pivot.TokenResponse, bool) {
+	m.mu.RLock()
+	snapshot, ok := m.tokenSnapshots[agent]
+	m.mu.RUnlock()
+	if !ok {
+		return pivot.TokenResponse{}, false
+	}
+	result := pivot.TokenResponse{StoreInstanceID: snapshot.storeInstanceID, Contexts: cloneTokenMetadata(snapshot.contexts), Candidates: cloneTokenMetadata(snapshot.candidates)}
+	now := time.Now()
+	for i := range result.Candidates {
+		if !result.Candidates[i].ExpiresAt.IsZero() && !now.Before(result.Candidates[i].ExpiresAt) {
+			result.Candidates[i].State = "expired"
+		}
+	}
+	return result, true
+}
+
+func (m *Manager) rememberTokenResponse(agent string, result pivot.TokenResponse) {
+	m.mu.Lock()
+	if m.tokenSnapshots == nil {
+		m.tokenSnapshots = make(map[string]tokenSnapshot)
+	}
+	m.tokenSnapshots[agent] = tokenSnapshot{storeInstanceID: result.StoreInstanceID, contexts: cloneTokenMetadata(result.Contexts), candidates: cloneTokenMetadata(result.Candidates)}
+	m.mu.Unlock()
 }
 
 type tokenAuditKey struct{}
@@ -150,6 +187,59 @@ func TokenOperationBody(ctx context.Context, path string, body any) (any, error)
 // Resolve at submission time, before audit and enqueue. The queue freezes the
 // chosen ID; a subsequent default change never changes an accepted operation.
 func (m *Manager) bindTokenOperation(r *http.Request) (*http.Request, error) {
+	parts := strings.Split(strings.SplitN(r.URL.Path, "?", 2)[0], "/")
+	if r.Method == http.MethodPost && len(parts) == 5 && parts[1] == "v1" && parts[2] == "deployments" && parts[4] == "start" {
+		data, err := io.ReadAll(io.LimitReader(r.Body, 4097))
+		if err != nil || len(data) > 4096 {
+			return r, errors.New("deployment start request too large")
+		}
+		var body map[string]json.RawMessage
+		if json.Unmarshal(data, &body) != nil || body == nil {
+			return r, errors.New("invalid deployment start request")
+		}
+		m.mu.RLock()
+		store := m.operations
+		m.mu.RUnlock()
+		if store == nil {
+			return r, errors.New("deployment history unavailable")
+		}
+		record, err := store.Deployment(parts[3])
+		if err != nil {
+			return r, errors.New("deployment unavailable")
+		}
+		id := ""
+		rawSelection, selectionProvided := body["token_context_id"]
+		if len(rawSelection) != 0 && json.Unmarshal(rawSelection, &id) != nil {
+			return r, errors.New("invalid authentication context ID")
+		}
+		id, err = m.resolveTokenContext(r.Context(), jobOwner(r.Context()), record.SourceAgentID, id)
+		if err != nil {
+			return r, err
+		}
+		hasCredential := false
+		for _, name := range []string{"username", "password", "nt_hash"} {
+			var value string
+			if raw := body[name]; len(raw) != 0 && json.Unmarshal(raw, &value) == nil && value != "" {
+				hasCredential = true
+			}
+		}
+		if hasCredential && !selectionProvided {
+			id = "process"
+		}
+		if hasCredential && id != "" && id != "process" {
+			return r, errors.New("choose a token context or supplied Jump credentials")
+		}
+		if id != "" {
+			body["token_context_id"], _ = json.Marshal(id)
+		}
+		data, err = json.Marshal(body)
+		if err != nil {
+			return r, err
+		}
+		r = r.WithContext(pivot.WithTokenContext(r.Context(), id))
+		r.Body = io.NopCloser(bytes.NewReader(data))
+		return r, nil
+	}
 	if r.Method != http.MethodPost || !tokenOperationPath(r.URL.Path) {
 		return r, nil
 	}
@@ -185,6 +275,12 @@ func (m *Manager) bindTokenOperation(r *http.Request) (*http.Request, error) {
 }
 func (m *Manager) tokenHTTPHandlers(routes *http.ServeMux) {
 	routes.HandleFunc("GET /v1/agents/{id}/tokens", func(w http.ResponseWriter, r *http.Request) {
+		if result, ok := m.cachedTokenResponse(r.PathValue("id")); ok {
+			result.DefaultContextID = m.tokenDefault(jobOwner(r.Context()), r.PathValue("id"))
+			w.Header().Set("Cache-Control", "no-store")
+			jsonReply(w, 200, result)
+			return
+		}
 		m.manageTokenRequest(w, r, pivot.TokenRequest{Action: "list"})
 	})
 	routes.HandleFunc("POST /v1/agents/{id}/tokens", func(w http.ResponseWriter, r *http.Request) {
@@ -215,12 +311,12 @@ func (m *Manager) manageTokenRequest(w http.ResponseWriter, r *http.Request, req
 	}
 	m.mu.RLock()
 	state := m.agents[agent]
-	m.mu.RUnlock()
-	if state == nil || state.mux == nil {
-		http.Error(w, "token management requires a live connected agent; creation cannot be queued", 409)
-		return
+	info := m.offlineAgents[agent]
+	if state != nil {
+		info = state.inventory
 	}
-	if !state.inventory.Capabilities.Allows("tokens") {
+	m.mu.RUnlock()
+	if info.Capabilities == nil || !info.Capabilities.Allows("tokens") {
 		http.Error(w, "agent authentication contexts are unsupported or disabled", 409)
 		return
 	}
@@ -233,16 +329,10 @@ func (m *Manager) manageTokenRequest(w http.ResponseWriter, r *http.Request, req
 			http.Error(w, "invalid authentication context ID", 400)
 			return
 		}
-		result, err := pivot.ManageTokens(r.Context(), state.mux, pivot.TokenRequest{Action: "list"})
-		if err != nil {
-			http.Error(w, err.Error(), 409)
-			return
-		}
-		found := false
+		result, cached := m.cachedTokenResponse(agent)
+		found := !cached
 		for _, item := range result.Contexts {
-			if item.ID == request.ID {
-				found = true
-			}
+			found = found || item.ID == request.ID
 		}
 		if !found {
 			http.Error(w, "authentication context unavailable", 409)
@@ -258,12 +348,24 @@ func (m *Manager) manageTokenRequest(w http.ResponseWriter, r *http.Request, req
 		jsonReply(w, 200, result)
 		return
 	}
-	result, err := pivot.ManageTokens(r.Context(), state.mux, request)
+	releaseTurn, err := m.foregroundTurn(r.Context(), agent)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusRequestTimeout)
+		return
+	}
+	defer releaseTurn()
+	stream, err := m.openAgentForOperator(r.Context(), r.Context().Done(), agent, pivot.TokenDestination)
+	if err != nil {
+		http.Error(w, err.Error(), 409)
+		return
+	}
+	result, err := pivot.ManageTokensOnStream(r.Context(), stream, request)
 
 	if err != nil {
 		http.Error(w, err.Error(), 409)
 		return
 	}
+	m.rememberTokenResponse(agent, result)
 	if audit, _ := r.Context().Value(tokenAuditKey{}).(*tokenAuditInfo); audit != nil && result.Created != nil && authcontext.ValidID(result.Created.ID) {
 		audit.id = result.Created.ID
 	}

@@ -32,19 +32,21 @@ type DeploymentArtifact struct {
 }
 
 type DeploymentStartRequest struct {
-	Delivery    string `json:"delivery"`
-	InstallPath string `json:"install_path,omitempty"`
-	Username    string `json:"username,omitempty"`
-	Password    string `json:"password,omitempty"`
-	NTHash      string `json:"nt_hash,omitempty"`
+	TokenContextID string `json:"token_context_id,omitempty"`
+	Delivery       string `json:"delivery"`
+	InstallPath    string `json:"install_path,omitempty"`
+	Username       string `json:"username,omitempty"`
+	Password       string `json:"password,omitempty"`
+	NTHash         string `json:"nt_hash,omitempty"`
 }
 
 type DeploymentExecutionPlan struct {
-	DeliveryType string
-	DeliveryID   string
-	InstallPath  string
-	ArtifactPath string
-	Credential   *pivot.WindowsCredential
+	TokenContextID string
+	DeliveryType   string
+	DeliveryID     string
+	InstallPath    string
+	ArtifactPath   string
+	Credential     *pivot.WindowsCredential
 }
 
 type DeploymentProgress struct {
@@ -395,10 +397,20 @@ func (m *Manager) startDeployment(ctx context.Context, id string, request Deploy
 	if record.Context == "named-account" {
 		return errors.New("named-account deployments require a future credential integration")
 	}
+	selection, err := m.resolveTokenContext(ctx, jobOwner(ctx), record.SourceAgentID, request.TokenContextID)
+	if err != nil {
+		return err
+	}
+	if (request.Username != "" || request.Password != "" || request.NTHash != "") && selection != "" && selection != "process" {
+		return errors.New("choose a token context or supplied Jump credentials")
+	}
+	request.TokenContextID = selection
+	ctx = pivot.WithTokenContext(ctx, selection)
 	plan, err := executor.Preflight(ctx, record, request)
 	if err != nil {
 		return err
 	}
+	plan.TokenContextID = selection
 	if plan.Credential != nil && !sourceInfo.Capabilities.Allows("jump-credentials") {
 		return errors.New("source Windows agent does not support supplied Jump credentials; build and run a current agent first")
 	}
@@ -411,6 +423,7 @@ func (m *Manager) startDeployment(ctx context.Context, id string, request Deploy
 		}
 		item.State, item.UpdatedAt, item.Progress = "dispatching", time.Now().UTC(), "Starting Windows method"
 		item.DeliveryType, item.DeliveryID, item.InstallPath = plan.DeliveryType, plan.DeliveryID, plan.InstallPath
+		item.TokenContextID = plan.TokenContextID
 		if plan.Credential != nil {
 			item.Account = plan.Credential.Account()
 		}
@@ -425,7 +438,7 @@ func (m *Manager) startDeployment(ctx context.Context, id string, request Deploy
 		credentialAccount = plan.Credential.Account()
 		m.retainDeploymentCredential(id, plan.Credential)
 	}
-	queuedRequest := queuedJobRequest{Kind: "deployment", DeploymentID: id, Delivery: request.Delivery, InstallPath: plan.InstallPath, CredentialAccount: credentialAccount, Actor: boundActionFromContext(ctx), deferDispatch: true}
+	queuedRequest := queuedJobRequest{TokenContextID: plan.TokenContextID, Kind: "deployment", DeploymentID: id, Delivery: request.Delivery, InstallPath: plan.InstallPath, CredentialAccount: credentialAccount, Actor: boundActionFromContext(ctx), deferDispatch: true}
 	job, queued, queueErr := m.queueJobIfSleeping(0, record.SourceAgentID, queuedRequest)
 	if queueErr != nil {
 		m.clearDeploymentCredential(id)
@@ -527,12 +540,14 @@ func (m *Manager) dispatchQueuedDeployment(agentID string, stream *mux.Mux, job 
 		m.failQueuedDeploymentJob(job, versionErr.Error())
 		return
 	}
-	plan, err := executor.Preflight(ctx, record, DeploymentStartRequest{Delivery: request.Delivery, InstallPath: request.InstallPath})
+	ctx = pivot.WithTokenContext(ctx, request.TokenContextID)
+	plan, err := executor.Preflight(ctx, record, DeploymentStartRequest{TokenContextID: request.TokenContextID, Delivery: request.Delivery, InstallPath: request.InstallPath})
 	if err != nil {
 		_ = m.AdvanceDeployment(record.ID, DeploymentProgress{State: "failed", Progress: "Queued deployment preflight failed", Failure: err.Error(), JobID: job.info.ID})
 		m.failQueuedDeploymentJob(job, "Queued deployment preflight failed: "+err.Error())
 		return
 	}
+	plan.TokenContextID = request.TokenContextID
 	if request.CredentialAccount != "" {
 		credential, ok := m.takeDeploymentCredential(record.ID)
 		if !ok || credential.Account() != request.CredentialAccount {

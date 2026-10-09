@@ -87,15 +87,11 @@ func executeAssembly(ctx context.Context, source []byte, args []string, write fu
 	command.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	configureTokenProcess(ctx, command)
 	command.Stdin = bytes.NewReader(assemblyWorkerRequest(source, args))
-	stdout, err := command.StdoutPipe()
+	stdout, stdoutWriter := io.Pipe()
+	stderr, stderrWriter := io.Pipe()
+	command.Stdout, command.Stderr = stdoutWriter, stderrWriter
+	process, err := startOperationCommand(ctx, command)
 	if err != nil {
-		return -1, err
-	}
-	stderr, err := command.StderrPipe()
-	if err != nil {
-		return -1, err
-	}
-	if err := command.Start(); err != nil {
 		return -1, fmt.Errorf("start .NET Framework worker: %w", err)
 	}
 	var remaining atomic.Int64
@@ -117,16 +113,16 @@ func executeAssembly(ctx context.Context, source []byte, args []string, write fu
 					firstErr = copyErr
 				}
 				mu.Unlock()
-				_ = command.Process.Kill()
+				_ = process.Kill()
 			}
 		}(pipe.reader, pipe.kind)
 	}
 	done := make(chan error, 1)
-	go func() { group.Wait(); done <- command.Wait() }()
+	go func() { waitErr := process.Wait(); group.Wait(); done <- waitErr }()
 	var waitErr error
 	select {
 	case <-ctx.Done():
-		_ = command.Process.Kill()
+		_ = process.Kill()
 		select {
 		case <-done:
 		case <-time.After(5 * time.Second):
@@ -138,9 +134,8 @@ func executeAssembly(ctx context.Context, source []byte, args []string, write fu
 		return -1, firstErr
 	}
 	if waitErr != nil {
-		var exitErr *exec.ExitError
-		if errors.As(waitErr, &exitErr) {
-			return exitErr.ExitCode(), fmt.Errorf("assembly returned non-zero status %d", exitErr.ExitCode())
+		if exitCode, ok := operationExitCode(waitErr); ok {
+			return exitCode, fmt.Errorf("assembly returned non-zero status %d", exitCode)
 		}
 		return -1, fmt.Errorf(".NET Framework worker: %w", waitErr)
 	}

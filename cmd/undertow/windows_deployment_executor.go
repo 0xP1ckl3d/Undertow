@@ -92,13 +92,14 @@ func (e *windowsDeploymentExecutor) Preflight(_ context.Context, record control.
 	if ip := net.ParseIP(strings.Trim(record.Target, "[]")); ip != nil && ip.To4() == nil {
 		return control.DeploymentExecutionPlan{}, errors.New("IPv6 targets are not supported by Windows administrative-share delivery")
 	}
-	return control.DeploymentExecutionPlan{DeliveryType: "agent-channel", DeliveryID: record.SourceAgentID, InstallPath: path, ArtifactPath: artifactPath, Credential: credential}, nil
+	return control.DeploymentExecutionPlan{TokenContextID: request.TokenContextID, DeliveryType: "agent-channel", DeliveryID: record.SourceAgentID, InstallPath: path, ArtifactPath: artifactPath, Credential: credential}, nil
 }
 
 func (e *windowsDeploymentExecutor) Start(ctx context.Context, record control.DeploymentRecord, plan control.DeploymentExecutionPlan, source *mux.Mux, existingJobID string, report func(control.DeploymentProgress) error) error {
 	if plan.ArtifactPath == "" {
 		return errors.New("Windows deployment endpoint is unavailable")
 	}
+	ctx = pivot.WithTokenContext(ctx, plan.TokenContextID)
 	sharePath, err := windowsAdminSharePath(record.Target, plan.InstallPath)
 	if err != nil {
 		return err

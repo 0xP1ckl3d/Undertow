@@ -233,12 +233,11 @@ func serveExec(ctx context.Context, stream *mux.Stream, hostOps bool) {
 	stdout := &cappedWriter{limit: 32 << 10}
 	stderr := &cappedWriter{limit: 32 << 10}
 	command.Stdout, command.Stderr = stdout, stderr
-	err = command.Run()
+	err = runOperationCommand(commandCtx, command)
 	result := ExecResult{Stdout: stdout.buffer.String(), Stderr: stderr.buffer.String()}
 	if err != nil {
-		var exit *exec.ExitError
-		if errors.As(err, &exit) {
-			result.ExitCode = exit.ExitCode()
+		if code, ok := operationExitCode(err); ok {
+			result.ExitCode = code
 		} else {
 			result.Error = err.Error()
 		}

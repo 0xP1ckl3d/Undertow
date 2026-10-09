@@ -13,7 +13,7 @@ func inventoryCommand(ctx context.Context, program string, args ...string) (stri
 	stdout := &cappedWriter{limit: 32 << 10}
 	stderr := &cappedWriter{limit: 4 << 10}
 	command.Stdout, command.Stderr = stdout, stderr
-	if err := command.Run(); err != nil {
+	if err := runOperationCommand(ctx, command); err != nil {
 		if stderr.buffer.Len() != 0 {
 			return "", errors.New(stderr.buffer.String())
 		}

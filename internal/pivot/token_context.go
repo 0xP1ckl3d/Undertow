@@ -70,6 +70,7 @@ type TokenRequest struct {
 	SealedLogon *authcontext.SealedLogon `json:"sealed_logon,omitempty"`
 }
 type TokenResponse struct {
+	StoreInstanceID  string                   `json:"store_instance_id,omitempty"`
 	CreationKey      *authcontext.CreationKey `json:"creation_key,omitempty"`
 	Contexts         []authcontext.Metadata   `json:"contexts"`
 	Candidates       []authcontext.Metadata   `json:"candidates,omitempty"`
@@ -88,7 +89,14 @@ func ManageTokens(ctx context.Context, agent *mux.Mux, r TokenRequest) (TokenRes
 	if err != nil {
 		return TokenResponse{}, err
 	}
+	return ManageTokensOnStream(ctx, s, r)
+}
+
+// ManageTokensOnStream runs a token request over a stream opened after the
+// control plane has waited for a sleeping agent's authenticated check-in.
+func ManageTokensOnStream(ctx context.Context, s *mux.Stream, r TokenRequest) (TokenResponse, error) {
 	defer s.Close()
+	var err error
 	done := make(chan struct{})
 	defer close(done)
 	go func() {
@@ -173,6 +181,8 @@ func serveTokens(ctx context.Context, s *mux.Stream) {
 		response.Error = err.Error()
 	}
 	response.Contexts = agentTokens.List()
+	response.Candidates = agentTokens.Candidates()
+	response.StoreInstanceID = agentTokens.InstanceID()
 	_ = json.NewEncoder(s).Encode(response)
 	_ = s.CloseWrite()
 }

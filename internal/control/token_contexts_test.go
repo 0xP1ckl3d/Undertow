@@ -110,7 +110,7 @@ func TestTokenRelayHeaderPreservesPayloadAndProcessOverride(t *testing.T) {
 		t.Fatal("module bytes changed", remaining, err)
 	}
 }
-func TestTokenCreationIsLiveOnlyAndAuditExcludesCredentials(t *testing.T) {
+func TestTokenCreationWaitsInMemoryAndAuditExcludesCredentials(t *testing.T) {
 	m := tokenTestManager()
 	store, err := OpenOperationsStore(filepath.Join(t.TempDir(), "operations.db"))
 	if err != nil {
@@ -130,12 +130,16 @@ func TestTokenCreationIsLiveOnlyAndAuditExcludesCredentials(t *testing.T) {
 		t.Fatal(err)
 	}
 	body, _ := json.Marshal(pivot.TokenRequest{Action: "create", SealedLogon: &sealed})
-	request := httptest.NewRequest("POST", "/v1/agents/offline/tokens", bytes.NewReader(body))
+	report := pivot.CapabilityReport{Supported: []string{"tokens"}, Allowed: []string{"tokens"}}
+	m.offlineAgents["offline"] = AgentInfo{ID: "offline", Capabilities: &report, ConnectionState: "sleeping", SleepLostAfter: time.Now().Add(time.Minute)}
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	request := httptest.NewRequest("POST", "/v1/agents/offline/tokens", bytes.NewReader(body)).WithContext(ctx)
 	request.Header.Set("Authorization", "Bearer test")
 	w := httptest.NewRecorder()
 	m.handler("test").ServeHTTP(w, request)
-	if w.Code != 409 || len(m.jobs) != 0 {
-		t.Fatal("creation was queued", w.Code, m.jobs)
+	if w.Code < 400 || len(m.jobs) != 0 {
+		t.Fatal("creation entered a durable job", w.Code, m.jobs)
 	}
 	audits, err := store.AuditHistory(10)
 	if err != nil || len(audits) != 1 {
@@ -171,5 +175,65 @@ func TestAuditRetainsContextIDAcrossDatabaseOpen(t *testing.T) {
 	records, err := store.AuditHistory(10)
 	if err != nil || len(records) != 1 || records[0].TokenContextID != id {
 		t.Fatal(records, err)
+	}
+}
+
+func TestTokenSnapshotRetainsCandidateExpiryAndAllowsSleepingUse(t *testing.T) {
+	m := tokenTestManager()
+	contextID := strings.Repeat("c", 32)
+	candidateID := strings.Repeat("d", 32)
+	report := pivot.CapabilityReport{Supported: []string{"tokens"}, Allowed: []string{"tokens"}, TokenStoreInstanceID: "store-one"}
+	m.offlineAgents["agent"] = AgentInfo{ID: "agent", Capabilities: &report, ConnectionState: "sleeping", SleepLostAfter: time.Now().Add(time.Minute)}
+	m.rememberTokenResponse("agent", pivot.TokenResponse{StoreInstanceID: "store-one", Contexts: []authcontext.Metadata{{ID: contextID, Identity: `LAB\operator`}}, Candidates: []authcontext.Metadata{{ID: candidateID, Identity: `NT AUTHORITY\SYSTEM`, State: "available", ExpiresAt: time.Now().Add(-time.Second)}}})
+	result, ok := m.cachedTokenResponse("agent")
+	if !ok || len(result.Candidates) != 1 || result.Candidates[0].State != "expired" {
+		t.Fatal("candidate expiry metadata did not survive navigation cache", result, ok)
+	}
+	r := httptest.NewRequest("POST", "/v1/agents/agent/tokens", nil)
+	r.SetPathValue("id", "agent")
+	r = r.WithContext(context.WithValue(r.Context(), jobOwnerKey{}, uint64(77)))
+	w := httptest.NewRecorder()
+	m.manageTokenRequest(w, r, pivot.TokenRequest{Action: "use", ID: contextID})
+	if w.Code != http.StatusOK || m.tokenDefault(77, "agent") != contextID {
+		t.Fatal("sleeping-agent selection was not immediate", w.Code, w.Body.String())
+	}
+}
+
+func TestJumpFreezesSessionContextAndRejectsCredentialCombination(t *testing.T) {
+	m := tokenTestManager()
+	store, err := OpenOperationsStore(filepath.Join(t.TempDir(), "operations.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err = m.SetOperationsStore(store); err != nil {
+		t.Fatal(err)
+	}
+	id := strings.Repeat("e", 32)
+	report := pivot.CapabilityReport{Supported: []string{"tokens"}, Allowed: []string{"tokens"}}
+	m.offlineAgents["source"] = AgentInfo{ID: "source", Capabilities: &report, ConnectionState: "sleeping", SleepLostAfter: time.Now().Add(time.Minute)}
+	m.tokenDefaults = map[tokenDefaultKey]string{{91, "source"}: id}
+	record := DeploymentRecord{ID: "jump-one", SourceAgentID: "source", Target: "ws01", ArtifactID: "artifact", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(), State: "prepared"}
+	if err = store.CreateDeployment(record); err != nil {
+		t.Fatal(err)
+	}
+	bind := func(body string) (*http.Request, error) {
+		r := httptest.NewRequest(http.MethodPost, "/v1/deployments/jump-one/start", strings.NewReader(body))
+		return m.bindTokenOperation(r.WithContext(context.WithValue(r.Context(), jobOwnerKey{}, uint64(91))))
+	}
+	r, err := bind(`{"install_path":""}`)
+	if err != nil || pivot.TokenContextID(r.Context()) != id {
+		t.Fatal("Jump did not freeze operator default", pivot.TokenContextID(r.Context()), err)
+	}
+	var body DeploymentStartRequest
+	if json.NewDecoder(r.Body).Decode(&body) != nil || body.TokenContextID != id {
+		t.Fatal("Jump request did not retain selected context", body)
+	}
+	if _, err = bind(`{"username":"LAB\\operator","password":"fixture","token_context_id":"` + id + `"}`); err == nil {
+		t.Fatal("Jump combined supplied credentials with a token context")
+	}
+	r, err = bind(`{"username":"LAB\\operator","password":"fixture"}`)
+	if err != nil || pivot.TokenContextID(r.Context()) != "process" {
+		t.Fatal("supplied Jump credentials did not become an explicit process-context override", err)
 	}
 }

@@ -144,12 +144,12 @@ func (m *Manager) StartDeploymentCommandJob(ctx context.Context, agentID, deploy
 	if len(credentials) != 0 {
 		credential = credentials[0]
 	}
-	session, err := pivot.OpenInteractive(startCtx, state.mux, pivot.InteractiveRequest{Argv: argv, NoPTY: true, Credential: credential})
+	session, err := pivot.OpenInteractive(startCtx, state.mux, pivot.InteractiveRequest{TokenContextID: pivot.TokenContextID(ctx), Argv: argv, NoPTY: true, Credential: credential})
 	if err != nil {
 		return JobInfo{}, err
 	}
 	if existingJobID == "" {
-		return m.registerJob(0, agentID, state.mux, session, JobInfo{AgentID: agentID, Kind: "deployment", DeploymentID: deploymentID})
+		return m.registerJob(0, agentID, state.mux, session, JobInfo{TokenContextID: pivot.TokenContextID(ctx), AgentID: agentID, Kind: "deployment", DeploymentID: deploymentID})
 	}
 	m.mu.Lock()
 	job := m.jobs[existingJobID]

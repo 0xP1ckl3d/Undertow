@@ -28,6 +28,8 @@ type Metadata struct {
 	ElevationType      string    `json:"elevation_type"`
 	Source             string    `json:"source"`
 	CreatedAt          time.Time `json:"created_at"`
+	ExpiresAt          time.Time `json:"expires_at,omitempty"`
+	State              string    `json:"state,omitempty"`
 }
 
 // LogonRequest is transient transport input, never a queued job or history DTO.
@@ -58,14 +60,17 @@ type entry struct {
 type Store struct {
 	mu         sync.Mutex
 	backend    Backend
+	instanceID string
 	contexts   map[string]entry
 	candidates map[string]entry
 }
 
 func New(backend Backend) *Store {
-	return &Store{backend: backend, contexts: map[string]entry{}, candidates: map[string]entry{}}
+	id, _ := opaqueID()
+	return &Store{backend: backend, instanceID: id, contexts: map[string]entry{}, candidates: map[string]entry{}}
 }
-func ValidID(id string) bool { return len(id) == 32 && lenTrimHex(id) == 0 }
+func (s *Store) InstanceID() string { return s.instanceID }
+func ValidID(id string) bool        { return len(id) == 32 && lenTrimHex(id) == 0 }
 func lenTrimHex(id string) int {
 	for _, c := range id {
 		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
@@ -83,9 +88,11 @@ func opaqueID() (string, error) {
 }
 func (s *Store) expireLocked() {
 	for id, e := range s.candidates {
-		if !time.Now().Before(e.expires) {
+		if e.token != nil && !time.Now().Before(e.expires) {
 			_ = e.token.Close()
-			delete(s.candidates, id)
+			e.token = nil
+			e.metadata.State = "expired"
+			s.candidates[id] = e
 		}
 	}
 }
@@ -94,6 +101,12 @@ func (s *Store) List() []Metadata {
 	defer s.mu.Unlock()
 	s.expireLocked()
 	return metadataList(s.contexts)
+}
+func (s *Store) Candidates() []Metadata {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.expireLocked()
+	return metadataList(s.candidates)
 }
 func metadataList(entries map[string]entry) []Metadata {
 	result := make([]Metadata, 0, len(entries))
@@ -108,7 +121,9 @@ func (s *Store) Discover(ctx context.Context) ([]Metadata, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for id, e := range s.candidates {
-		_ = e.token.Close()
+		if e.token != nil {
+			_ = e.token.Close()
+		}
 		delete(s.candidates, id)
 	}
 	tokens, err := s.backend.Discover(ctx)
@@ -133,8 +148,9 @@ func (s *Store) Discover(ctx context.Context) ([]Metadata, error) {
 			_ = t.Close()
 			continue
 		}
-		m.ID, m.CreatedAt = id, time.Now().UTC()
-		s.candidates[id] = entry{token: t, metadata: m, expires: time.Now().Add(CandidateTTL)}
+		now := time.Now().UTC()
+		m.ID, m.CreatedAt, m.ExpiresAt, m.State = id, now, now.Add(CandidateTTL), "available"
+		s.candidates[id] = entry{token: t, metadata: m, expires: m.ExpiresAt}
 	}
 	time.AfterFunc(CandidateTTL, func() { s.mu.Lock(); defer s.mu.Unlock(); s.expireLocked() })
 	return metadataList(s.candidates), nil
@@ -154,7 +170,7 @@ func (s *Store) addLocked(t Token) (Metadata, error) {
 		_ = t.Close()
 		return Metadata{}, err
 	}
-	m.ID, m.CreatedAt = id, time.Now().UTC()
+	m.ID, m.CreatedAt, m.State = id, time.Now().UTC(), "available"
 	s.contexts[id] = entry{token: t, metadata: m}
 	return m, nil
 }
@@ -163,7 +179,7 @@ func (s *Store) Import(id string) (Metadata, error) {
 	defer s.mu.Unlock()
 	s.expireLocked()
 	e, ok := s.candidates[id]
-	if !ok {
+	if !ok || e.token == nil || e.metadata.State != "available" {
 		return Metadata{}, errors.New("token candidate unavailable; discover again")
 	}
 	t, err := e.token.Duplicate()
@@ -214,7 +230,9 @@ func (s *Store) Clear() {
 		delete(s.contexts, id)
 	}
 	for id, e := range s.candidates {
-		_ = e.token.Close()
+		if e.token != nil {
+			_ = e.token.Close()
+		}
 		delete(s.candidates, id)
 	}
 }

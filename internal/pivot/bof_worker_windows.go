@@ -31,13 +31,12 @@ func executeBOFWorker(ctx context.Context, object, arguments []byte, output func
 	input.Write(object)
 	input.Write(arguments)
 	command.Stdin = &input
-	stdout, err := command.StdoutPipe()
-	if err != nil {
-		return -1, err
-	}
+	stdout, stdoutWriter := io.Pipe()
+	command.Stdout = stdoutWriter
 	var stderr strings.Builder
 	command.Stderr = &limitedWriter{writer: &stderr, limit: 4096}
-	if err := command.Start(); err != nil {
+	process, err := startOperationCommand(ctx, command)
+	if err != nil {
 		return -1, fmt.Errorf("start BOF worker: %w", err)
 	}
 	code := -1
@@ -54,7 +53,7 @@ func executeBOFWorker(ctx context.Context, object, arguments []byte, output func
 		switch kind {
 		case bof.WorkerOutput, bof.WorkerStderr, bof.WorkerCallback:
 			if err := output(kind, data); err != nil {
-				_ = command.Process.Kill()
+				_ = process.Kill()
 				workerError = err.Error()
 			}
 		case bof.WorkerError:
@@ -76,7 +75,7 @@ func executeBOFWorker(ctx context.Context, object, arguments []byte, output func
 		}
 	}
 complete:
-	waitErr := command.Wait()
+	waitErr := process.Wait()
 	if ctx.Err() != nil {
 		return -1, fmt.Errorf("BOF runtime: %w", ctx.Err())
 	}

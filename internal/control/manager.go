@@ -194,6 +194,7 @@ type agentState struct {
 }
 type Manager struct {
 	tokenDefaults            map[tokenDefaultKey]string
+	tokenSnapshots           map[string]tokenSnapshot
 	mu                       sync.RWMutex
 	agentSessions            sync.WaitGroup
 	shuttingDown             bool
@@ -416,7 +417,7 @@ func (m *Manager) SetRelayPayloadAcceptor(accept func(context.Context, string, *
 }
 
 func NewManager(routes *routing.Table, device RouteDevice, virtualNetwork netip.Prefix, proxyIP netip.Addr) *Manager {
-	return &Manager{eventBus: NewEventBroker(), agents: make(map[string]*agentState), offlineAgents: make(map[string]AgentInfo), nicknames: make(map[string]string), archivedAgents: make(map[string]bool), sleepOverrides: make(map[string]SleepPolicy), sleepTimers: make(map[string]*time.Timer), clients: make(map[uint64]*clientState), forwards: make(map[string]*forwardState), pendingForwards: make(map[string]*pendingForward), pendingLive: make(map[string]int), foregroundTails: make(map[string]chan struct{}), jobs: make(map[string]*jobState), jobDispatching: make(map[string]bool), deploymentCredentials: make(map[string]pivot.WindowsCredential), relays: make(map[string]map[string]*relayState), desiredRelays: make(map[string]map[string]bool), restoringRelays: make(map[string]map[string]bool), routes: routes, device: device, virtualNetwork: virtualNetwork.Masked(), proxyIP: proxyIP, virtualByAgent: make(map[string]netip.Addr), virtualUsed: make(map[netip.Addr]bool)}
+	return &Manager{eventBus: NewEventBroker(), agents: make(map[string]*agentState), offlineAgents: make(map[string]AgentInfo), nicknames: make(map[string]string), archivedAgents: make(map[string]bool), sleepOverrides: make(map[string]SleepPolicy), sleepTimers: make(map[string]*time.Timer), clients: make(map[uint64]*clientState), forwards: make(map[string]*forwardState), pendingForwards: make(map[string]*pendingForward), pendingLive: make(map[string]int), foregroundTails: make(map[string]chan struct{}), jobs: make(map[string]*jobState), jobDispatching: make(map[string]bool), deploymentCredentials: make(map[string]pivot.WindowsCredential), tokenSnapshots: make(map[string]tokenSnapshot), relays: make(map[string]map[string]*relayState), desiredRelays: make(map[string]map[string]bool), restoringRelays: make(map[string]map[string]bool), routes: routes, device: device, virtualNetwork: virtualNetwork.Masked(), proxyIP: proxyIP, virtualByAgent: make(map[string]netip.Addr), virtualUsed: make(map[netip.Addr]bool)}
 }
 
 // SetAgentArchived changes visibility of a retained, disconnected agent only.
@@ -951,6 +952,9 @@ func (m *Manager) UpdateInventory(id string, streamMux *mux.Mux, b []byte) {
 		}
 		state.inventory.Interfaces = append([]string(nil), info.Interfaces...)
 		state.inventory.AdvertisedRoutes = validRoutes
+		if snapshot, ok := m.tokenSnapshots[id]; ok && info.Capabilities != nil && info.Capabilities.TokenStoreInstanceID != "" && snapshot.storeInstanceID != "" && snapshot.storeInstanceID != info.Capabilities.TokenStoreInstanceID {
+			delete(m.tokenSnapshots, id)
+		}
 		state.inventory.Capabilities = info.Capabilities
 		state.inventory.ArtifactIdentity = info.ArtifactIdentity
 		state.inventory.Sleep = info.Sleep

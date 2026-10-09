@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"undertow/internal/control"
+	"undertow/internal/pivot"
 )
 
 func deploymentPrerequisites(method, context string) string {
@@ -176,9 +177,12 @@ func runConsoleDeployment(ctx context.Context, output io.Writer, call consoleCal
 		return nil
 	case "start":
 		if len(args) < 3 {
-			return errors.New("use jump start ID [INSTALL_PATH] [--username USER (--password-file FILE | --nt-hash-file FILE)]")
+			return errors.New("use jump start ID [INSTALL_PATH] [--token-context ID|process] [--username USER (--password-file FILE | --nt-hash-file FILE)]")
 		}
 		request := map[string]string{"delivery": "agent-channel"}
+		if tokenID := pivot.TokenContextID(ctx); tokenID != "" {
+			request["token_context_id"] = tokenID
+		}
 		installPath, username, passwordFile, hashFile := "", "", "", ""
 		for i := 3; i < len(args); i++ {
 			switch args[i] {
@@ -202,7 +206,7 @@ func runConsoleDeployment(ctx context.Context, output io.Writer, call consoleCal
 				hashFile = args[i]
 			default:
 				if strings.HasPrefix(args[i], "--") || installPath != "" {
-					return errors.New("use jump start ID [INSTALL_PATH] [--username USER (--password-file FILE | --nt-hash-file FILE)]")
+					return errors.New("use jump start ID [INSTALL_PATH] [--token-context ID|process] [--username USER (--password-file FILE | --nt-hash-file FILE)]")
 				}
 				installPath = args[i]
 			}
@@ -217,6 +221,10 @@ func runConsoleDeployment(ctx context.Context, output io.Writer, call consoleCal
 			return errors.New("use --username with --password-file or --nt-hash-file")
 		}
 		if passwordFile != "" {
+			if tokenID := request["token_context_id"]; tokenID != "" && tokenID != "process" {
+				return errors.New("choose --token-context or supplied Jump credentials")
+			}
+			request["token_context_id"] = "process"
 			secret, err := os.ReadFile(passwordFile)
 			if err != nil {
 				return fmt.Errorf("read Windows password file: %w", err)
@@ -228,6 +236,10 @@ func runConsoleDeployment(ctx context.Context, output io.Writer, call consoleCal
 			request["username"], request["password"] = username, password
 		}
 		if hashFile != "" {
+			if tokenID := request["token_context_id"]; tokenID != "" && tokenID != "process" {
+				return errors.New("choose --token-context or supplied Jump credentials")
+			}
+			request["token_context_id"] = "process"
 			secret, err := os.ReadFile(hashFile)
 			if err != nil {
 				return fmt.Errorf("read Windows NT hash file: %w", err)
