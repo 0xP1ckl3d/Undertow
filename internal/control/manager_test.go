@@ -25,6 +25,33 @@ type routeDevice struct {
 	routes map[string]bool
 }
 
+func TestRejectedReconnectRetainsLastValidatedAgentInventory(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	manager := NewManager(routing.New(nil), nil, netip.MustParsePrefix("172.16.254.0/24"), netip.MustParseAddr("172.16.254.1"))
+	id := "known-agent"
+	manager.offlineAgents[id] = AgentInfo{ID: id, Hostname: "WS01", ArtifactIdentity: ArtifactIdentity{ArtifactID: "expected-artifact"}, Offline: true}
+	a, b := make(chan []byte, 256), make(chan []byte, 256)
+	serverMux := mux.New(ctx, &remoteTestTransport{in: a, out: b, done: make(chan struct{})}, true)
+	agentMux := mux.New(ctx, &remoteTestTransport{in: b, out: a, done: make(chan struct{})}, false)
+	defer serverMux.Close()
+	defer agentMux.Close()
+	var keys security.Keys
+	sess, err := session.New(9100, keys, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.Register(&dns.Peer{Session: sess, AgentID: id, EnrollmentArtifactID: "expected-artifact", Connected: time.Now()}, serverMux)
+	if got := manager.AgentCatalog(); len(got) != 1 || got[0].Hostname != "WS01" || got[0].Capabilities != nil {
+		t.Fatalf("pending reconnect replaced last validated inventory: %+v", got)
+	}
+	manager.UpdateInventory(id, serverMux, []byte(`{"hostname":"WS01","artifact_id":"wrong-artifact"}`))
+	manager.Unregister(id, serverMux)
+	if got := manager.AgentCatalog(); len(got) != 1 || got[0].Hostname != "WS01" || got[0].ArtifactID != "expected-artifact" || !got[0].Offline {
+		t.Fatalf("rejected reconnect erased last validated inventory: %+v", got)
+	}
+}
+
 func TestTwoAgentsFromOnePayloadRemainConnected(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

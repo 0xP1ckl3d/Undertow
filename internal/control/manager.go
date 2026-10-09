@@ -748,6 +748,16 @@ func (m *Manager) Register(peer transport.Peer, streamMux *mux.Mux) {
 	}
 	peer.SetVirtualIP(virtual.String())
 	old := m.agents[id]
+	// Keep the last validated inventory visible until this connection has
+	// supplied and passed its own inventory. A rejected reconnect must not
+	// replace a known host with an empty agent ID-only snapshot.
+	if old != nil && old.inventoryReady {
+		previous := old.inventory
+		previous.ID = id
+		previous.Online = false
+		previous.Offline = true
+		m.offlineAgents[id] = previous
+	}
 	for _, route := range m.routes.List() {
 		if route.AgentID != id || !route.Active {
 			continue
@@ -789,7 +799,10 @@ func (m *Manager) Register(peer transport.Peer, streamMux *mux.Mux) {
 	if firstSeen.IsZero() {
 		firstSeen, firstSeenEstimated = time.Now().UTC(), knownIdentity
 	}
-	m.agents[id] = &agentState{peer: peer, mux: streamMux, privilege: privilege, newIdentity: old == nil && !knownIdentity, inventory: AgentInfo{Via: peer.Snapshot().Via, RelayBind: peer.Snapshot().RelayBind, Depth: depth, FirstSeen: firstSeen, FirstSeenEstimated: firstSeenEstimated}}
+	// Only carry display metadata into the unvalidated connection. Capabilities
+	// and routes must come from the new inventory before they are usable.
+	pendingInventory := AgentInfo{Hostname: previous.Hostname, OS: previous.OS, Arch: previous.Arch, ArtifactIdentity: previous.ArtifactIdentity, Via: peer.Snapshot().Via, RelayBind: peer.Snapshot().RelayBind, Depth: depth, FirstSeen: firstSeen, FirstSeenEstimated: firstSeenEstimated}
+	m.agents[id] = &agentState{peer: peer, mux: streamMux, privilege: privilege, newIdentity: old == nil && !knownIdentity, inventory: pendingInventory}
 	if m.archivedAgents[id] {
 		if m.operations != nil {
 			if err := m.operations.SetAgentArchived(id, false); err != nil {
@@ -799,7 +812,6 @@ func (m *Manager) Register(peer transport.Peer, streamMux *mux.Mux) {
 		delete(m.archivedAgents, id)
 	}
 	m.agentSessions.Add(1)
-	delete(m.offlineAgents, id)
 	m.recordLifecycleLocked(LifecycleEvent{AgentID: id, Kind: "connected", Transport: peer.Snapshot().Carrier, SessionID: peer.Snapshot().ID})
 	m.mu.Unlock()
 	m.PublishEvent("agent.connected", id)
@@ -892,7 +904,7 @@ func (m *Manager) UpdateInventory(id string, streamMux *mux.Mux, b []byte) {
 		}
 		m.mu.RUnlock()
 		if bound != "" && info.ArtifactID != bound {
-			log.Printf("agent %s rejected: artifact enrollment does not match inventory", id)
+			log.Printf("agent %s rejected: artifact enrollment %s does not match inventory %s", id, bound, info.ArtifactID)
 			streamMux.Close()
 			return
 		}
@@ -967,6 +979,7 @@ func (m *Manager) UpdateInventory(id string, streamMux *mux.Mux, b []byte) {
 			state.inventory.Profile, state.inventory.UndertowVersion, _ = m.artifactLookup(info.ArtifactID)
 		}
 		state.inventoryReady = true
+		delete(m.offlineAgents, id)
 		for _, route := range m.routes.List() {
 			if route.AgentID != id || route.Active == agentPivotAllowed(state) {
 				continue
@@ -1126,6 +1139,11 @@ func (m *Manager) Unregister(id string, streamMux *mux.Mux) {
 	}
 	state := m.agents[id]
 	peerInfo := state.peer.Snapshot()
+	if !state.inventoryReady {
+		if previous, ok := m.offlineAgents[id]; ok {
+			last = previous
+		}
+	}
 	duration := int64(0)
 	if !peerInfo.Connected.IsZero() {
 		duration = int64(time.Since(peerInfo.Connected).Seconds())
