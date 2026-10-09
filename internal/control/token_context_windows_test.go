@@ -5,6 +5,7 @@ package control
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"net/netip"
 	"os"
 	"strings"
@@ -16,16 +17,31 @@ import (
 	"undertow/internal/routing"
 )
 
+var tokenUATAlternateIdentity = flag.String("undertow-token-alternate-identity", "", "alternate-user identity for the Windows token Job UAT")
+var tokenUATAlternateSource = flag.String("undertow-token-alternate-source", "Notepad.exe", "alternate-user source process for the Windows token Job UAT")
+
 // This UAT exercises the real control-plane background Job lifecycle. The
-// companion pivot UAT covers direct exec, Live shell, ConPTY and a .NET worker.
+// companion pivot UAT covers direct exec, Live shell, BOF and .NET workers.
 func TestWindowsTokenContextUATImportedForeignProcessBackgroundJob(t *testing.T) {
 	raw := os.Getenv("UNDERTOW_TOKEN_UAT_PROCESS_IDENTITIES")
-	if raw == "" {
+	if raw == "" && *tokenUATAlternateIdentity == "" {
 		t.Skip("set UNDERTOW_TOKEN_UAT_PROCESS_IDENTITIES in the Windows lab")
 	}
 	var identities []string
-	if json.Unmarshal([]byte(raw), &identities) != nil || len(identities) < 2 {
-		t.Fatal("UNDERTOW_TOKEN_UAT_PROCESS_IDENTITIES must name an alternate user and LocalSystem")
+	if *tokenUATAlternateIdentity != "" {
+		identities = []string{*tokenUATAlternateIdentity, "NT AUTHORITY\\SYSTEM"}
+	} else {
+		if json.Unmarshal([]byte(raw), &identities) != nil || len(identities) < 2 {
+			t.Fatal("UNDERTOW_TOKEN_UAT_PROCESS_IDENTITIES must name an alternate user and LocalSystem")
+		}
+	}
+	var sources []string
+	if *tokenUATAlternateIdentity != "" {
+		sources = []string{*tokenUATAlternateSource, "LogonUI.exe"}
+	} else if rawSources := os.Getenv("UNDERTOW_TOKEN_UAT_PROCESS_SOURCES"); rawSources != "" {
+		if json.Unmarshal([]byte(rawSources), &sources) != nil || len(sources) != len(identities) {
+			t.Fatal("UNDERTOW_TOKEN_UAT_PROCESS_SOURCES must have one process name for each identity")
+		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
@@ -41,10 +57,10 @@ func TestWindowsTokenContextUATImportedForeignProcessBackgroundJob(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, identity := range identities {
+	for index, identity := range identities {
 		var candidate authcontext.Metadata
 		for _, item := range discovered.Candidates {
-			if strings.EqualFold(item.Identity, identity) && strings.HasPrefix(item.Source, "process:") {
+			if strings.EqualFold(item.Identity, identity) && strings.HasPrefix(item.Source, "process:") && (len(sources) == 0 || strings.Contains(strings.ToLower(item.Source), strings.ToLower(sources[index]))) {
 				candidate = item
 				break
 			}

@@ -10,9 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -25,18 +23,8 @@ var assemblyWorker []byte
 // The dedicated .NET Framework worker is embedded in the agent binary. Only
 // this fixed worker executable is materialized for CreateProcess; the module
 // itself is sent over stdin and loaded by the CLR from bytes.
-func assemblyWorkerPath() (string, func(), error) {
-	directory, err := os.MkdirTemp("", "undertow-clr-")
-	if err != nil {
-		return "", nil, fmt.Errorf("create assembly worker directory: %w", err)
-	}
-	cleanup := func() { _ = os.RemoveAll(directory) }
-	path := filepath.Join(directory, "worker.exe")
-	if err := os.WriteFile(path, assemblyWorker, 0700); err != nil {
-		cleanup()
-		return "", nil, fmt.Errorf("write assembly worker: %w", err)
-	}
-	return path, cleanup, nil
+func assemblyWorkerPath(ctx context.Context) (string, func(), error) {
+	return stageWorkerFile(ctx, "undertow-clr-", "worker.exe", assemblyWorker)
 }
 
 func assemblyWorkerRequest(source []byte, args []string) []byte {
@@ -77,7 +65,7 @@ func (o assemblyOutput) Write(data []byte) (int, error) {
 }
 
 func executeAssembly(ctx context.Context, source []byte, args []string, write func(byte, []byte) error) (int, error) {
-	path, cleanup, err := assemblyWorkerPath()
+	path, cleanup, err := assemblyWorkerPath(ctx)
 	if err != nil {
 		return -1, err
 	}

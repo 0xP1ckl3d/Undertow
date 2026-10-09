@@ -5,6 +5,7 @@ package pivot
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"io"
 	"os"
 	"os/exec"
@@ -17,7 +18,23 @@ import (
 
 	"golang.org/x/sys/windows"
 	"undertow/internal/authcontext"
+	"undertow/internal/bof"
 )
+
+var tokenUATIdentityAssembly = flag.String("undertow-token-identity-assembly", "", "path to the Windows UAT identity-reporting assembly")
+var tokenUATIdentityBOF = flag.String("undertow-token-identity-bof", "", "path to the Windows UAT identity-reporting BOF")
+var tokenUATTargetIdentity = flag.String("undertow-token-target-identity", "NT AUTHORITY\\SYSTEM", "expected identity for process-token UAT")
+var tokenUATSourceProcess = flag.String("undertow-token-source-process", "LogonUI.exe", "source process name for process-token UAT")
+
+func TestMain(m *testing.M) {
+	if len(os.Args) == 2 && os.Args[1] == "_bof-worker" {
+		if err := bof.WorkerMain(os.Stdin, os.Stdout); err != nil {
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
 
 func windowsTokenUATContext(t *testing.T) (context.Context, string) {
 	t.Helper()
@@ -226,6 +243,96 @@ func basicSelectedChildSID(token windows.Token) (string, error) {
 		return "", err
 	}
 	return user.User.Sid.String(), nil
+}
+
+func TestWindowsTokenContextUATProcessLaunchStages(t *testing.T) {
+	if *tokenUATIdentityAssembly == "" || *tokenUATIdentityBOF == "" {
+		t.Skip("supply -undertow-token-identity-assembly and -undertow-token-identity-bof in the Windows lab")
+	}
+	ctx := context.WithValue(context.Background(), tokenCapabilityKey{}, true)
+	candidates, err := agentTokens.Discover(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var candidate authcontext.Metadata
+	for _, item := range candidates {
+		if strings.EqualFold(item.Identity, *tokenUATTargetIdentity) && strings.Contains(strings.ToLower(item.Source), strings.ToLower(*tokenUATSourceProcess)) && item.ProcessLaunchReady {
+			candidate = item
+			break
+		}
+	}
+	if candidate.ID == "" {
+		t.Fatalf("process-launch-capable %s token from %s was not discoverable", *tokenUATTargetIdentity, *tokenUATSourceProcess)
+	}
+	t.Logf("selected candidate source: %s", candidate.Source)
+	stored, err := agentTokens.Import(candidate.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer agentTokens.Remove(stored.ID)
+	selected, release, err := acquireTokenContext(ctx, stored.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	user, err := operationToken(selected).GetTokenUser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedSID := user.User.Sid.String()
+	t.Log("testing basic process creation without standard handles or ConPTY")
+	basicSID, err := basicSelectedChildSID(operationToken(selected))
+	if err != nil || basicSID != expectedSID {
+		t.Fatalf("basic process creation: sid=%q expected=%q err=%v", basicSID, expectedSID, err)
+	}
+	t.Log("basic process creation passed; testing exec with inherited standard handles")
+	output, err := inventoryCommand(selected, "whoami.exe", "/user")
+	if err != nil || !strings.Contains(output, expectedSID) {
+		t.Fatalf("exec process creation or standard handles: output=%q err=%v", output, err)
+	}
+	for _, noPTY := range []bool{true, false} {
+		t.Logf("testing Live shell with NoPTY=%t", noPTY)
+		process, terminal, _, err := startInteractiveProcess(selected, InteractiveRequest{Argv: []string{"cmd.exe", "/d", "/c", "whoami.exe /user"}, NoPTY: noPTY, Cols: 100, Rows: 30})
+		if err != nil {
+			t.Fatalf("Live shell launch: %v", err)
+		}
+		readDone := make(chan []byte, 1)
+		go func() { data, _ := io.ReadAll(terminal); readDone <- data }()
+		waitErr := process.Wait()
+		_ = terminal.Close()
+		data := <-readDone
+		if waitErr != nil || !strings.Contains(string(data), expectedSID) {
+			t.Fatalf("Live shell identity: output=%q err=%v", data, waitErr)
+		}
+	}
+	assembly, err := os.ReadFile(*tokenUATIdentityAssembly)
+	if err != nil {
+		t.Fatal("read worker UAT assembly:", err)
+	}
+	t.Log("testing .NET worker under the selected token")
+	var workerOutput strings.Builder
+	code, workerErr := executeAssembly(selected, assembly, nil, func(kind byte, data []byte) error {
+		if kind == InteractiveOutput || kind == InteractiveStderr {
+			workerOutput.Write(data)
+		}
+		return nil
+	})
+	if workerErr != nil || code != 0 || !strings.Contains(workerOutput.String(), expectedSID) {
+		t.Fatalf(".NET worker identity: code=%d output=%q err=%v", code, workerOutput.String(), workerErr)
+	}
+	object, err := os.ReadFile(*tokenUATIdentityBOF)
+	if err != nil {
+		t.Fatal("read BOF UAT object:", err)
+	}
+	t.Log("testing BOF worker under the selected token")
+	var bofOutput strings.Builder
+	code, workerErr = executeBOFWorker(selected, object, []byte{0, 0, 0, 0}, func(_ byte, data []byte) error {
+		bofOutput.Write(data)
+		return nil
+	})
+	if workerErr != nil || code != 0 || !strings.Contains(bofOutput.String(), expectedSID) {
+		t.Fatalf("BOF worker identity: code=%d output=%q err=%v", code, bofOutput.String(), workerErr)
+	}
 }
 
 func TestWindowsTokenContextUATSealedLogonFailureAndReplay(t *testing.T) {

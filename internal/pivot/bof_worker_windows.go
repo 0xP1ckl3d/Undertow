@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"strings"
 
@@ -17,10 +16,11 @@ import (
 )
 
 func executeBOFWorker(ctx context.Context, object, arguments []byte, output func(byte, []byte) error) (int, error) {
-	executable, err := os.Executable()
+	executable, cleanup, err := bofWorkerExecutable(ctx)
 	if err != nil {
 		return -1, err
 	}
+	defer cleanup()
 	command := exec.CommandContext(ctx, executable, "_bof-worker")
 	configureTokenProcess(ctx, command)
 	var input bytes.Buffer

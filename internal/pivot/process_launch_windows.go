@@ -175,7 +175,13 @@ func launchWithPreparedCaller(selected windows.Token, application *uint16, comma
 		flags &^= windows.CREATE_UNICODE_ENVIRONMENT
 	}
 	if useWithToken {
-		if err := createProcessWithTokenCall(selected, application, commandLine, inherit, flags, environment, directory, startup, info); err != nil {
+		// Secondary Logon rejects the extended handle-list startup used by
+		// CreateProcessAsUser. Its STARTUPINFO contract still accepts inheritable
+		// standard handles, so retain those fields and use the plain structure.
+		plainStartup := *startup
+		plainStartup.Cb = uint32(unsafe.Sizeof(windows.StartupInfo{}))
+		flags &^= windows.EXTENDED_STARTUPINFO_PRESENT
+		if err := createProcessWithTokenCall(selected, application, commandLine, inherit, flags, environment, directory, &plainStartup, info); err != nil {
 			return fmt.Errorf("CreateProcessWithTokenW: %w", err)
 		}
 	} else if err := createProcessAsUserCall(selected, application, commandLine, inherit, flags, environment, directory, startup, info); err != nil {
