@@ -91,6 +91,22 @@ func TestAgentGUIConsoleRequiresExplicitAgentCommand(t *testing.T) {
 	}
 }
 
+func TestAgentGUIExecLaunchFailureIsNotExitZero(t *testing.T) {
+	client := &liveClientConsole{request: func(_ context.Context, method, path string, _ any) ([]byte, error) {
+		if method != http.MethodPost || path != "/v1/agents/agent-a/exec" {
+			return nil, errors.New("unexpected request")
+		}
+		return []byte(`{"error":"selected-token launch failed","exit_code":-1}`), nil
+	}}
+	result, err := (&guiServer{client: client}).runAgentGUICommand(context.Background(), "agent-a", "exec whoami.exe")
+	if err == nil || err.Error() != "selected-token launch failed" {
+		t.Fatalf("launch error: %+v %v", result, err)
+	}
+	if strings.Contains(result.Output, "[exit 0]") {
+		t.Fatalf("launch failure reported success: %q", result.Output)
+	}
+}
+
 func TestAgentGUIConsoleScreenshotRequiresExplicitCommand(t *testing.T) {
 	store, err := openClientGUIStore(filepath.Join(t.TempDir(), "ui.db"))
 	if err != nil {

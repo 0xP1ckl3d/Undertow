@@ -239,10 +239,12 @@ func serveExec(ctx context.Context, stream *mux.Stream, hostOps bool) {
 		if code, ok := operationExitCode(err); ok {
 			result.ExitCode = code
 		} else {
+			result.ExitCode = -1
 			result.Error = err.Error()
 		}
 	}
 	if commandCtx.Err() != nil {
+		result.ExitCode = -1
 		result.Error = commandCtx.Err().Error()
 	}
 	writeExecResult(stream, result)

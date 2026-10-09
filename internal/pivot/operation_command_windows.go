@@ -17,24 +17,53 @@ import (
 )
 
 var createProcessWithTokenW = windows.NewLazySystemDLL("advapi32.dll").NewProc("CreateProcessWithTokenW")
+var errSelectedTokenExtendedStartupUnsupported = errors.New("selected-token fallback requires plain startup information")
 
-func createProcessWithSelectedToken(token windows.Token, application *uint16, commandLine []uint16, inherit bool, flags uint32, environment *uint16, directory *uint16, startup *windows.StartupInfo, info *windows.ProcessInformation) error {
+type tokenProcessCreator func(windows.Token, *uint16, []uint16, bool, uint32, *uint16, *uint16, *windows.StartupInfo, *windows.ProcessInformation) error
+
+var createProcessAsUserCall tokenProcessCreator = func(token windows.Token, application *uint16, commandLine []uint16, inherit bool, flags uint32, environment *uint16, directory *uint16, startup *windows.StartupInfo, info *windows.ProcessInformation) error {
 	line := append([]uint16(nil), commandLine...)
-	err := windows.CreateProcessAsUser(token, application, &line[0], nil, nil, inherit, flags, environment, directory, startup, info)
-	if !errors.Is(err, windows.ERROR_PRIVILEGE_NOT_HELD) {
-		return err
-	}
-	// CreateProcessWithTokenW is the documented alternative for callers that
-	// hold SeImpersonatePrivilege but not the two privileges required by
-	// CreateProcessAsUserW. Failure remains explicit; process identity is never
-	// substituted with the agent's own token.
-	line = append(line[:0], commandLine...)
-	result, _, fallbackErr := createProcessWithTokenW.Call(
+	return windows.CreateProcessAsUser(token, application, &line[0], nil, nil, inherit, flags, environment, directory, startup, info)
+}
+
+var createProcessWithTokenCall tokenProcessCreator = func(token windows.Token, application *uint16, commandLine []uint16, _ bool, flags uint32, environment *uint16, directory *uint16, startup *windows.StartupInfo, info *windows.ProcessInformation) error {
+	line := append([]uint16(nil), commandLine...)
+	result, _, err := createProcessWithTokenW.Call(
 		uintptr(token), 0, uintptr(unsafe.Pointer(application)), uintptr(unsafe.Pointer(&line[0])),
 		uintptr(flags), uintptr(unsafe.Pointer(environment)), uintptr(unsafe.Pointer(directory)),
 		uintptr(unsafe.Pointer(startup)), uintptr(unsafe.Pointer(info)),
 	)
 	if result == 0 {
+		return err
+	}
+	return nil
+}
+
+func createProcessWithSelectedToken(token windows.Token, application *uint16, commandLine []uint16, inherit bool, flags uint32, environment *uint16, directory *uint16, startup *windows.StartupInfo, info *windows.ProcessInformation) error {
+	err := createProcessAsUserCall(token, application, commandLine, inherit, flags, environment, directory, startup, info)
+	if !errors.Is(err, windows.ERROR_PRIVILEGE_NOT_HELD) {
+		return err
+	}
+	if flags&windows.EXTENDED_STARTUPINFO_PRESENT != 0 && !inherit {
+		// ConPTY is an extended startup attribute and cannot cross the Secondary
+		// Logon fallback. The interactive caller retries through its pipe-backed
+		// terminal, which still launches under the selected primary token.
+		return errSelectedTokenExtendedStartupUnsupported
+	}
+	// CreateProcessWithTokenW is the documented alternative for callers that
+	// hold SeImpersonatePrivilege but not the privileges required by
+	// CreateProcessAsUserW. Secondary Logon rejects extended startup attributes,
+	// so use the same inheritable stdio handles through a plain STARTUPINFO.
+	// Failure remains explicit; process identity is never substituted with the
+	// agent's own token.
+	fallbackStartup := *startup
+	fallbackStartup.Cb = uint32(unsafe.Sizeof(windows.StartupInfo{}))
+	fallbackFlags := flags &^ windows.EXTENDED_STARTUPINFO_PRESENT
+	if environment == nil {
+		fallbackFlags &^= windows.CREATE_UNICODE_ENVIRONMENT
+	}
+	fallbackErr := createProcessWithTokenCall(token, application, commandLine, inherit, fallbackFlags, environment, directory, &fallbackStartup, info)
+	if fallbackErr != nil {
 		return fmt.Errorf("launch with selected token: CreateProcessAsUserW: %v; CreateProcessWithTokenW: %w", err, fallbackErr)
 	}
 	return nil

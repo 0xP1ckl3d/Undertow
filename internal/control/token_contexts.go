@@ -275,13 +275,34 @@ func (m *Manager) bindTokenOperation(r *http.Request) (*http.Request, error) {
 }
 func (m *Manager) tokenHTTPHandlers(routes *http.ServeMux) {
 	routes.HandleFunc("GET /v1/agents/{id}/tokens", func(w http.ResponseWriter, r *http.Request) {
-		if result, ok := m.cachedTokenResponse(r.PathValue("id")); ok {
-			result.DefaultContextID = m.tokenDefault(jobOwner(r.Context()), r.PathValue("id"))
+		agent := r.PathValue("id")
+		if result, ok := m.cachedTokenResponse(agent); ok {
+			result.DefaultContextID = m.tokenDefault(jobOwner(r.Context()), agent)
 			w.Header().Set("Cache-Control", "no-store")
 			jsonReply(w, 200, result)
 			return
 		}
-		m.manageTokenRequest(w, r, pivot.TokenRequest{Action: "list"})
+		// Opening the workspace is a metadata read, not an agent operation. A
+		// cache miss must not occupy the foreground turn or wait for a sleeping
+		// agent. Operators can explicitly refresh to enqueue a live list request.
+		m.mu.RLock()
+		state := m.agents[agent]
+		info := m.offlineAgents[agent]
+		if state != nil {
+			info = state.inventory
+		}
+		m.mu.RUnlock()
+		if info.Capabilities == nil || !info.Capabilities.Allows("tokens") {
+			http.Error(w, "agent authentication contexts are unsupported or disabled", 409)
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		jsonReply(w, 200, pivot.TokenResponse{
+			StoreInstanceID:  info.Capabilities.TokenStoreInstanceID,
+			Contexts:         []authcontext.Metadata{},
+			Candidates:       []authcontext.Metadata{},
+			DefaultContextID: m.tokenDefault(jobOwner(r.Context()), agent),
+		})
 	})
 	routes.HandleFunc("POST /v1/agents/{id}/tokens", func(w http.ResponseWriter, r *http.Request) {
 		var request pivot.TokenRequest

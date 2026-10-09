@@ -199,6 +199,33 @@ func TestTokenSnapshotRetainsCandidateExpiryAndAllowsSleepingUse(t *testing.T) {
 	}
 }
 
+func TestTokenWorkspaceCacheMissDoesNotWaitForSleepingAgent(t *testing.T) {
+	m := tokenTestManager()
+	report := pivot.CapabilityReport{Supported: []string{"tokens"}, Allowed: []string{"tokens"}, TokenStoreInstanceID: "store-one"}
+	m.offlineAgents["agent"] = AgentInfo{ID: "agent", Capabilities: &report, ConnectionState: "sleeping", SleepLostAfter: time.Now().Add(time.Minute)}
+	mux := http.NewServeMux()
+	m.tokenHTTPHandlers(mux)
+	r := httptest.NewRequest(http.MethodGet, "/v1/agents/agent/tokens", nil)
+	r = r.WithContext(context.WithValue(r.Context(), jobOwnerKey{}, uint64(77)))
+	w := httptest.NewRecorder()
+
+	started := time.Now()
+	mux.ServeHTTP(w, r)
+	if elapsed := time.Since(started); elapsed > 100*time.Millisecond {
+		t.Fatalf("metadata read waited for agent check-in: %v", elapsed)
+	}
+	if w.Code != http.StatusOK {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	var result pivot.TokenResponse
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	if result.StoreInstanceID != "store-one" || result.Contexts == nil || len(result.Contexts) != 0 || len(result.Candidates) != 0 {
+		t.Fatalf("unexpected immediate snapshot: %#v", result)
+	}
+}
+
 func TestJumpFreezesSessionContextAndRejectsCredentialCombination(t *testing.T) {
 	m := tokenTestManager()
 	store, err := OpenOperationsStore(filepath.Join(t.TempDir(), "operations.db"))

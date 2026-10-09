@@ -5,6 +5,7 @@ package pivot
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"runtime"
@@ -12,6 +13,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 	"undertow/internal/authcontext"
@@ -370,5 +372,101 @@ func TestWindowsTokenContextUATImportedForeignProcessExecution(t *testing.T) {
 		}
 		release()
 		_ = agentTokens.Remove(stored.ID)
+	}
+}
+
+func TestCreateProcessWithSelectedTokenFallbackUsesBasicStartupInfo(t *testing.T) {
+	originalAsUser, originalWithToken := createProcessAsUserCall, createProcessWithTokenCall
+	defer func() {
+		createProcessAsUserCall, createProcessWithTokenCall = originalAsUser, originalWithToken
+	}()
+	createProcessAsUserCall = func(windows.Token, *uint16, []uint16, bool, uint32, *uint16, *uint16, *windows.StartupInfo, *windows.ProcessInformation) error {
+		return windows.ERROR_PRIVILEGE_NOT_HELD
+	}
+	called := false
+	createProcessWithTokenCall = func(_ windows.Token, _ *uint16, _ []uint16, inherit bool, flags uint32, environment *uint16, _ *uint16, startup *windows.StartupInfo, _ *windows.ProcessInformation) error {
+		called = true
+		if !inherit {
+			t.Error("fallback did not preserve handle inheritance")
+		}
+		if flags&windows.EXTENDED_STARTUPINFO_PRESENT != 0 {
+			t.Error("fallback retained EXTENDED_STARTUPINFO_PRESENT")
+		}
+		if flags&windows.CREATE_UNICODE_ENVIRONMENT != 0 || environment != nil {
+			t.Error("fallback described a missing environment block as Unicode")
+		}
+		if startup.Cb != uint32(unsafe.Sizeof(windows.StartupInfo{})) {
+			t.Fatalf("fallback STARTUPINFO size = %d", startup.Cb)
+		}
+		return nil
+	}
+	startup := windows.StartupInfo{Cb: uint32(unsafe.Sizeof(windows.StartupInfoEx{})), Flags: windows.STARTF_USESTDHANDLES}
+	err := createProcessWithSelectedToken(1, nil, []uint16{'x', 0}, true, windows.EXTENDED_STARTUPINFO_PRESENT|windows.CREATE_UNICODE_ENVIRONMENT, nil, nil, &startup, &windows.ProcessInformation{})
+	if err != nil || !called {
+		t.Fatal("plain STARTUPINFO fallback was not used", err)
+	}
+}
+
+func TestWindowsTokenContextUATCreateProcessWithTokenFallback(t *testing.T) {
+	ctx, id := windowsTokenUATContext(t)
+	selected, release, err := acquireTokenContext(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	original := createProcessAsUserCall
+	defer func() { createProcessAsUserCall = original }()
+	createProcessAsUserCall = func(windows.Token, *uint16, []uint16, bool, uint32, *uint16, *uint16, *windows.StartupInfo, *windows.ProcessInformation) error {
+		return windows.ERROR_PRIVILEGE_NOT_HELD
+	}
+	output, err := inventoryCommand(selected, "whoami.exe", "/user")
+	if errors.Is(err, windows.ERROR_PRIVILEGE_NOT_HELD) {
+		t.Skip("CreateProcessWithTokenW UAT requires SeImpersonatePrivilege")
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, err := operationToken(selected).GetTokenUser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output, user.User.Sid.String()) {
+		t.Fatal("CreateProcessWithTokenW fallback used the wrong identity")
+	}
+}
+
+func TestSelectedTokenConPTYFallsBackToPipedTerminal(t *testing.T) {
+	ctx, id := windowsTokenUATContext(t)
+	selected, release, err := acquireTokenContext(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	original := createProcessAsUserCall
+	defer func() { createProcessAsUserCall = original }()
+	createProcessAsUserCall = func(windows.Token, *uint16, []uint16, bool, uint32, *uint16, *uint16, *windows.StartupInfo, *windows.ProcessInformation) error {
+		return windows.ERROR_PRIVILEGE_NOT_HELD
+	}
+	process, terminal, _, err := startInteractiveProcess(selected, InteractiveRequest{Argv: []string{"cmd.exe", "/d", "/c", "whoami.exe /user"}, Cols: 100, Rows: 30})
+	if errors.Is(err, windows.ERROR_PRIVILEGE_NOT_HELD) {
+		t.Skip("selected-token Live shell UAT requires SeImpersonatePrivilege for the fallback")
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	readDone := make(chan []byte, 1)
+	go func() { data, _ := io.ReadAll(terminal); readDone <- data }()
+	waitErr := process.Wait()
+	_ = terminal.Close()
+	output := <-readDone
+	if waitErr != nil {
+		t.Fatal(waitErr)
+	}
+	user, err := operationToken(selected).GetTokenUser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(output), user.User.Sid.String()) {
+		t.Fatalf("piped selected-token Live shell used the wrong identity: %q", output)
 	}
 }

@@ -1,6 +1,6 @@
 # Windows authentication contexts / tokens
 
-Open **Agents → your Windows agent → Authentication Contexts / Tokens**. Each context is a live Windows token owned by that agent process. Undertow sends only opaque context IDs and identity metadata to operators. Token handles are never sent to the server, written to disk, or placed in Jobs or history.
+Open **Agents → your Windows agent → Tokens**. Each context is a live Windows token owned by that agent process. Undertow sends only opaque context IDs and identity metadata to operators. Token handles are never sent to the server, written to disk, or placed in Jobs or history.
 
 The agent must advertise and allow the `tokens` capability. Windows agents enable it by default; `--deny tokens` disables management and selected-token execution. Older and non-Windows agents keep their existing execution behaviour and reject supplied token context IDs.
 
@@ -12,13 +12,13 @@ The table shows context ID, identity, domain/user, token type, impersonation lev
 
 **Create a context** supports Windows `LogonUserW` interactive, network, batch, and new-credentials logons. Account logon rights and agent process permissions apply. New credentials preserves the local identity and supplies different outbound network credentials; Windows does not validate that password during creation. Clear Domain for a UPN, or use `.` for a local account. The client seals transient logon input to a single-use agent key before forwarding it through the server. Keys expire after one minute; tampering, expiry, replay, and keys from another agent are rejected. The server receives only ciphertext and does not retain creation requests.
 
-List, discovery, import, creation, remove, and clear requests wait in memory for a sleeping/check-in agent's next authenticated check-in. They do not become durable Jobs or survive a server/client restart. Plaintext logon material remains only in the local operator client long enough to seal it; neither plaintext nor a reusable secret enters the server queue. **Use for this session** and **Revert** are server-side session choices and apply immediately while the agent sleeps.
+Opening Tokens reads the last server-held metadata immediately, including an empty first snapshot; it never waits for the agent. Refresh, list, discovery, import, creation, remove, and clear requests wait in memory for a sleeping/check-in agent's next authenticated check-in. They do not become durable Jobs or survive a server/client restart. Plaintext logon material remains only in the local operator client long enough to seal it; neither plaintext nor a reusable secret enters the server queue. **Use for this session** and **Revert** are server-side session choices and apply immediately while the agent sleeps.
 
 **Remove** closes a stored context. **Clear store** closes all stored contexts and candidates and invalidates pending creation keys. Already-running work holds its own token duplicate and can finish; queued work that has not acquired a token fails when the selected context is unavailable. Contexts survive transport reconnects in the same process, but disappear when the agent process exits. Restarting the server does not recreate agent tokens.
 
 ## Choose an execution identity
 
-The Job, Modules, and Live shell forms expose **Authentication context**. Choose a stored context, the authenticated operator connection's default, or **Agent process identity**. Console execution/module commands accept `--token-context CONTEXT_ID` or `--token-context process`.
+The Job, Modules, and Shell forms expose **Authentication context**. Choose a stored context, the authenticated operator connection's default, or **Agent process identity**. Console execution/module commands accept `--token-context CONTEXT_ID` or `--token-context process`.
 
 **Use for this session** affects only future work submitted through this authenticated operator connection for this agent. Other connections, including another connection with the same account, keep their own defaults. GUI and console on the same client connection share that default. It is not an agent-wide identity change and does not survive client disconnect/server restart.
 
@@ -26,7 +26,7 @@ An explicit selection takes precedence over the session default. The server free
 
 **Revert to process identity** clears only this connection's default; it also works when the agent is offline. Removed or restarted-agent contexts remain visibly unavailable until the operator chooses a live context or reverts. Execution fails instead of silently falling back to the process identity. Removing/clearing shared contexts does not change another operator's default.
 
-Programs, scripts, interactive shells, background command Jobs, BOF workers, and assembly workers launch with the selected primary token. Undertow first uses `CreateProcessAsUserW`; when Windows reports that the caller lacks its required privileges, Undertow uses the documented `CreateProcessWithTokenW` alternative. Failure from both mechanisms is returned with no process-identity fallback. Built-in operations, native module entry points, and WASM execution use impersonation restricted to their locked operation thread, then restore the previous thread identity. A native module creating additional threads must follow Windows thread-token semantics; those threads do not automatically inherit impersonation. Existing working directories, environment and module runtime limits still apply; selecting a token does not expand capabilities.
+Programs, scripts, interactive shells, background command Jobs, BOF workers, and assembly workers launch with the selected primary token. Undertow first uses `CreateProcessAsUserW`; when Windows reports that the caller lacks its required privileges, Undertow uses `CreateProcessWithTokenW` with the plain `STARTUPINFO` contract required by Secondary Logon. Failure from both mechanisms is returned with no process-identity fallback. Built-in operations, native module entry points, and WASM execution use impersonation restricted to their locked operation thread, then restore the previous thread identity. A native module creating additional threads must follow Windows thread-token semantics; those threads do not automatically inherit impersonation. Existing working directories, environment and module runtime limits still apply; selecting a token does not expand capabilities.
 
 Jump freezes the selected context when **Start jump** is submitted. The same opaque context ID applies to target artifact delivery and the selected WinRM, WMI, Service Control, or Scheduled Task worker. Removing it before either phase acquires the token fails closed. Supplied Jump username/password or NT-hash credentials are a separate override: the GUI and console explicitly select `process` for that mode, and the server rejects a supplied credential combined with another token context.
 
@@ -89,7 +89,7 @@ An optional alternate-account test uses `UNDERTOW_TOKEN_UAT_LOGON_FILE` pointing
 | Two authenticated clients select different contexts and run `whoami` concurrently | Each command uses its own context; baseline process identity remains unchanged |
 | Queue work while the agent sleeps, then change the submitting session's default | The Job retains its original ID and executes with that selection on callback |
 | Submit discover/import/create/remove/clear while the agent sleeps | The request waits for the next authenticated check-in; no token handle, plaintext credential, or reusable secret appears in a durable queue |
-| Leave and reopen Authentication Contexts after discovery | Candidate rows remain and transition to `expired` at their agent-side expiry instead of disappearing on navigation |
+| Leave and reopen Tokens after discovery | Candidate rows remain and transition to `expired` at their agent-side expiry instead of disappearing on navigation |
 | Remove a context before queued work dispatches | Work fails with context unavailable; no process-identity fallback |
 | Remove/clear during running work | Accepted work finishes with its leased token; future acquisitions fail |
 | Disconnect/reconnect the carrier without ending the agent process | Stored contexts remain available |

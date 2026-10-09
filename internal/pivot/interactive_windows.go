@@ -5,6 +5,7 @@ package pivot
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -228,6 +229,9 @@ func startInteractiveProcess(ctx context.Context, request InteractiveRequest) (i
 		err = createProcessWithSelectedToken(token, app, line, false, windows.EXTENDED_STARTUPINFO_PRESENT, nil, nil, &startup.StartupInfo, &processInfo)
 	} else {
 		err = windows.CreateProcess(app, &line[0], nil, nil, false, windows.EXTENDED_STARTUPINFO_PRESENT, nil, nil, &startup.StartupInfo, &processInfo)
+	}
+	if errors.Is(err, errSelectedTokenExtendedStartupUnsupported) {
+		return startPipedInteractiveProcess(ctx, path, argv[1:])
 	}
 	if err != nil {
 		return nil, nil, nil, err

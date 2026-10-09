@@ -406,7 +406,7 @@ func (g *guiServer) runAgentGUICommand(ctx context.Context, agentID, line string
 		}
 		output := result.Stdout + result.Stderr
 		if result.Error != "" {
-			output += result.Error + "\n"
+			return guiCommandResult{Output: output}, errors.New(result.Error)
 		}
 		return guiCommandResult{Output: fmt.Sprintf("%s[exit %d]\n", output, result.ExitCode)}, nil
 	case "jobs":
