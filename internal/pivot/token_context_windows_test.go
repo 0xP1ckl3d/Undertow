@@ -376,11 +376,14 @@ func TestWindowsTokenContextUATImportedForeignProcessExecution(t *testing.T) {
 }
 
 func TestCreateProcessWithSelectedTokenFallbackUsesBasicStartupInfo(t *testing.T) {
-	originalAsUser, originalWithToken := createProcessAsUserCall, createProcessWithTokenCall
+	originalAsUser, originalImpersonated, originalWithToken := createProcessAsUserCall, createProcessAsUserImpersonatedCall, createProcessWithTokenCall
 	defer func() {
-		createProcessAsUserCall, createProcessWithTokenCall = originalAsUser, originalWithToken
+		createProcessAsUserCall, createProcessAsUserImpersonatedCall, createProcessWithTokenCall = originalAsUser, originalImpersonated, originalWithToken
 	}()
 	createProcessAsUserCall = func(windows.Token, *uint16, []uint16, bool, uint32, *uint16, *uint16, *windows.StartupInfo, *windows.ProcessInformation) error {
+		return windows.ERROR_PRIVILEGE_NOT_HELD
+	}
+	createProcessAsUserImpersonatedCall = func(windows.Token, *uint16, []uint16, bool, uint32, *uint16, *uint16, *windows.StartupInfo, *windows.ProcessInformation) error {
 		return windows.ERROR_PRIVILEGE_NOT_HELD
 	}
 	called := false
@@ -407,7 +410,30 @@ func TestCreateProcessWithSelectedTokenFallbackUsesBasicStartupInfo(t *testing.T
 	}
 }
 
-func TestWindowsTokenContextUATCreateProcessWithTokenFallback(t *testing.T) {
+func TestCreateProcessWithSelectedTokenRetriesAsSelectedIdentity(t *testing.T) {
+	originalAsUser, originalImpersonated, originalWithToken := createProcessAsUserCall, createProcessAsUserImpersonatedCall, createProcessWithTokenCall
+	defer func() {
+		createProcessAsUserCall, createProcessAsUserImpersonatedCall, createProcessWithTokenCall = originalAsUser, originalImpersonated, originalWithToken
+	}()
+	createProcessAsUserCall = func(windows.Token, *uint16, []uint16, bool, uint32, *uint16, *uint16, *windows.StartupInfo, *windows.ProcessInformation) error {
+		return windows.ERROR_PRIVILEGE_NOT_HELD
+	}
+	selectedIdentityCalled := false
+	createProcessAsUserImpersonatedCall = func(windows.Token, *uint16, []uint16, bool, uint32, *uint16, *uint16, *windows.StartupInfo, *windows.ProcessInformation) error {
+		selectedIdentityCalled = true
+		return nil
+	}
+	createProcessWithTokenCall = func(windows.Token, *uint16, []uint16, bool, uint32, *uint16, *uint16, *windows.StartupInfo, *windows.ProcessInformation) error {
+		t.Fatal("Secondary Logon called after selected-identity launch succeeded")
+		return nil
+	}
+	err := createProcessWithSelectedToken(1, nil, []uint16{'x', 0}, true, 0, nil, nil, &windows.StartupInfo{}, &windows.ProcessInformation{})
+	if err != nil || !selectedIdentityCalled {
+		t.Fatal("selected-identity CreateProcessAsUserW retry was not used", err)
+	}
+}
+
+func TestWindowsTokenContextUATCreateProcessAsSelectedIdentity(t *testing.T) {
 	ctx, id := windowsTokenUATContext(t)
 	selected, release, err := acquireTokenContext(ctx, id)
 	if err != nil {
@@ -417,6 +443,34 @@ func TestWindowsTokenContextUATCreateProcessWithTokenFallback(t *testing.T) {
 	original := createProcessAsUserCall
 	defer func() { createProcessAsUserCall = original }()
 	createProcessAsUserCall = func(windows.Token, *uint16, []uint16, bool, uint32, *uint16, *uint16, *windows.StartupInfo, *windows.ProcessInformation) error {
+		return windows.ERROR_PRIVILEGE_NOT_HELD
+	}
+	output, err := inventoryCommand(selected, "whoami.exe", "/user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, err := operationToken(selected).GetTokenUser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output, user.User.Sid.String()) {
+		t.Fatal("selected-identity CreateProcessAsUserW retry used the wrong identity")
+	}
+}
+
+func TestWindowsTokenContextUATCreateProcessWithTokenFallback(t *testing.T) {
+	ctx, id := windowsTokenUATContext(t)
+	selected, release, err := acquireTokenContext(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	original, originalImpersonated := createProcessAsUserCall, createProcessAsUserImpersonatedCall
+	defer func() { createProcessAsUserCall, createProcessAsUserImpersonatedCall = original, originalImpersonated }()
+	createProcessAsUserCall = func(windows.Token, *uint16, []uint16, bool, uint32, *uint16, *uint16, *windows.StartupInfo, *windows.ProcessInformation) error {
+		return windows.ERROR_PRIVILEGE_NOT_HELD
+	}
+	createProcessAsUserImpersonatedCall = func(windows.Token, *uint16, []uint16, bool, uint32, *uint16, *uint16, *windows.StartupInfo, *windows.ProcessInformation) error {
 		return windows.ERROR_PRIVILEGE_NOT_HELD
 	}
 	output, err := inventoryCommand(selected, "whoami.exe", "/user")
@@ -442,9 +496,12 @@ func TestSelectedTokenConPTYFallsBackToPipedTerminal(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer release()
-	original := createProcessAsUserCall
-	defer func() { createProcessAsUserCall = original }()
+	original, originalImpersonated := createProcessAsUserCall, createProcessAsUserImpersonatedCall
+	defer func() { createProcessAsUserCall, createProcessAsUserImpersonatedCall = original, originalImpersonated }()
 	createProcessAsUserCall = func(windows.Token, *uint16, []uint16, bool, uint32, *uint16, *uint16, *windows.StartupInfo, *windows.ProcessInformation) error {
+		return windows.ERROR_PRIVILEGE_NOT_HELD
+	}
+	createProcessAsUserImpersonatedCall = func(windows.Token, *uint16, []uint16, bool, uint32, *uint16, *uint16, *windows.StartupInfo, *windows.ProcessInformation) error {
 		return windows.ERROR_PRIVILEGE_NOT_HELD
 	}
 	process, terminal, _, err := startInteractiveProcess(selected, InteractiveRequest{Argv: []string{"cmd.exe", "/d", "/c", "whoami.exe /user"}, Cols: 100, Rows: 30})
