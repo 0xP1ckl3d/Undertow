@@ -84,7 +84,7 @@ func openControlSession(ctx context.Context, options operatorOptions, agentID, o
 		return nil, nil, err
 	}
 	path := "/v1/agents/" + url.PathEscape(agentID) + "/" + operation
-	if _, err := fmt.Fprintf(conn, "CONNECT %s HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer %s\r\n\r\n", path, strings.TrimSpace(string(token))); err != nil {
+	if _, err := fmt.Fprintf(conn, "CONNECT %s HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer %s\r\nX-Undertow-Token-Context: %s\r\n\r\n", path, strings.TrimSpace(string(token)), pivot.TokenContextID(ctx)); err != nil {
 		conn.Close()
 		return nil, nil, err
 	}

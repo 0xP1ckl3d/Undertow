@@ -18,6 +18,7 @@ import (
 // queuedJobRequest is retained by the server while an agent is intentionally
 // sleeping. The original typed job API validates the payload before enqueue.
 type queuedJobRequest struct {
+	TokenContextID    string             `json:"token_context_id,omitempty"`
 	Kind              string             `json:"kind"`
 	Language          string             `json:"language,omitempty"`
 	Argv              []string           `json:"argv,omitempty"`
@@ -58,6 +59,14 @@ func (r queuedJobRequest) size() int {
 // their brief online window. This removes a race between the operator click
 // and the agent's sleep handshake. A truly lost agent still rejects new work.
 func (m *Manager) queueJobIfSleeping(owner uint64, agentID string, request queuedJobRequest) (JobInfo, bool, error) {
+	if err := pivot.ValidateTokenContextID(request.TokenContextID); err != nil {
+		return JobInfo{}, true, err
+	}
+	if request.Exec != nil {
+		if err := pivot.ValidateTokenContextID(request.Exec.TokenContextID); err != nil {
+			return JobInfo{}, true, err
+		}
+	}
 	m.mu.Lock()
 	live := m.agents[agentID]
 	offline := m.offlineAgents[agentID]
@@ -94,8 +103,9 @@ func (m *Manager) queueJobIfSleeping(owner uint64, agentID string, request queue
 		return JobInfo{}, true, err
 	}
 	now := time.Now().UTC()
-	info := JobInfo{ID: hex.EncodeToString(random[:]), AgentID: agentID, Kind: request.Kind, Language: request.Language, Argv: append([]string(nil), request.Argv...), Started: now, QueuedAt: &now, State: "queued", DeploymentID: request.DeploymentID}
+	info := JobInfo{TokenContextID: request.TokenContextID, ID: hex.EncodeToString(random[:]), AgentID: agentID, Kind: request.Kind, Language: request.Language, Argv: append([]string(nil), request.Argv...), Started: now, QueuedAt: &now, State: "queued", DeploymentID: request.DeploymentID}
 	if request.Exec != nil {
+		info.TokenContextID = request.Exec.TokenContextID
 		info.Builtin = request.Exec.Builtin
 		info.Argv = append([]string(nil), request.Exec.Argv...)
 		info.Args = append([]string(nil), request.Exec.Args...)
@@ -206,7 +216,7 @@ func (m *Manager) dispatchQueuedJob(agentID string, stream *mux.Mux, job *jobSta
 		m.dispatchQueuedLifecycle(agentID, stream, job, request.Kind)
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(pivot.WithTokenContext(context.Background(), request.TokenContextID), 15*time.Second)
 	defer cancel()
 	var session *pivot.InteractiveSession
 	var err error
@@ -301,6 +311,17 @@ func (m *Manager) dispatchQueuedExec(agentID string, stream *mux.Mux, job *jobSt
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	result, err := pivot.ExecuteRequest(ctx, stream, *request)
 	cancel()
+	// Persist process-identity observations before publishing a terminal Job.
+	// Selected contexts stay in Job history and never replace agent inventory.
+	if err == nil && (request.TokenContextID == "" || request.TokenContextID == "process") && retainedHostOperation(request.Builtin) && len(request.Args) == 0 {
+		m.mu.RLock()
+		current := m.agents[agentID]
+		valid := current != nil && current.mux == stream
+		m.mu.RUnlock()
+		if valid {
+			m.retainHostResult(agentID, request.Builtin, result)
+		}
+	}
 	m.mu.Lock()
 	if job.info.State != "dispatching" {
 		m.mu.Unlock()
@@ -337,9 +358,6 @@ func (m *Manager) dispatchQueuedExec(agentID string, stream *mux.Mux, job *jobSt
 		}
 	}
 	m.mu.Unlock()
-	if request.Builtin != "" && retainedHostOperation(request.Builtin) && len(request.Args) == 0 {
-		m.retainHostResult(agentID, request.Builtin, result)
-	}
 	m.PublishEvent("job."+info.State, info.ID)
 }
 

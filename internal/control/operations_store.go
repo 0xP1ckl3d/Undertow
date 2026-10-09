@@ -13,6 +13,7 @@ import (
 )
 
 type AuditRecord struct {
+	TokenContextID  string    `json:"token_context_id,omitempty"`
 	ID              string    `json:"id"`
 	ActionID        string    `json:"action_id,omitempty"`
 	At              time.Time `json:"at"`
@@ -74,12 +75,19 @@ func OpenOperationsStore(path string) (*OperationsStore, error) {
 		"CREATE INDEX IF NOT EXISTS deployments_waiting_artifact ON deployments(state,artifact_id)",
 		"CREATE UNIQUE INDEX IF NOT EXISTS deployments_unique_result ON deployments(result_agent_id) WHERE result_agent_id <> ''",
 		"CREATE INDEX IF NOT EXISTS screenshots_agent_at ON screenshots(agent_id, at DESC)",
-		"PRAGMA user_version=14",
+		"PRAGMA user_version=15",
 	} {
 		if _, err := db.Exec(statement); err != nil {
 			db.Close()
 			return nil, fmt.Errorf("initialize operations database: %w", err)
 		}
+	}
+	rows, columnErr := db.Query("SELECT token_context_id FROM audit LIMIT 0")
+	if columnErr == nil {
+		rows.Close()
+	} else if _, err := db.Exec("ALTER TABLE audit ADD COLUMN token_context_id TEXT NOT NULL DEFAULT ''"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate audit authentication context: %w", err)
 	}
 	if err := os.Chmod(abs, 0600); err != nil {
 		db.Close()
@@ -369,7 +377,7 @@ func (s *OperationsStore) RecordAudit(record AuditRecord) error {
 	if s == nil {
 		return errors.New("operations store is not configured")
 	}
-	_, err := s.db.Exec(`INSERT INTO audit (id,action_id,at,action,target,client_id,client_session_id,operator_id,display_name,source,identity_trust,status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, record.ID, record.ActionID, record.At.Format(time.RFC3339Nano), record.Action, record.Target, record.ClientID, fmt.Sprint(record.ClientSessionID), record.OperatorID, record.DisplayName, record.Source, record.IdentityTrust, record.Status)
+	_, err := s.db.Exec(`INSERT INTO audit (id,action_id,at,action,target,client_id,client_session_id,operator_id,display_name,source,identity_trust,status,token_context_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, record.ID, record.ActionID, record.At.Format(time.RFC3339Nano), record.Action, record.Target, record.ClientID, fmt.Sprint(record.ClientSessionID), record.OperatorID, record.DisplayName, record.Source, record.IdentityTrust, record.Status, record.TokenContextID)
 	if err != nil {
 		return err
 	}
@@ -385,6 +393,14 @@ func (s *OperationsStore) CompleteAudit(id string, status int) error {
 	return err
 }
 
+func (s *OperationsStore) CompleteAuditContext(id string, status int, contextID string) error {
+	if s == nil {
+		return errors.New("operations store is not configured")
+	}
+	_, err := s.db.Exec(`UPDATE audit SET status=?,token_context_id=? WHERE id=?`, status, contextID, id)
+	return err
+}
+
 func (s *OperationsStore) AuditHistory(limit int) ([]AuditRecord, error) {
 	if s == nil {
 		return []AuditRecord{}, nil
@@ -392,7 +408,7 @@ func (s *OperationsStore) AuditHistory(limit int) ([]AuditRecord, error) {
 	if limit < 1 || limit > 500 {
 		limit = 100
 	}
-	rows, err := s.db.Query(`SELECT id,action_id,at,action,target,client_id,client_session_id,operator_id,display_name,source,identity_trust,status FROM audit ORDER BY at DESC LIMIT ?`, limit)
+	rows, err := s.db.Query(`SELECT id,action_id,at,action,target,client_id,client_session_id,operator_id,display_name,source,identity_trust,status,token_context_id FROM audit ORDER BY at DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -401,7 +417,7 @@ func (s *OperationsStore) AuditHistory(limit int) ([]AuditRecord, error) {
 	for rows.Next() {
 		var r AuditRecord
 		var at, session string
-		if err := rows.Scan(&r.ID, &r.ActionID, &at, &r.Action, &r.Target, &r.ClientID, &session, &r.OperatorID, &r.DisplayName, &r.Source, &r.IdentityTrust, &r.Status); err != nil {
+		if err := rows.Scan(&r.ID, &r.ActionID, &at, &r.Action, &r.Target, &r.ClientID, &session, &r.OperatorID, &r.DisplayName, &r.Source, &r.IdentityTrust, &r.Status, &r.TokenContextID); err != nil {
 			return nil, err
 		}
 		r.At, _ = time.Parse(time.RFC3339Nano, at)

@@ -58,13 +58,16 @@ func TestAgentGUIConsoleRequiresExplicitAgentCommand(t *testing.T) {
 		return nil, errors.New("unexpected request")
 	}}
 	gui := &guiServer{client: client, store: store}
-	for _, line := range []string{"help", "shell"} {
+	for _, line := range []string{"help", "shell", "shell --token-context process"} {
 		result, err := gui.runAgentGUICommand(context.Background(), "agent-a", line)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if line == "shell" && !result.OpenShell {
 			t.Fatal("shell did not require explicit shell panel")
+		}
+		if line == "shell --token-context process" && (!result.OpenShell || result.ShellTokenContextID != "process") {
+			t.Fatal("shell context selection lost")
 		}
 	}
 	for _, line := range []string{"quit", "exit", "back", "use agent-b", "status", "payload"} {
@@ -122,11 +125,17 @@ func TestAgentGUIConsoleScreenshotRequiresExplicitCommand(t *testing.T) {
 func TestAgentGUIConsoleKillsByStableAgentID(t *testing.T) {
 	var path string
 	client := &liveClientConsole{request: func(_ context.Context, method, target string, _ any) ([]byte, error) {
-		if method != http.MethodPost { return nil, errors.New("unexpected method") }
+		if method != http.MethodPost {
+			return nil, errors.New("unexpected method")
+		}
 		path = target
 		return nil, nil
 	}}
 	gui := &guiServer{client: client}
-	if _, err := gui.runAgentGUICommand(context.Background(), "agent-a", "session kill"); err != nil { t.Fatal(err) }
-	if path != "/v1/sessions/agent-a/kill" { t.Fatalf("session kill targeted %q, want stable agent ID", path) }
+	if _, err := gui.runAgentGUICommand(context.Background(), "agent-a", "session kill"); err != nil {
+		t.Fatal(err)
+	}
+	if path != "/v1/sessions/agent-a/kill" {
+		t.Fatalf("session kill targeted %q, want stable agent ID", path)
+	}
 }

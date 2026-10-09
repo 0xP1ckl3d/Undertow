@@ -30,6 +30,8 @@ See [getting started](getting-started.md) for enrollment, fingerprint, and privi
 | `routes` | Show routes; from an agent menu, filter to that agent. |
 | `quit` or `exit` | Detach the server console without stopping its worker. In the VPN client console, stop the VPN and remove its owned routes. |
 
+For live Windows token discovery, import, logon and session/per-operation selection, see [Authentication contexts / tokens](authentication-contexts.md#console-commands). Use `help tokens` in an agent console. Execution and module commands accept `--token-context ID|process`.
+
 ## Team coordination
 
 The connected **client** console can read and send the same server-retained messages and assignments as the GUI. These commands use the account authenticated when the client connected; an agent selection is not needed. The server console has no operator session for team chat, so use an authenticated client.

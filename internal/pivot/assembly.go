@@ -70,6 +70,12 @@ func serveAssembly(ctx context.Context, stream *mux.Stream) {
 		RejectInteractive(stream, errors.New("invalid assembly request"))
 		return
 	}
+	ctx, releaseToken, tokenErr := acquireTokenContext(ctx, request.TokenContextID)
+	if tokenErr != nil {
+		RejectInteractive(stream, tokenErr)
+		return
+	}
+	defer releaseToken()
 	select {
 	case nativeSlots <- struct{}{}:
 		defer func() { <-nativeSlots }()

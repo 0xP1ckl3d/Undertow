@@ -162,6 +162,8 @@ The server stores transfer metadata rather than another copy of the file. Sessio
 
 ## Run tools from Modules
 
+Windows agents expose **Authentication Contexts / Tokens** for discovery, import, logon and session defaults. Job, Modules and Live shell forms also have a per-operation **Authentication context** control. See [Authentication contexts / tokens](authentication-contexts.md) for selection, lifecycle and multi-operator behaviour.
+
 Open **Agents → your agent → Modules**, or sidebar **Modules** and choose **Target agent**. The bank is local to this client; loading does not execute tools.
 
 1. Search or filter **WASM**, **Native**, **.NET**, or **BOF**.

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -20,7 +21,13 @@ func TestParseDeniedCapabilities(t *testing.T) {
 		t.Fatalf("capabilities not independent: %+v", caps)
 	}
 	report := caps.Report()
-	if !reflect.DeepEqual(report.Supported, []string{"pivot", "exec", "hostops", "interactive", "scripts", "wasm", "native", "upload", "download", "listeners", "relay", "jump-credentials", "jump-nt-hash"}) || !reflect.DeepEqual(report.Allowed, []string{"pivot", "hostops", "interactive", "scripts", "wasm", "native", "download", "listeners", "relay", "jump-credentials", "jump-nt-hash"}) {
+	expectedSupported := []string{"pivot", "exec", "hostops", "interactive", "scripts", "wasm", "native", "upload", "download", "listeners", "relay", "jump-credentials", "jump-nt-hash"}
+	expectedAllowed := []string{"pivot", "hostops", "interactive", "scripts", "wasm", "native", "download", "listeners", "relay", "jump-credentials", "jump-nt-hash"}
+	if runtime.GOOS == "windows" {
+		expectedSupported = append(expectedSupported, "tokens")
+		expectedAllowed = append(expectedAllowed, "tokens")
+	}
+	if !reflect.DeepEqual(report.Supported, expectedSupported) || !reflect.DeepEqual(report.Allowed, expectedAllowed) {
 		t.Fatalf("report=%+v", report)
 	}
 	if _, err := ParseDenied("shell"); err == nil || !strings.Contains(err.Error(), "unknown agent capability") {

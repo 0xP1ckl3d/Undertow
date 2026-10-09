@@ -155,6 +155,10 @@ func (m *Manager) ServeRemote(ctx context.Context, token string, clientID uint64
 
 func clientRequestAllowed(request *http.Request, clientID uint64) bool {
 	path := request.URL.EscapedPath()
+	partsToken := strings.Split(path, "/")
+	if len(partsToken) == 5 && partsToken[1] == "v1" && partsToken[2] == "agents" && partsToken[3] != "" && !strings.ContainsAny(partsToken[3], "%\\") && partsToken[4] == "tokens" && request.URL.RawQuery == "" {
+		return request.Method == http.MethodGet || request.Method == http.MethodPost
+	}
 	if path == "/v1/team/operators" || path == "/v1/team/tasks" {
 		return request.URL.RawQuery == "" && (request.Method == http.MethodGet || path == "/v1/team/tasks" && request.Method == http.MethodPost)
 	}
@@ -394,6 +398,18 @@ func CallRemote(ctx context.Context, session *mux.Mux, method, path string, body
 	}
 	var raw json.RawMessage
 	if body != nil {
+		if id := pivot.TokenContextID(ctx); id != "" && tokenOperationPath(path) {
+			encoded, err := json.Marshal(body)
+			if err != nil {
+				return nil, err
+			}
+			var fields map[string]json.RawMessage
+			if json.Unmarshal(encoded, &fields) != nil || fields == nil {
+				return nil, errors.New("invalid operation body")
+			}
+			fields["token_context_id"], _ = json.Marshal(id)
+			body = fields
+		}
 		encoded, err := json.Marshal(body)
 		if err != nil {
 			return nil, err

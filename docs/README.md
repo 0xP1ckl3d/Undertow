@@ -18,6 +18,7 @@ Undertow connects your operator client to remote agents and their networks throu
 | Find an agent, inspect its host, run commands, or open a live shell | [GUI agent workflows](gui.md#choose-and-identify-an-agent) |
 | Browse and transfer files | [GUI files and transfers](gui.md#browse-and-transfer-files) · [Console files](console.md#running-an-agent-program-and-transferring-files) |
 | Run long-running work and keep its output | [GUI background jobs](gui.md#start-and-follow-background-jobs) · [Console jobs](console.md#server-console) |
+| Select a Windows identity per operation or operator connection | [Authentication contexts / tokens](authentication-contexts.md) |
 | Capture a Windows display | [GUI screenshots](gui.md#capture-and-view-screenshots) · [Console screenshots](console.md#windows-display-screenshots) |
 | Understand quiet check-ins and why an agent stays connected | [Agent connection rhythm](gui.md#understand-agent-connection-rhythm) · [Idle sleep details](agent-distribution.md#idle-sleep) |
 | Build, host, download, or deploy a headless agent | [Payload deployment](agent-distribution.md) |

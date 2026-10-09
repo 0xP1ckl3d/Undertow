@@ -132,6 +132,15 @@ func wasmHostOperation(ctx context.Context, op string, req wasmHostRequest) (any
 		if current, err := user.Current(); err == nil {
 			identity["user"], identity["uid"], identity["gid"], identity["home"] = current.Username, current.Uid, current.Gid, current.HomeDir
 		}
+		if metadata, selected, err := operationTokenMetadata(ctx); selected {
+			if err != nil {
+				return nil, err
+			}
+			identity["user"], identity["uid"], identity["gid"], identity["home"] = metadata.Identity, "", "", ""
+			if current, err := user.Lookup(metadata.Identity); err == nil {
+				identity["uid"], identity["gid"], identity["home"] = current.Uid, current.Gid, current.HomeDir
+			}
+		}
 		identity["os"], identity["arch"], identity["hostname"], identity["cwd"], identity["pid"] = runtime.GOOS, runtime.GOARCH, host, cwd, os.Getpid()
 		return identity, nil
 	case "environment":

@@ -433,7 +433,9 @@ VPN client keyboard during a transfer: Ctrl-] to cancel
 
 ### Granular agent capabilities
 
-All capabilities are enabled by default: `pivot`, `exec`, `hostops`, `interactive`, `scripts`, `wasm`, `native`, `upload`, `download`, `listeners`, `relay`, `jump-credentials`, and `jump-nt-hash`. Deny any combination at agent startup; the server and agent enforce the operation at the relevant stream. `relay` allows an operator-requested child-agent listener; zero relay listeners exist until explicitly started on a selected agent. It is independent of `listeners`, which controls client-service TCP forwards. `jump-credentials` allows a Jump to use an operator-supplied Windows identity, while `jump-nt-hash` separately gates NT-hash authentication. Denying either does not affect Jumps that use the source agent identity.
+Windows token contexts are managed through the [Authentication Contexts / Tokens workspace](docs/authentication-contexts.md), with per-operation IDs and authenticated connection defaults. Tokens stay in agent memory; only metadata and opaque selections cross the server. The Windows `tokens` capability controls management and selected-token execution.
+
+All supported capabilities are enabled by default: `tokens` (Windows), `pivot`, `exec`, `hostops`, `interactive`, `scripts`, `wasm`, `native`, `upload`, `download`, `listeners`, `relay`, `jump-credentials`, and `jump-nt-hash`. Deny any combination at agent startup; the server and agent enforce the operation at the relevant stream. `relay` allows an operator-requested child-agent listener; zero relay listeners exist until explicitly started on a selected agent. It is independent of `listeners`, which controls client-service TCP forwards. `jump-credentials` allows a Jump to use an operator-supplied Windows identity, while `jump-nt-hash` separately gates NT-hash authentication. Denying either does not affect Jumps that use the source agent identity.
 
 ```text
 Agent: undertow agent --transport quic --server SERVER_IP:443 --tls-insecure-skip-verify --fingerprint FINGERPRINT --token-file token.key --deny=exec,upload

@@ -18,9 +18,10 @@ const ExecDestination = "exec.undertow.invalid:0"
 const HostOpsDestination = "hostops.undertow.invalid:0"
 
 type ExecRequest struct {
-	Argv    []string `json:"argv,omitempty"`
-	Builtin string   `json:"builtin,omitempty"`
-	Args    []string `json:"args,omitempty"`
+	TokenContextID string   `json:"token_context_id,omitempty"`
+	Argv           []string `json:"argv,omitempty"`
+	Builtin        string   `json:"builtin,omitempty"`
+	Args           []string `json:"args,omitempty"`
 }
 
 type ExecResult struct {
@@ -73,6 +74,9 @@ func Execute(ctx context.Context, agent *mux.Mux, argv []string) (ExecResult, er
 
 // ExecuteRequest runs a direct executable or a built-in host operation.
 func ExecuteRequest(ctx context.Context, agent *mux.Mux, request ExecRequest) (ExecResult, error) {
+	if request.TokenContextID == "" {
+		request.TokenContextID = TokenContextID(ctx)
+	}
 	if err := validateExecRequest(request); err != nil {
 		return ExecResult{}, err
 	}
@@ -95,6 +99,9 @@ func ExecuteRequest(ctx context.Context, agent *mux.Mux, request ExecRequest) (E
 // ExecuteRequestOnStream runs an already opened foreground agent stream.
 // The caller may wait for a sleeping agent before opening it.
 func ExecuteRequestOnStream(ctx context.Context, stream *mux.Stream, request ExecRequest) (ExecResult, error) {
+	if request.TokenContextID == "" {
+		request.TokenContextID = TokenContextID(ctx)
+	}
 	if err := validateExecRequest(request); err != nil {
 		_ = stream.Close()
 		return ExecResult{}, err
@@ -132,6 +139,9 @@ func ExecuteRequestOnStream(ctx context.Context, stream *mux.Stream, request Exe
 }
 
 func validateExecRequest(request ExecRequest) error {
+	if err := ValidateTokenContextID(request.TokenContextID); err != nil {
+		return err
+	}
 	if request.Builtin == "" {
 		if len(request.Args) != 0 {
 			return errors.New("built-in arguments require a built-in command")
@@ -189,8 +199,22 @@ func serveExec(ctx context.Context, stream *mux.Stream, hostOps bool) {
 		writeExecResult(stream, ExecResult{Error: "command type does not match stream capability"})
 		return
 	}
+	ctx, releaseToken, err := acquireTokenContext(ctx, request.TokenContextID)
+	if err != nil {
+		writeExecResult(stream, ExecResult{Error: err.Error()})
+		return
+	}
+	defer releaseToken()
 	if request.Builtin != "" {
+		restore, err := enterTokenThread(ctx)
+		if err != nil {
+			writeExecResult(stream, ExecResult{Error: err.Error()})
+			return
+		}
 		result := runBuiltin(ctx, request.Builtin, request.Args)
+		if err := restore(); err != nil {
+			result = ExecResult{Error: err.Error()}
+		}
 		writeExecResult(stream, result)
 		return
 	}
@@ -205,6 +229,7 @@ func serveExec(ctx context.Context, stream *mux.Stream, hostOps bool) {
 	}()
 	command := exec.CommandContext(commandCtx, request.Argv[0], request.Argv[1:]...)
 	configureExecProcess(command)
+	configureTokenProcess(commandCtx, command)
 	stdout := &cappedWriter{limit: 32 << 10}
 	stderr := &cappedWriter{limit: 32 << 10}
 	command.Stdout, command.Stderr = stdout, stderr

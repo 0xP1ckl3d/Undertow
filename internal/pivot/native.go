@@ -77,6 +77,22 @@ func serveNative(ctx context.Context, stream *mux.Stream) {
 		RejectInteractive(stream, errors.New("invalid native request"))
 		return
 	}
+	ctx, releaseToken, tokenErr := acquireTokenContext(ctx, request.TokenContextID)
+	if tokenErr != nil {
+		RejectInteractive(stream, tokenErr)
+		return
+	}
+	defer releaseToken()
+	restore, tokenErr := enterTokenThread(ctx)
+	if tokenErr != nil {
+		RejectInteractive(stream, tokenErr)
+		return
+	}
+	defer func() {
+		if err := restore(); err != nil {
+			_ = WriteInteractiveError(stream, err)
+		}
+	}()
 	args, err := nativemodule.EncodeArgs(request.Args, request.Stdin)
 	if err != nil {
 		RejectInteractive(stream, err)

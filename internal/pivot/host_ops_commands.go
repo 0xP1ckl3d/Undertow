@@ -9,6 +9,7 @@ import (
 func inventoryCommand(ctx context.Context, program string, args ...string) (string, error) {
 	command := exec.CommandContext(ctx, program, args...)
 	configureExecProcess(command)
+	configureTokenProcess(ctx, command)
 	stdout := &cappedWriter{limit: 32 << 10}
 	stderr := &cappedWriter{limit: 4 << 10}
 	command.Stdout, command.Stderr = stdout, stderr

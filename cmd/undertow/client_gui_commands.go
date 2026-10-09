@@ -19,9 +19,10 @@ import (
 )
 
 type guiCommandResult struct {
-	Output    string               `json:"output"`
-	OpenShell bool                 `json:"open_shell,omitempty"`
-	ModuleRun *guiModuleCommandRun `json:"module_run,omitempty"`
+	Output              string               `json:"output"`
+	OpenShell           bool                 `json:"open_shell,omitempty"`
+	ShellTokenContextID string               `json:"shell_token_context_id,omitempty"`
+	ModuleRun           *guiModuleCommandRun `json:"module_run,omitempty"`
 }
 
 func (g *guiServer) agentGUIHelp() string {
@@ -35,6 +36,7 @@ func (g *guiServer) agentGUIHelp() string {
 		}
 	}
 	section("AGENT SESSION", [][2]string{{"show", "Inspect this agent"}, {"agent events", "Recent lifecycle events"}, {"agent sleep [SECONDS JITTER]", "View or set idle sleep"}, {"agent shutdown", "Ask this agent to exit"}, {"session kill", "Close this session; agent may reconnect"}, {"shell", "Open the separate live shell panel"}})
+	section("AUTHENTICATION CONTEXTS", [][2]string{{"tokens list|discover", "List live contexts or useful token candidates"}, {"tokens import|use|remove ID", "Import, select for this session, or remove"}, {"tokens create USER DOMAIN PASSWORD_FILE TYPE", "Create through Windows logon"}, {"tokens revert|clear", "Revert this session or close stored tokens"}, {"--token-context ID|process", "Select identity for one execution or module operation"}})
 	section("HOST", [][2]string{{"pwd; ls [PATH]; stat PATH", "Browse this agent's files"}, {"mkdir PATH; rm PATH", "Create or remove a path"}, {"whoami; ps; privileges", "Identity, processes and privileges"}, {"env [NAME]", "Environment variables"}, {"interfaces; dns; route-table", "Network configuration"}, {"screens; screenshot [NUMBER]", "List screens or capture explicitly"}})
 	section("FILES AND SERVICES", [][2]string{{"upload LOCAL REMOTE", "Send a client file to this agent"}, {"download REMOTE [LOCAL]", "Save an agent file on this client"}, {"forward add BIND TARGET", "Expose a client service through this agent"}, {"forward list; forward del BIND", "Inspect or close forwards"}, {"relay start [BIND]", "Start a relay listener on this agent"}, {"relay list; relay stop BIND", "Inspect or close relay listeners"}})
 	section("EXECUTION AND JOBS", [][2]string{{"exec PROGRAM [ARGS]", "Run one program when requested"}, {"job start PROGRAM [ARGS]", "Start a background job"}, {"jobs; job show|output ID", "Inspect retained jobs and output"}, {"job cancel|stop|delete ID", "Manage a job"}, {"run-script [OPTIONS] FILE", "Run a client-side script file"}, {"run-wasm|run-native|run-assembly|run-bof ...", "Run a client-side module file"}})
@@ -153,13 +155,14 @@ func (g *guiServer) runGUIConsoleModule(ctx context.Context, agentID string, mod
 		}
 		return guiCommandResult{Output: fmt.Sprintf("Started %s job %s on this agent. Output is retained in Jobs.\n", module.Name, job.ID)}, nil
 	}
-	return guiCommandResult{ModuleRun: &guiModuleCommandRun{Name: module.Name, Args: values, Input: input}}, nil
+	return guiCommandResult{ModuleRun: &guiModuleCommandRun{TokenContextID: pivot.TokenContextID(ctx), Name: module.Name, Args: values, Input: input}}, nil
 }
 
 type guiModuleCommandRun struct {
-	Name  string   `json:"name"`
-	Args  []string `json:"args"`
-	Input []byte   `json:"input,omitempty"`
+	TokenContextID string   `json:"token_context_id,omitempty"`
+	Name           string   `json:"name"`
+	Args           []string `json:"args"`
+	Input          []byte   `json:"input,omitempty"`
 }
 
 // runAgentGUICommand parses the familiar attached-agent command vocabulary in
@@ -173,6 +176,11 @@ func (g *guiServer) runAgentGUICommand(ctx context.Context, agentID, line string
 	if len(args) == 0 {
 		return guiCommandResult{}, nil
 	}
+	args, tokenID, err := parseTokenOption(args)
+	if err != nil {
+		return guiCommandResult{}, err
+	}
+	ctx = pivot.WithTokenContext(ctx, tokenID)
 	claims, err := g.actionClaims()
 	if err != nil {
 		return guiCommandResult{}, err
@@ -181,6 +189,14 @@ func (g *guiServer) runAgentGUICommand(ctx context.Context, agentID, line string
 	call := func(method, path string, body any) ([]byte, error) { return g.client.call(ctx, method, path, body) }
 	base := "/v1/agents/" + url.PathEscape(agentID)
 	switch args[0] {
+	case "tokens":
+		var out strings.Builder
+		if err := runConsoleTokens(ctx, &out, func(ctx context.Context, method, path string, body any) ([]byte, error) {
+			return g.client.call(ctx, method, path, body)
+		}, args, agentID); err != nil {
+			return guiCommandResult{}, err
+		}
+		return guiCommandResult{Output: out.String()}, nil
 	case "jump", "jumps", "deploy", "deployments":
 		var out strings.Builder
 		remoteCall := func(_ context.Context, method, path string, body any) ([]byte, error) {
@@ -215,7 +231,7 @@ func (g *guiServer) runAgentGUICommand(ctx context.Context, agentID, line string
 		if len(args) != 1 {
 			return guiCommandResult{}, errors.New("use shell")
 		}
-		return guiCommandResult{Output: "Live shell panel opened. Select Start live shell to connect.\n", OpenShell: true}, nil
+		return guiCommandResult{Output: "Live shell panel opened. Select Start live shell to connect.\n", OpenShell: true, ShellTokenContextID: pivot.TokenContextID(ctx)}, nil
 	case "show":
 		if len(args) != 1 {
 			return guiCommandResult{}, errors.New("use show")

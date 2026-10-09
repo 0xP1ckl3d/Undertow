@@ -69,7 +69,11 @@ func consoleCommand(args []string) error {
 func consoleCommandWithOptions(options operatorOptions, lifecycle consoleFeatures) error {
 	ctx, stop := commandContext()
 	defer stop()
-	caller := func(_ context.Context, method, path string, body any) ([]byte, error) {
+	caller := func(ctx context.Context, method, path string, body any) ([]byte, error) {
+		body, err := control.TokenOperationBody(ctx, path, body)
+		if err != nil {
+			return nil, err
+		}
 		return callControl(options, method, path, body)
 	}
 	opener := func(ctx context.Context, agentID string, request pivot.InteractiveRequest) (*pivot.InteractiveSession, error) {
@@ -95,6 +99,14 @@ func consoleCommandWithOptions(options operatorOptions, lifecycle consoleFeature
 }
 
 func runConsole(ctx context.Context, input io.Reader, output io.Writer, call consoleCaller, clientID func() uint64, quit func(), clientRoutes clientRouteAction, events <-chan string, features ...consoleFeatures) error {
+	originalCall := call
+	call = func(ctx context.Context, method, path string, body any) ([]byte, error) {
+		body, err := control.TokenOperationBody(ctx, path, body)
+		if err != nil {
+			return nil, err
+		}
+		return originalCall(ctx, method, path, body)
+	}
 	terminalOutput := false
 	if file, ok := output.(*os.File); ok && isConsoleTerminal(file) {
 		if restore, enabled := enableConsoleOutput(file); enabled {
@@ -334,6 +346,18 @@ func runConsole(ctx context.Context, input io.Reader, output io.Writer, call con
 			continue
 		}
 		if len(args) == 0 {
+			continue
+		}
+		args, tokenID, err := parseTokenOption(args)
+		if err != nil {
+			fmt.Fprintln(output, "error:", err)
+			continue
+		}
+		ctx := pivot.WithTokenContext(ctx, tokenID)
+		if args[0] == "tokens" {
+			if err := runConsoleTokens(ctx, output, call, args, selectedID); err != nil {
+				fmt.Fprintln(output, "error:", err)
+			}
 			continue
 		}
 		if args[0] == "clear" || args[0] == "cls" {

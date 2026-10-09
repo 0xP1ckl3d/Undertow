@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/netip"
+	"runtime"
 	"strings"
 
 	"undertow/internal/icmp"
@@ -34,6 +35,7 @@ func ServeAgentWithCapabilities(ctx context.Context, m *mux.Mux, caps Capabiliti
 // ServeAgentWithLifecycle adds the configured-agent shutdown control stream.
 // A nil stop callback keeps manually launched agents on their existing path.
 func ServeAgentWithLifecycle(ctx context.Context, m *mux.Mux, caps Capabilities, stop func()) {
+	ctx = context.WithValue(ctx, tokenCapabilityKey{}, caps.TokenContexts)
 	for {
 		s, err := m.Accept(ctx)
 		if err != nil {
@@ -66,6 +68,14 @@ func ServeAgentWithLifecycle(ctx context.Context, m *mux.Mux, caps Capabilities,
 					}
 				}
 			}()
+			continue
+		}
+		if s.Destination() == TokenDestination {
+			if !caps.TokenContexts || runtime.GOOS != "windows" {
+				s.Fail(errors.New("agent authentication contexts are disabled"))
+				continue
+			}
+			go serveTokens(ctx, s)
 			continue
 		}
 		if s.Destination() == ExecDestination {

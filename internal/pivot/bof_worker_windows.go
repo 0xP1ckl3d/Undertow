@@ -22,6 +22,7 @@ func executeBOFWorker(ctx context.Context, object, arguments []byte, output func
 		return -1, err
 	}
 	command := exec.CommandContext(ctx, executable, "_bof-worker")
+	configureTokenProcess(ctx, command)
 	var input bytes.Buffer
 	var header [8]byte
 	binary.BigEndian.PutUint32(header[:4], uint32(len(object)))

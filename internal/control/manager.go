@@ -193,6 +193,7 @@ type agentState struct {
 	txRate         float64
 }
 type Manager struct {
+	tokenDefaults            map[tokenDefaultKey]string
 	mu                       sync.RWMutex
 	agentSessions            sync.WaitGroup
 	shuttingDown             bool
@@ -512,6 +513,11 @@ func (m *Manager) UnregisterClient(sessionID uint64, streamMux *mux.Mux) {
 	if state := m.clients[sessionID]; state != nil && state.mux == streamMux {
 		removed = true
 		delete(m.clients, sessionID)
+		for key := range m.tokenDefaults {
+			if key.session == sessionID {
+				delete(m.tokenDefaults, key)
+			}
+		}
 		for id, forward := range m.forwards {
 			if forward.ClientID == sessionID {
 				if forward.control != nil {
@@ -1658,6 +1664,7 @@ func (m *Manager) handler(token string) http.Handler {
 		handler.ServeHTTP(w, r)
 	}))
 	m.jobHTTPHandlers(muxer)
+	m.tokenHTTPHandlers(muxer)
 	muxer.HandleFunc("GET /v1/history", func(w http.ResponseWriter, r *http.Request) {
 		m.mu.RLock()
 		store := m.operations
@@ -1910,7 +1917,7 @@ func (m *Manager) handler(token string) http.Handler {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
-		if retainedHostOperation(request.Builtin) && len(request.Args) == 0 {
+		if (request.TokenContextID == "" || request.TokenContextID == "process") && retainedHostOperation(request.Builtin) && len(request.Args) == 0 {
 			m.retainHostResult(r.PathValue("id"), request.Builtin, result)
 		}
 		jsonReply(w, http.StatusOK, result)
@@ -2093,6 +2100,17 @@ func (m *Manager) handler(token string) http.Handler {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
+		var tokenErr error
+		r, tokenErr = m.bindTokenManagementAudit(r)
+		if tokenErr != nil {
+			http.Error(w, tokenErr.Error(), 400)
+			return
+		}
+		r, tokenErr = m.bindTokenOperation(r)
+		if tokenErr != nil {
+			http.Error(w, tokenErr.Error(), http.StatusBadRequest)
+			return
+		}
 		if (r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodDelete) && !(r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/v1/transfers/")) {
 			m.mu.RLock()
 			store := m.operations
@@ -2116,7 +2134,11 @@ func (m *Manager) handler(token string) http.Handler {
 						trust = "server_authenticated_operator"
 					}
 				}
-				record := AuditRecord{ID: auditID, ActionID: actor.ActionID, At: time.Now().UTC(), Action: r.Method, Target: r.URL.Path, ClientID: actor.ClientID, ClientSessionID: actor.ClientSessionID, OperatorID: actor.OperatorID, DisplayName: actor.DisplayName, Source: source, IdentityTrust: trust}
+				record := AuditRecord{TokenContextID: pivot.TokenContextID(r.Context()), ID: auditID, ActionID: actor.ActionID, At: time.Now().UTC(), Action: r.Method, Target: r.URL.Path, ClientID: actor.ClientID, ClientSessionID: actor.ClientSessionID, OperatorID: actor.OperatorID, DisplayName: actor.DisplayName, Source: source, IdentityTrust: trust}
+				if authAudit, _ := r.Context().Value(tokenAuditKey{}).(*tokenAuditInfo); authAudit != nil {
+					record.Action += " tokens." + authAudit.action
+					record.TokenContextID = authAudit.id
+				}
 				if err := store.RecordAudit(record); err != nil {
 					log.Printf("audit start: %v", err)
 					http.Error(w, "audit unavailable", http.StatusInternalServerError)
@@ -2126,7 +2148,13 @@ func (m *Manager) handler(token string) http.Handler {
 			tracked := &statusResponseWriter{ResponseWriter: w, status: http.StatusOK}
 			muxer.ServeHTTP(tracked, r)
 			if store != nil {
-				if err := store.CompleteAudit(auditID, tracked.status); err != nil {
+				var completeErr error
+				if authAudit, _ := r.Context().Value(tokenAuditKey{}).(*tokenAuditInfo); authAudit != nil {
+					completeErr = store.CompleteAuditContext(auditID, tracked.status, authAudit.id)
+				} else {
+					completeErr = store.CompleteAudit(auditID, tracked.status)
+				}
+				if err := completeErr; err != nil {
 					log.Printf("audit result: %v", err)
 				}
 				m.PublishEvent("audit.recorded", auditID)

@@ -91,6 +91,11 @@ func runBuiltin(parent context.Context, name string, args []string) ExecResult {
 			output = "removed " + clean
 		}
 	case "whoami":
+		if metadata, selected, metadataErr := operationTokenMetadata(ctx); selected {
+			err = metadataErr
+			output = metadata.Identity
+			break
+		}
 		var current *user.User
 		current, err = user.Current()
 		if err == nil {

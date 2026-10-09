@@ -26,6 +26,7 @@ import (
 const jobOutputLimit = 256 << 10
 
 type JobInfo struct {
+	TokenContextID  string             `json:"token_context_id,omitempty"`
 	ID              string             `json:"id"`
 	AgentID         string             `json:"agent_id"`
 	Kind            string             `json:"kind,omitempty"`
@@ -90,7 +91,7 @@ func (m *Manager) StartJob(ctx context.Context, owner uint64, agentID string, ar
 	if len(argv) == 0 {
 		return JobInfo{}, errors.New("job start needs a program")
 	}
-	if info, queued, err := m.queueJobIfSleeping(owner, agentID, queuedJobRequest{Kind: "command", Argv: argv}); queued {
+	if info, queued, err := m.queueJobIfSleeping(owner, agentID, queuedJobRequest{TokenContextID: pivot.TokenContextID(ctx), Kind: "command", Argv: argv}); queued {
 		return info, err
 	}
 	m.mu.RLock()
@@ -108,11 +109,11 @@ func (m *Manager) StartJob(ctx context.Context, owner uint64, agentID string, ar
 	}
 	startCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	session, err := pivot.OpenInteractive(startCtx, state.mux, pivot.InteractiveRequest{Argv: argv})
+	session, err := pivot.OpenInteractive(startCtx, state.mux, pivot.InteractiveRequest{TokenContextID: pivot.TokenContextID(ctx), Argv: argv})
 	if err != nil {
 		return JobInfo{}, err
 	}
-	return m.registerJob(owner, agentID, state.mux, session, JobInfo{AgentID: agentID, Kind: "command", Argv: append([]string(nil), argv...)})
+	return m.registerJob(owner, agentID, state.mux, session, JobInfo{TokenContextID: pivot.TokenContextID(ctx), AgentID: agentID, Kind: "command", Argv: append([]string(nil), argv...)})
 }
 
 func (m *Manager) StartScriptJob(ctx context.Context, owner uint64, agentID, language string, source []byte) (JobInfo, error) {
@@ -191,7 +192,7 @@ func (m *Manager) startScriptJob(ctx context.Context, owner uint64, agentID, lan
 		return JobInfo{}, errors.New("script source exceeds the 1 MiB limit or is empty")
 	}
 	if allowQueue {
-		if info, queued, err := m.queueJobIfSleeping(owner, agentID, queuedJobRequest{Kind: "script", Language: language, Source: source}); queued {
+		if info, queued, err := m.queueJobIfSleeping(owner, agentID, queuedJobRequest{TokenContextID: pivot.TokenContextID(ctx), Kind: "script", Language: language, Source: source}); queued {
 			return info, err
 		}
 	}
@@ -214,14 +215,14 @@ func (m *Manager) startScriptJob(ctx context.Context, owner uint64, agentID, lan
 	if err != nil {
 		return JobInfo{}, err
 	}
-	return m.registerJob(owner, agentID, state.mux, session, JobInfo{AgentID: agentID, Kind: "script", Language: language, DeploymentID: deploymentID})
+	return m.registerJob(owner, agentID, state.mux, session, JobInfo{TokenContextID: pivot.TokenContextID(ctx), AgentID: agentID, Kind: "script", Language: language, DeploymentID: deploymentID})
 }
 
 func (m *Manager) StartWASMJob(ctx context.Context, owner uint64, agentID string, module []byte, args []string, stdin []byte) (JobInfo, error) {
 	if len(module) == 0 || len(module) > pivot.WASMModuleLimit || len(stdin) > pivot.WASMStdinLimit {
 		return JobInfo{}, errors.New("WASM module or stdin exceeds its size limit")
 	}
-	if info, queued, err := m.queueJobIfSleeping(owner, agentID, queuedJobRequest{Kind: "wasm", Argv: args, Source: module, Input: stdin}); queued {
+	if info, queued, err := m.queueJobIfSleeping(owner, agentID, queuedJobRequest{TokenContextID: pivot.TokenContextID(ctx), Kind: "wasm", Argv: args, Source: module, Input: stdin}); queued {
 		return info, err
 	}
 	m.mu.RLock()
@@ -243,7 +244,7 @@ func (m *Manager) StartWASMJob(ctx context.Context, owner uint64, agentID string
 	if err != nil {
 		return JobInfo{}, err
 	}
-	return m.registerJob(owner, agentID, state.mux, session, JobInfo{AgentID: agentID, Kind: "wasm", Argv: append([]string(nil), args...)})
+	return m.registerJob(owner, agentID, state.mux, session, JobInfo{TokenContextID: pivot.TokenContextID(ctx), AgentID: agentID, Kind: "wasm", Argv: append([]string(nil), args...)})
 }
 
 func (m *Manager) StartNativeJob(ctx context.Context, owner uint64, agentID string, module []byte, args []string, data []byte) (JobInfo, error) {
@@ -253,7 +254,7 @@ func (m *Manager) StartNativeJob(ctx context.Context, owner uint64, agentID stri
 	if _, err := nativemodule.EncodeArgs(args, data); err != nil {
 		return JobInfo{}, err
 	}
-	if info, queued, err := m.queueJobIfSleeping(owner, agentID, queuedJobRequest{Kind: "native", Argv: args, Source: module, Input: data}); queued {
+	if info, queued, err := m.queueJobIfSleeping(owner, agentID, queuedJobRequest{TokenContextID: pivot.TokenContextID(ctx), Kind: "native", Argv: args, Source: module, Input: data}); queued {
 		return info, err
 	}
 	m.mu.RLock()
@@ -275,14 +276,14 @@ func (m *Manager) StartNativeJob(ctx context.Context, owner uint64, agentID stri
 	if err != nil {
 		return JobInfo{}, err
 	}
-	return m.registerJob(owner, agentID, state.mux, session, JobInfo{AgentID: agentID, Kind: "native", Argv: append([]string(nil), args...)})
+	return m.registerJob(owner, agentID, state.mux, session, JobInfo{TokenContextID: pivot.TokenContextID(ctx), AgentID: agentID, Kind: "native", Argv: append([]string(nil), args...)})
 }
 
 func (m *Manager) StartAssemblyJob(ctx context.Context, owner uint64, agentID string, source []byte, args []string) (JobInfo, error) {
 	if err := pivot.ValidateAssembly(source, args); err != nil {
 		return JobInfo{}, err
 	}
-	if info, queued, err := m.queueJobIfSleeping(owner, agentID, queuedJobRequest{Kind: "assembly", Argv: args, Source: source}); queued {
+	if info, queued, err := m.queueJobIfSleeping(owner, agentID, queuedJobRequest{TokenContextID: pivot.TokenContextID(ctx), Kind: "assembly", Argv: args, Source: source}); queued {
 		return info, err
 	}
 	m.mu.RLock()
@@ -303,7 +304,7 @@ func (m *Manager) StartAssemblyJob(ctx context.Context, owner uint64, agentID st
 	if err != nil {
 		return JobInfo{}, err
 	}
-	return m.registerJob(owner, agentID, state.mux, session, JobInfo{AgentID: agentID, Kind: "assembly", Argv: append([]string(nil), args...)})
+	return m.registerJob(owner, agentID, state.mux, session, JobInfo{TokenContextID: pivot.TokenContextID(ctx), AgentID: agentID, Kind: "assembly", Argv: append([]string(nil), args...)})
 }
 
 func (m *Manager) StartBOFJob(ctx context.Context, owner uint64, agentID string, object, arguments []byte) (JobInfo, error) {
@@ -317,7 +318,7 @@ func (m *Manager) StartBOFJob(ctx context.Context, owner uint64, agentID string,
 	if len(arguments) < 4 || len(arguments) > bof.MaxArguments+4 {
 		return JobInfo{}, errors.New("invalid BOF argument buffer")
 	}
-	if info, queued, err := m.queueJobIfSleeping(owner, agentID, queuedJobRequest{Kind: "bof", Source: object, Arguments: arguments}); queued {
+	if info, queued, err := m.queueJobIfSleeping(owner, agentID, queuedJobRequest{TokenContextID: pivot.TokenContextID(ctx), Kind: "bof", Source: object, Arguments: arguments}); queued {
 		return info, err
 	}
 	m.mu.RLock()
@@ -339,7 +340,7 @@ func (m *Manager) StartBOFJob(ctx context.Context, owner uint64, agentID string,
 	if err != nil {
 		return JobInfo{}, err
 	}
-	return m.registerJob(owner, agentID, state.mux, session, JobInfo{AgentID: agentID, Kind: "bof"})
+	return m.registerJob(owner, agentID, state.mux, session, JobInfo{TokenContextID: pivot.TokenContextID(ctx), AgentID: agentID, Kind: "bof"})
 }
 
 func (m *Manager) registerJob(owner uint64, agentID string, agent *mux.Mux, session *pivot.InteractiveSession, info JobInfo) (JobInfo, error) {

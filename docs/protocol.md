@@ -15,6 +15,8 @@ The server only accepts queries under its configured synthetic domain. Each DNS 
 
 ## Handshake and enrollment
 
+Windows authentication-context management uses a negotiated `tokens` capability and live `tokens.undertow.invalid:0` streams. Execution headers and queued Jobs carry only optional opaque `token_context_id`; logon creation uses a single-use agent public key and sealed input. See [Authentication context protocol and storage](authentication-contexts.md#protocol-and-storage-boundary).
+
 After the encrypted carrier handshake and its existing token, password, or open enrollment check, an Undertow **client** sends operator account credentials in its encrypted VPN control hello. The server verifies the password hash in its operations database before registering the client session or returning `ready:true`. The resulting account ID, display name, role, and version are bound to that session; later remote API and interactive audit records derive identity from the bound account. Agents do not send operator credentials. See [Operator authentication](operator-authentication.md).
 
 The first byte identifies an unencrypted handshake message:

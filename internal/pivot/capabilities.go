@@ -2,12 +2,14 @@ package pivot
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 )
 
 // Capabilities control the operations implemented by the current agent.
 // A false field rejects the matching operation before it starts.
 type Capabilities struct {
+	TokenContexts   bool
 	Pivot           bool
 	Exec            bool
 	HostOps         bool
@@ -29,7 +31,7 @@ type CapabilityReport struct {
 }
 
 func DefaultCapabilities() Capabilities {
-	return Capabilities{Pivot: true, Exec: true, HostOps: true, Interactive: true, Scripts: true, WASM: true, Native: true, Upload: true, Download: true, Listeners: true, Relay: true, JumpCredentials: true, JumpNTHash: true}
+	return Capabilities{TokenContexts: true, Pivot: true, Exec: true, HostOps: true, Interactive: true, Scripts: true, WASM: true, Native: true, Upload: true, Download: true, Listeners: true, Relay: true, JumpCredentials: true, JumpNTHash: true}
 }
 
 func ParseDenied(raw string) (Capabilities, error) {
@@ -39,6 +41,8 @@ func ParseDenied(raw string) (Capabilities, error) {
 	}
 	for _, item := range strings.Split(raw, ",") {
 		switch strings.TrimSpace(item) {
+		case "tokens":
+			caps.TokenContexts = false
 		case "pivot":
 			caps.Pivot = false
 		case "exec":
@@ -66,7 +70,7 @@ func ParseDenied(raw string) (Capabilities, error) {
 		case "jump-nt-hash":
 			caps.JumpNTHash = false
 		default:
-			return Capabilities{}, fmt.Errorf("unknown agent capability %q; supported: pivot,exec,hostops,interactive,scripts,wasm,native,upload,download,listeners,relay,jump-credentials,jump-nt-hash", strings.TrimSpace(item))
+			return Capabilities{}, fmt.Errorf("unknown agent capability %q; supported: tokens,pivot,exec,hostops,interactive,scripts,wasm,native,upload,download,listeners,relay,jump-credentials,jump-nt-hash", strings.TrimSpace(item))
 		}
 	}
 	return caps, nil
@@ -80,6 +84,12 @@ func (c Capabilities) Report() CapabilityReport {
 	}{{"pivot", c.Pivot}, {"exec", c.Exec}, {"hostops", c.HostOps}, {"interactive", c.Interactive}, {"scripts", c.Scripts}, {"wasm", c.WASM}, {"native", c.Native}, {"upload", c.Upload}, {"download", c.Download}, {"listeners", c.Listeners}, {"relay", c.Relay}, {"jump-credentials", c.JumpCredentials}, {"jump-nt-hash", c.JumpNTHash}} {
 		if item.allowed {
 			report.Allowed = append(report.Allowed, item.name)
+		}
+	}
+	if runtime.GOOS == "windows" {
+		report.Supported = append(report.Supported, "tokens")
+		if c.TokenContexts {
+			report.Allowed = append(report.Allowed, "tokens")
 		}
 	}
 	return report

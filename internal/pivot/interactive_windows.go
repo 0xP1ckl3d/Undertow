@@ -224,7 +224,12 @@ func startInteractiveProcess(ctx context.Context, request InteractiveRequest) (i
 		ProcThreadAttributeList: attributes.List(),
 	}
 	var processInfo windows.ProcessInformation
-	if err := windows.CreateProcess(app, &line[0], nil, nil, false, windows.EXTENDED_STARTUPINFO_PRESENT, nil, nil, &startup.StartupInfo, &processInfo); err != nil {
+	if token := operationToken(ctx); token != 0 {
+		err = windows.CreateProcessAsUser(token, app, &line[0], nil, nil, false, windows.EXTENDED_STARTUPINFO_PRESENT, nil, nil, &startup.StartupInfo, &processInfo)
+	} else {
+		err = windows.CreateProcess(app, &line[0], nil, nil, false, windows.EXTENDED_STARTUPINFO_PRESENT, nil, nil, &startup.StartupInfo, &processInfo)
+	}
+	if err != nil {
 		return nil, nil, nil, err
 	}
 	_ = windows.CloseHandle(processInfo.Thread)
@@ -264,6 +269,7 @@ func startPipedInteractiveProcess(ctx context.Context, path string, args []strin
 	}
 	command := exec.CommandContext(ctx, path, args...)
 	configureExecProcess(command)
+	configureTokenProcess(ctx, command)
 	command.Stdin, command.Stdout, command.Stderr = inputRead, outputWrite, outputWrite
 	if err := command.Start(); err != nil {
 		_ = inputRead.Close()

@@ -287,10 +287,11 @@ func (g *guiServer) importModule(w http.ResponseWriter, r *http.Request) {
 }
 
 type guiModuleRunRequest struct {
-	Args       string   `json:"args"`
-	Values     []string `json:"values,omitempty"`
-	Background bool     `json:"background"`
-	Input      []byte   `json:"input,omitempty"`
+	TokenContextID string   `json:"token_context_id,omitempty"`
+	Args           string   `json:"args"`
+	Values         []string `json:"values,omitempty"`
+	Background     bool     `json:"background"`
+	Input          []byte   `json:"input,omitempty"`
 }
 
 func (g *guiServer) runModule(w http.ResponseWriter, r *http.Request) {
@@ -321,7 +322,7 @@ func (g *guiServer) runModule(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "preferences unavailable", http.StatusInternalServerError)
 		return
 	}
-	ctx := control.WithActionClaims(r.Context(), claims)
+	ctx := pivot.WithTokenContext(control.WithActionClaims(r.Context(), claims), request.TokenContextID)
 	_ = g.store.AppendConsoleEntry(r.PathValue("id"), "modules", "command", "module "+r.PathValue("name")+map[bool]string{true: " (background)", false: " (foreground)"}[request.Background])
 	job, session, err := g.startModule(ctx, r.PathValue("id"), r.PathValue("name"), args, request.Input, request.Background)
 	if err != nil {

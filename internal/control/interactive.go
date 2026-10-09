@@ -11,6 +11,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,9 +20,17 @@ import (
 )
 
 type interactiveRelayRequest struct {
-	AgentID string       `json:"agent_id"`
-	Kind    string       `json:"kind,omitempty"`
-	Actor   ActionClaims `json:"actor,omitempty"`
+	AgentID        string       `json:"agent_id"`
+	Kind           string       `json:"kind,omitempty"`
+	Actor          ActionClaims `json:"actor,omitempty"`
+	TokenContextID string       `json:"token_context_id,omitempty"`
+}
+
+func selectInteractiveToken(ctx context.Context, r pivot.InteractiveRequest) string {
+	if r.TokenContextID != "" {
+		return r.TokenContextID
+	}
+	return pivot.TokenContextID(ctx)
 }
 
 // OpenClientInteractive relays one client console session through the server.
@@ -33,7 +42,7 @@ func OpenClientInteractive(ctx context.Context, client *mux.Mux, agentID string,
 	if err != nil {
 		return nil, err
 	}
-	if err := json.NewEncoder(stream).Encode(interactiveRelayRequest{AgentID: agentID, Actor: claimsFromContext(ctx)}); err != nil {
+	if err := json.NewEncoder(stream).Encode(interactiveRelayRequest{TokenContextID: selectInteractiveToken(ctx, request), AgentID: agentID, Actor: claimsFromContext(ctx)}); err != nil {
 		stream.Close()
 		return nil, err
 	}
@@ -68,7 +77,7 @@ func openClientMemory(ctx context.Context, client *mux.Mux, agentID, kind string
 	if err != nil {
 		return nil, err
 	}
-	if err := json.NewEncoder(stream).Encode(interactiveRelayRequest{AgentID: agentID, Kind: kind, Actor: claimsFromContext(ctx)}); err != nil {
+	if err := json.NewEncoder(stream).Encode(interactiveRelayRequest{TokenContextID: pivot.TokenContextID(ctx), AgentID: agentID, Kind: kind, Actor: claimsFromContext(ctx)}); err != nil {
 		stream.Close()
 		return nil, err
 	}
@@ -107,7 +116,7 @@ func bridgeClientInteractive(ctx context.Context, client *mux.Mux, agentID, kind
 	if err != nil {
 		return err
 	}
-	if err := json.NewEncoder(stream).Encode(interactiveRelayRequest{AgentID: agentID, Kind: kind}); err != nil {
+	if err := json.NewEncoder(stream).Encode(interactiveRelayRequest{TokenContextID: pivot.TokenContextID(ctx), AgentID: agentID, Kind: kind}); err != nil {
 		stream.Close()
 		return err
 	}
@@ -160,6 +169,26 @@ func (m *Manager) ServeInteractiveRelayForClient(ctx context.Context, clientID u
 		pivot.RejectInteractive(client, errors.New("invalid agent ID"))
 		return
 	}
+	headerTimer := time.AfterFunc(30*time.Second, func() { _ = client.Close() })
+	operationLine, err := readTokenOperationLine(reader, request.TokenContextID)
+	headerTimer.Stop()
+	if err != nil {
+		pivot.RejectInteractive(client, err)
+		return
+	}
+	var selection struct {
+		TokenContextID string `json:"token_context_id"`
+	}
+	if json.Unmarshal(operationLine, &selection) != nil {
+		pivot.RejectInteractive(client, errors.New("invalid operation request"))
+		return
+	}
+	id, err := m.resolveTokenContext(ctx, clientID, request.AgentID, selection.TokenContextID)
+	if err != nil {
+		pivot.RejectInteractive(client, err)
+		return
+	}
+	request.TokenContextID = id
 	finishAudit, err := m.startInteractiveAudit(clientID, request)
 	if err != nil {
 		pivot.RejectInteractive(client, errors.New("audit unavailable"))
@@ -207,6 +236,19 @@ func (m *Manager) ServeInteractiveRelayForClient(ctx context.Context, clientID u
 	}
 	defer upstream.Close()
 	finishAudit(http.StatusOK)
+	var selectedBody map[string]json.RawMessage
+	_ = json.Unmarshal(operationLine, &selectedBody)
+	if request.TokenContextID != "" {
+		selectedBody["token_context_id"], _ = json.Marshal(request.TokenContextID)
+	}
+	operationLine, err = json.Marshal(selectedBody)
+	if err != nil {
+		return
+	}
+	operationLine = append(operationLine, '\n')
+	if _, err = upstream.Write(operationLine); err != nil {
+		return
+	}
 	bridgeInteractive(ctx, client, reader, upstream)
 }
 
@@ -254,7 +296,7 @@ func (m *Manager) startInteractiveAudit(clientID uint64, request interactiveRela
 	if request.Kind != "" {
 		path = "/v1/agents/" + request.AgentID + "/" + request.Kind
 	}
-	record := AuditRecord{ID: id, ActionID: truncateClaim(request.Actor.ActionID, 128), At: time.Now().UTC(), Action: "CONNECT", Target: path, ClientID: key, ClientSessionID: clientID, OperatorID: operatorID, DisplayName: displayName, Source: source, IdentityTrust: trust}
+	record := AuditRecord{TokenContextID: request.TokenContextID, ID: id, ActionID: truncateClaim(request.Actor.ActionID, 128), At: time.Now().UTC(), Action: "CONNECT", Target: path, ClientID: key, ClientSessionID: clientID, OperatorID: operatorID, DisplayName: displayName, Source: source, IdentityTrust: trust}
 	if err := store.RecordAudit(record); err != nil {
 		return nil, err
 	}
@@ -287,6 +329,11 @@ func bridgeInteractive(ctx context.Context, client *mux.Stream, reader io.Reader
 
 // InteractiveHandler is mounted inside the authenticated local control API.
 func (m *Manager) interactiveHandler(w http.ResponseWriter, r *http.Request) {
+	id, tokenErr := m.resolveTokenContext(r.Context(), jobOwner(r.Context()), r.PathValue("id"), r.Header.Get("X-Undertow-Token-Context"))
+	if tokenErr != nil {
+		http.Error(w, tokenErr.Error(), 409)
+		return
+	}
 	destination := pivot.InteractiveDestination
 	if r.URL.Path == "/v1/agents/"+r.PathValue("id")+"/script" {
 		destination = pivot.ScriptDestination
@@ -331,7 +378,44 @@ func (m *Manager) interactiveHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	// The client waits for the CONNECT response before sending the request.
 	outputDone := make(chan struct{})
-	go func() { _, _ = io.Copy(upstream, rw); _ = upstream.CloseWrite() }()
+	go func() {
+		_ = conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+		line, err := readTokenOperationLine(rw.Reader, id)
+		_ = conn.SetReadDeadline(time.Time{})
+		if err != nil {
+			_ = pivot.WriteInteractiveError(conn, err)
+			_ = upstream.Close()
+			return
+		}
+		var selected struct {
+			TokenContextID string `json:"token_context_id"`
+		}
+		_ = json.Unmarshal(line, &selected)
+		selectedID, err := m.resolveTokenContext(r.Context(), jobOwner(r.Context()), r.PathValue("id"), selected.TokenContextID)
+		if err != nil {
+			_ = pivot.WriteInteractiveError(conn, err)
+			_ = upstream.Close()
+			return
+		}
+		kind := ""
+		if destination != pivot.InteractiveDestination {
+			parts := strings.Split(r.URL.Path, "/")
+			kind = parts[len(parts)-1]
+		}
+		finishAudit, err := m.startInteractiveAudit(0, interactiveRelayRequest{AgentID: r.PathValue("id"), Kind: kind, TokenContextID: selectedID})
+		if err != nil {
+			_ = pivot.WriteInteractiveError(conn, errors.New("audit unavailable"))
+			_ = upstream.Close()
+			return
+		}
+		if _, err = upstream.Write(line); err != nil {
+			finishAudit(http.StatusBadGateway)
+			return
+		}
+		finishAudit(http.StatusOK)
+		_, _ = io.Copy(upstream, rw)
+		_ = upstream.CloseWrite()
+	}()
 	go func() {
 		_, err := io.Copy(conn, upstream)
 		if err != nil {

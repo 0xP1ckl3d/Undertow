@@ -115,6 +115,8 @@ func (g *guiServer) handler() http.Handler {
 	mux.HandleFunc("POST /api/auth", g.auth)
 	mux.HandleFunc("GET /api/status", g.remote(http.MethodGet, func(*http.Request) string { return "/v1/status" }))
 	mux.HandleFunc("GET /api/events", g.events)
+	mux.HandleFunc("GET /api/agents/{id}/tokens", g.remote(http.MethodGet, func(r *http.Request) string { return "/v1/agents/" + url.PathEscape(r.PathValue("id")) + "/tokens" }))
+	mux.HandleFunc("POST /api/agents/{id}/tokens", g.manageTokens)
 	mux.HandleFunc("GET /api/topology", g.remote(http.MethodGet, func(*http.Request) string { return "/v1/topology" }))
 	mux.HandleFunc("GET /api/history", g.remote(http.MethodGet, func(*http.Request) string { return "/v1/history" }))
 	mux.HandleFunc("GET /api/deployments", g.remote(http.MethodGet, func(r *http.Request) string {
@@ -673,13 +675,14 @@ func parseGUITerminalStart(messageType websocket.MessageType, data []byte) (pivo
 		return pivot.InteractiveRequest{}, errors.New("invalid shell start request")
 	}
 	var message struct {
-		Type string   `json:"type"`
-		Argv []string `json:"argv"`
+		TokenContextID string   `json:"token_context_id,omitempty"`
+		Type           string   `json:"type"`
+		Argv           []string `json:"argv"`
 	}
 	if json.Unmarshal(data, &message) != nil || message.Type != "start" || len(message.Argv) > 32 {
 		return pivot.InteractiveRequest{}, errors.New("invalid shell start request")
 	}
-	return pivot.InteractiveRequest{Argv: message.Argv, Cols: 100, Rows: 30}, nil
+	return pivot.InteractiveRequest{TokenContextID: message.TokenContextID, Argv: message.Argv, Cols: 100, Rows: 30}, nil
 }
 
 func mustGUIJSON(value any) []byte { data, _ := json.Marshal(value); return data }

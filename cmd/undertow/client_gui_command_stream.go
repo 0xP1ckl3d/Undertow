@@ -48,13 +48,19 @@ func (g *guiServer) agentCommandStream(w http.ResponseWriter, r *http.Request) {
 	if len(args) == 0 {
 		return
 	}
+	args, tokenID, err := parseTokenOption(args)
+	if err != nil {
+		stream.event("error", err.Error())
+		return
+	}
+	requestCtx := pivot.WithTokenContext(r.Context(), tokenID)
 	if args[0] == "run-script" || args[0] == "run-wasm" || args[0] == "run-native" || args[0] == "run-assembly" || args[0] == "run-bof" {
 		claims, err := g.actionClaims()
 		if err != nil {
 			stream.event("error", err.Error())
 			return
 		}
-		ctx := control.WithActionClaims(r.Context(), claims)
+		ctx := control.WithActionClaims(requestCtx, claims)
 		if err := g.runGUIOneShot(ctx, &stream, r.PathValue("id"), args); err != nil {
 			stream.event("error", err.Error())
 		}
@@ -69,7 +75,7 @@ func (g *guiServer) agentCommandStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if result.OpenShell {
-		stream.event("shell", "")
+		stream.event("shell", result.ShellTokenContextID)
 	}
 	if result.ModuleRun == nil {
 		return
@@ -79,7 +85,8 @@ func (g *guiServer) agentCommandStream(w http.ResponseWriter, r *http.Request) {
 		stream.event("error", err.Error())
 		return
 	}
-	ctx := control.WithActionClaims(r.Context(), claims)
+	ctx := control.WithActionClaims(requestCtx, claims)
+	ctx = pivot.WithTokenContext(ctx, result.ModuleRun.TokenContextID)
 	_, session, err := g.startModule(ctx, r.PathValue("id"), result.ModuleRun.Name, result.ModuleRun.Args, result.ModuleRun.Input, false)
 	if err != nil {
 		stream.event("error", err.Error())

@@ -122,7 +122,7 @@ In a terminal, `server` starts a separate worker and opens its operator console.
 | `--fingerprint-file PATH` | `server.fingerprint` | Read saved pin or save a trust-on-first-use pin. |
 | `--trust-on-first-use` | Off | Discover the server pin for first connection. |
 | `--agent-key PATH` | `agent.key` | Stable agent Ed25519 identity. |
-| `--deny LIST` | None | Disable agent capabilities independently: `pivot`, `exec`, `hostops`, `interactive`, `scripts`, `wasm`, `native`, `upload`, `download`, `listeners`, `relay`, `jump-credentials`, `jump-nt-hash`. All are allowed by default. `listeners` controls client-service TCP forwards; `relay` controls child-agent relay listeners. `jump-credentials` controls supplied Windows identities; `jump-nt-hash` separately controls NT-hash authentication. None opens a listener automatically. |
+| `--deny LIST` | None | Disable agent capabilities independently: `tokens` (Windows token contexts), `pivot`, `exec`, `hostops`, `interactive`, `scripts`, `wasm`, `native`, `upload`, `download`, `listeners`, `relay`, `jump-credentials`, `jump-nt-hash`. All are allowed by default. `listeners` controls client-service TCP forwards; `relay` controls child-agent relay listeners. `jump-credentials` controls supplied Windows identities; `jump-nt-hash` separately controls NT-hash authentication. None opens a listener automatically. |
 | `--advertise-route CIDR` | None | Offer an additional IPv4 subnet to VPN clients; repeatable. Up IPv4 interface subnets are offered automatically. |
 | `--domain NAME` | `t.undertow.invalid` | DNS only; must match the server. |
 | `--auth`, `--token`, `--token-file`, `--password`, `--password-file` | See above | Enrollment. |

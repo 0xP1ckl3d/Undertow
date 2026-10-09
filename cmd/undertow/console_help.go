@@ -37,6 +37,22 @@ func printConsoleHelp(output io.Writer, vpnClient, selected, serverAttached bool
 		}
 	}
 	switch topic {
+	case "tokens", "authentication":
+		fmt.Fprint(output, `Authentication contexts (Windows agents):
+  tokens [AGENT_ID] list|discover
+  tokens [AGENT_ID] import CANDIDATE_ID
+  tokens [AGENT_ID] create USER DOMAIN PASSWORD_FILE interactive|network|batch|new_credentials
+  tokens [AGENT_ID] use CONTEXT_ID
+  tokens [AGENT_ID] revert
+  tokens [AGENT_ID] remove CONTEXT_ID
+  tokens [AGENT_ID] clear
+Execution, Jobs and module commands accept --token-context ID|process.
+use/revert set only this authenticated operator connection's default.
+Creation is live only; passwords are read from a local file, never command arguments.
+DOMAIN - accepts a UPN. Candidate IDs expire after two minutes or rediscovery.
+Removed/stale contexts fail closed. Revert restores agent process identity for future work.
+`)
+
 	case "team":
 		if !vpnClient {
 			return fmt.Errorf("team chat requires a connected operator client console")

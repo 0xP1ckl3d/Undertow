@@ -85,6 +85,7 @@ func executeAssembly(ctx context.Context, source []byte, args []string, write fu
 
 	command := exec.CommandContext(ctx, path)
 	command.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	configureTokenProcess(ctx, command)
 	command.Stdin = bytes.NewReader(assemblyWorkerRequest(source, args))
 	stdout, err := command.StdoutPipe()
 	if err != nil {

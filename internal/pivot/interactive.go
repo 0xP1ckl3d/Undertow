@@ -37,18 +37,25 @@ const (
 )
 
 type InteractiveRequest struct {
-	Argv       []string           `json:"argv,omitempty"`
-	Cols       uint16             `json:"cols,omitempty"`
-	Rows       uint16             `json:"rows,omitempty"`
-	NoPTY      bool               `json:"no_pty,omitempty"`
-	Credential *WindowsCredential `json:"credential,omitempty"`
+	TokenContextID string             `json:"token_context_id,omitempty"`
+	Argv           []string           `json:"argv,omitempty"`
+	Cols           uint16             `json:"cols,omitempty"`
+	Rows           uint16             `json:"rows,omitempty"`
+	NoPTY          bool               `json:"no_pty,omitempty"`
+	Credential     *WindowsCredential `json:"credential,omitempty"`
 }
 
 func validateInteractiveRequest(request InteractiveRequest) error {
+	if err := ValidateTokenContextID(request.TokenContextID); err != nil {
+		return err
+	}
 	if len(request.Argv) != 0 {
 		if err := validateArgv(request.Argv); err != nil {
 			return err
 		}
+	}
+	if request.Credential != nil && request.TokenContextID != "" && request.TokenContextID != "process" {
+		return errors.New("choose a token context or supplied Jump credentials")
 	}
 	if request.Credential == nil {
 		return nil
@@ -108,6 +115,9 @@ func StartInteractive(ctx context.Context, stream interface {
 	io.ReadWriteCloser
 	CloseWrite() error
 }, reader *bufio.Reader, request InteractiveRequest) (*InteractiveSession, error) {
+	if request.TokenContextID == "" {
+		request.TokenContextID = TokenContextID(ctx)
+	}
 	if err := validateInteractiveRequest(request); err != nil {
 		stream.Close()
 		return nil, err
@@ -246,6 +256,12 @@ func serveInteractive(ctx context.Context, stream *mux.Stream, caps Capabilities
 		RejectInteractive(stream, errors.New("agent NT-hash Jump authentication is disabled"))
 		return
 	}
+	ctx, releaseToken, tokenErr := acquireTokenContext(ctx, request.TokenContextID)
+	if tokenErr != nil {
+		RejectInteractive(stream, tokenErr)
+		return
+	}
+	defer releaseToken()
 	commandCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	command, terminal, resize, err := startInteractiveProcess(commandCtx, request)

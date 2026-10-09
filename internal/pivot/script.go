@@ -23,10 +23,11 @@ const ScriptSourceLimit = 1 << 20
 // MemoryRequest describes source bytes that follow its JSON line on the same
 // authenticated stream. Source is never named as a path on the agent.
 type MemoryRequest struct {
-	Language string   `json:"language,omitempty"`
-	Args     []string `json:"args,omitempty"`
-	Stdin    []byte   `json:"stdin,omitempty"`
-	Size     int      `json:"size"`
+	TokenContextID string   `json:"token_context_id,omitempty"`
+	Language       string   `json:"language,omitempty"`
+	Args           []string `json:"args,omitempty"`
+	Stdin          []byte   `json:"stdin,omitempty"`
+	Size           int      `json:"size"`
 }
 
 func validateMemoryRequest(request MemoryRequest, source []byte, limit int) error {
@@ -74,6 +75,13 @@ func StartMemorySession(ctx context.Context, stream interface {
 	io.ReadWriteCloser
 	CloseWrite() error
 }, reader *bufio.Reader, request MemoryRequest, source []byte) (*InteractiveSession, error) {
+	if request.TokenContextID == "" {
+		request.TokenContextID = TokenContextID(ctx)
+	}
+	if err := ValidateTokenContextID(request.TokenContextID); err != nil {
+		stream.Close()
+		return nil, err
+	}
 	if request.Size != len(source) || request.Size < 1 {
 		stream.Close()
 		return nil, errors.New("invalid source size")
@@ -206,6 +214,12 @@ func serveScript(ctx context.Context, stream *mux.Stream) {
 		RejectInteractive(stream, errors.New("invalid script request"))
 		return
 	}
+	ctx, releaseToken, tokenErr := acquireTokenContext(ctx, request.TokenContextID)
+	if tokenErr != nil {
+		RejectInteractive(stream, tokenErr)
+		return
+	}
+	defer releaseToken()
 	path, args, err := scriptExecutable(request.Language)
 	if err != nil {
 		RejectInteractive(stream, err)
@@ -222,6 +236,7 @@ func serveScript(ctx context.Context, stream *mux.Stream) {
 	}()
 	command := exec.CommandContext(commandCtx, path, args...)
 	configureExecProcess(command)
+	configureTokenProcess(commandCtx, command)
 	command.Stdin = &exactSourceReader{reader: reader, left: int64(request.Size)}
 	var writeMu sync.Mutex
 	command.Stdout = framedOutput{stream: stream, mu: &writeMu, kind: InteractiveOutput}
