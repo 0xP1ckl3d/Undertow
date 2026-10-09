@@ -42,6 +42,7 @@ func printConsoleHelp(output io.Writer, vpnClient, selected, serverAttached bool
   tokens [AGENT_ID] list|discover
   tokens [AGENT_ID] import CANDIDATE_ID
   tokens [AGENT_ID] create USER DOMAIN PASSWORD_FILE interactive|network|batch|new_credentials
+  tokens [AGENT_ID] create --credential ID interactive|network|batch|new_credentials
   tokens [AGENT_ID] use CONTEXT_ID
   tokens [AGENT_ID] revert
   tokens [AGENT_ID] remove CONTEXT_ID
@@ -51,6 +52,17 @@ use/revert set only this authenticated operator connection's default.
 Creation is live only; passwords are read from a local file, never command arguments.
 DOMAIN - accepts a UPN. Candidate IDs expire after two minutes or rediscovery.
 Removed/stale contexts fail closed. Revert restores agent process identity for future work.
+`)
+	case "credentials", "credential":
+		fmt.Fprint(output, `Engagement credential store:
+  credentials list
+  credentials add "LABEL" USER DOMAIN password|nt_hash SECRET_FILE [shared]
+  credentials replace ID "LABEL" USER DOMAIN password|nt_hash SECRET_FILE [shared]
+  credentials remove ID
+The secret is read from a local file, never a command argument. Stored secrets
+are encrypted in the server vault; listings and history include metadata only.
+Use jump start ID --credential ID or tokens create --credential ID LOGON_TYPE.
+NT hashes support compatible Jump methods but cannot create logon tokens.
 `)
 
 	case "team":
@@ -106,6 +118,8 @@ control connection. Profile and payload views never show enrollment secrets.
                                       Use a frozen authentication context for delivery and method execution.
   jump start ID [INSTALL_PATH] --username USER (--password-file FILE | --nt-hash-file FILE)
                                       Use separate supplied credentials; cannot be combined with a token context.
+  jump start ID [INSTALL_PATH] --credential ID
+                                      Use an authorised stored credential reference.
   jump link ID AGENT_ID              Associate a matching enrolled agent.
 Methods: winrm, wmi, service-control, scheduled-task.
 Contexts: WinRM and WMI use current-user; Service Control uses local-system;

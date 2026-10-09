@@ -66,6 +66,20 @@ func runConsoleTokens(ctx context.Context, out io.Writer, call consoleCaller, ar
 		}
 		r.ID = args[2]
 	case "create":
+		if len(args) == 5 && args[2] == "--credential" {
+			data, err := call(ctx, http.MethodPost, "/v1/agents/"+url.PathEscape(agent)+"/tokens/from-credential", map[string]string{"credential_id": args[3], "logon_type": args[4]})
+			if err != nil {
+				return err
+			}
+			var response pivot.TokenResponse
+			if err := json.Unmarshal(data, &response); err != nil {
+				return err
+			}
+			if response.Created != nil {
+				fmt.Fprintf(out, "Created context %s (%s) from stored credential.\n", response.Created.ID, response.Created.Identity)
+			}
+			return nil
+		}
 		if len(args) != 6 {
 			return errors.New("use tokens create USER DOMAIN PASSWORD_FILE interactive|network|batch|new_credentials (DOMAIN - for UPN)")
 		}

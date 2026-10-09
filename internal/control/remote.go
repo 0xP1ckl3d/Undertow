@@ -195,6 +195,16 @@ func clientRequestAllowed(request *http.Request, clientID uint64) bool {
 	if path == "/v1/operator/me" && request.Method == http.MethodGet && request.URL.RawQuery == "" {
 		return true
 	}
+	if path == "/v1/credentials" && request.URL.RawQuery == "" && (request.Method == http.MethodGet || request.Method == http.MethodPost) {
+		return true
+	}
+	if request.Method == http.MethodPost && strings.HasPrefix(path, "/v1/agents/") && strings.HasSuffix(path, "/tokens/from-credential") && request.URL.RawQuery == "" {
+		parts := strings.Split(path, "/")
+		return len(parts) == 6 && parts[3] != "" && !strings.ContainsAny(parts[3], "%\\")
+	}
+	if strings.HasPrefix(path, "/v1/credentials/") && request.URL.RawQuery == "" && (request.Method == http.MethodPut || request.Method == http.MethodDelete) {
+		return credentialIDValid(strings.TrimPrefix(path, "/v1/credentials/"))
+	}
 	if path == "/v1/operators" && (request.Method == http.MethodGet || request.Method == http.MethodPost) && request.URL.RawQuery == "" {
 		return true
 	}

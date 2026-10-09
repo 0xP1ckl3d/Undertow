@@ -27,6 +27,12 @@ var tokenUATTargetIdentity = flag.String("undertow-token-target-identity", "NT A
 var tokenUATSourceProcess = flag.String("undertow-token-source-process", "LogonUI.exe", "source process name for process-token UAT")
 
 func TestMain(m *testing.M) {
+	if len(os.Args) == 2 && os.Args[1] == "_shell-worker" {
+		if err := ShellWorkerMain(os.Stdin, os.Stdout); err != nil {
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
 	if len(os.Args) == 2 && os.Args[1] == "_bof-worker" {
 		if err := bof.WorkerMain(os.Stdin, os.Stdout); err != nil {
 			os.Exit(1)
@@ -305,6 +311,57 @@ func TestWindowsTokenContextUATProcessLaunchStages(t *testing.T) {
 			t.Fatalf("Live shell identity: output=%q err=%v", data, waitErr)
 		}
 	}
+	t.Log("testing character streaming and editing in an imported-token ConPTY shell")
+	shellCtx, stopShell := context.WithTimeout(selected, 20*time.Second)
+	process, terminal, _, err := startInteractiveProcess(shellCtx, InteractiveRequest{Argv: []string{"cmd.exe", "/d"}, Cols: 100, Rows: 30})
+	if err != nil {
+		stopShell()
+		t.Fatal(err)
+	}
+	chunks := make(chan string, 64)
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, readErr := terminal.Read(buf)
+			if n > 0 {
+				chunks <- string(buf[:n])
+			}
+			if readErr != nil {
+				close(chunks)
+				return
+			}
+		}
+	}()
+	seen := ""
+	waitFor := func(want string) {
+		t.Helper()
+		for !strings.Contains(seen, want) {
+			select {
+			case chunk, ok := <-chunks:
+				if !ok {
+					t.Fatalf("selected-token shell closed before %q: %q", want, seen)
+				}
+				seen += chunk
+			case <-shellCtx.Done():
+				t.Fatalf("selected-token shell timed out before %q: %q", want, seen)
+			}
+		}
+	}
+	waitFor(">")
+	if _, err := terminal.Write([]byte("who")); err != nil {
+		t.Fatal(err)
+	}
+	waitFor("who") // Characters must echo before Enter.
+	if _, err := terminal.Write([]byte("ami.exe /user\r")); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(expectedSID)
+	_, _ = terminal.Write([]byte("exit\r"))
+	if err := process.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	_ = terminal.Close()
+	stopShell()
 	assembly, err := os.ReadFile(*tokenUATIdentityAssembly)
 	if err != nil {
 		t.Fatal("read worker UAT assembly:", err)
@@ -332,6 +389,145 @@ func TestWindowsTokenContextUATProcessLaunchStages(t *testing.T) {
 	})
 	if workerErr != nil || code != 0 || !strings.Contains(bofOutput.String(), expectedSID) {
 		t.Fatalf("BOF worker identity: code=%d output=%q err=%v", code, bofOutput.String(), workerErr)
+	}
+}
+
+// Run on the Windows lab with UNDERTOW_TOKEN_UAT_SHELL=1 and the target
+// identity/process flags. This exercises input before Enter, the distinction
+// that a redirected-pipe shell cannot satisfy.
+func TestWindowsTokenContextUATImportedShellStreaming(t *testing.T) {
+	if os.Getenv("UNDERTOW_TOKEN_UAT_SHELL") != "1" {
+		t.Skip("opt in on the Windows lab")
+	}
+	ctx := context.WithValue(context.Background(), tokenCapabilityKey{}, true)
+	candidates, err := agentTokens.Discover(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var candidate authcontext.Metadata
+	for _, item := range candidates {
+		if strings.EqualFold(item.Identity, *tokenUATTargetIdentity) && strings.Contains(strings.ToLower(item.Source), strings.ToLower(*tokenUATSourceProcess)) && item.ProcessLaunchReady {
+			candidate = item
+			break
+		}
+	}
+	if candidate.ID == "" {
+		t.Fatalf("launch-ready %s process token from %s unavailable", *tokenUATTargetIdentity, *tokenUATSourceProcess)
+	}
+	stored, err := agentTokens.Import(candidate.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer agentTokens.Remove(stored.ID)
+	selected, release, err := acquireTokenContext(ctx, stored.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	user, err := operationToken(selected).GetTokenUser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedSID := user.User.Sid.String()
+	shellCtx, stop := context.WithTimeout(selected, 30*time.Second)
+	defer stop()
+	process, terminal, resize, err := startInteractiveProcess(shellCtx, InteractiveRequest{Argv: []string{"cmd.exe", "/d"}, Cols: 100, Rows: 30})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer terminal.Close()
+	chunks := make(chan string, 64)
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, err := terminal.Read(buf)
+			if n > 0 {
+				chunks <- string(buf[:n])
+			}
+			if err != nil {
+				close(chunks)
+				return
+			}
+		}
+	}()
+	seen := ""
+	waitFor := func(want string) {
+		t.Helper()
+		for !strings.Contains(seen, want) {
+			select {
+			case chunk, ok := <-chunks:
+				if !ok {
+					t.Fatalf("shell ended before %q: %q", want, seen)
+				}
+				seen += chunk
+			case <-shellCtx.Done():
+				t.Fatalf("shell timed out before %q: %q", want, seen)
+			}
+		}
+	}
+	waitFor(">")
+	if _, err := terminal.Write([]byte("who")); err != nil {
+		t.Fatal(err)
+	}
+	waitFor("who")
+	if err := resize(120, 35); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := terminal.Write([]byte("ami.exe /user\r")); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(expectedSID)
+	_, _ = terminal.Write([]byte("exit\r"))
+	if err := process.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	_ = terminal.Close()
+	ps, psTerminal, _, err := startInteractiveProcess(shellCtx, InteractiveRequest{Argv: []string{"powershell.exe", "-NoProfile", "-NoLogo"}, Cols: 100, Rows: 30})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer psTerminal.Close()
+	psChunks := make(chan string, 64)
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, readErr := psTerminal.Read(buf)
+			if n > 0 {
+				psChunks <- string(buf[:n])
+			}
+			if readErr != nil {
+				close(psChunks)
+				return
+			}
+		}
+	}()
+	psSeen := ""
+	psWaitFor := func(want string) {
+		t.Helper()
+		for !strings.Contains(psSeen, want) {
+			select {
+			case chunk, ok := <-psChunks:
+				if !ok {
+					t.Fatalf("PowerShell ended before %q: %q", want, psSeen)
+				}
+				psSeen += chunk
+			case <-shellCtx.Done():
+				t.Fatalf("PowerShell timed out before %q: %q", want, psSeen)
+			}
+		}
+	}
+	psWaitFor("PS ")
+	if _, err := psTerminal.Write([]byte("Write-Output ")); err != nil {
+		t.Fatal(err)
+	}
+	psWaitFor("Write-Output ")
+	if _, err := psTerminal.Write([]byte("undertow-token-shell\r")); err != nil {
+		t.Fatal(err)
+	}
+	psWaitFor("undertow-token-shell")
+	_, _ = psTerminal.Write([]byte("exit\r"))
+	if err := ps.Wait(); err != nil {
+		t.Fatal(err)
 	}
 }
 

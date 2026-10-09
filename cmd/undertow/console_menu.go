@@ -74,6 +74,7 @@ func printConsoleOverview(output io.Writer, vpnClient, selected, serverAttached 
 		m.row("operators me", "Show this authenticated account")
 		m.row("operators list", "List accounts (Team Leader)")
 		m.row("operators create|role|disable|enable|reset|revoke", "Manage accounts (Team Leader)")
+		m.row("credentials list|add|replace|remove", "Manage engagement credentials")
 	}
 	m.section("PAYLOAD DEPLOYMENT")
 	m.row("jumps [SOURCE_AGENT]", "List Windows Jump records")

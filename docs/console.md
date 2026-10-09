@@ -32,6 +32,8 @@ See [getting started](getting-started.md) for enrollment, fingerprint, and privi
 
 For live Windows token discovery, import, logon and session/per-operation selection, see [Authentication contexts / tokens](authentication-contexts.md#console-commands). Use `help tokens` in an agent console. Execution and module commands accept `--token-context ID|process`.
 
+The authenticated client console also supports `credentials list|add|replace|remove`. `help credentials` shows file-based secret input. Use `tokens create --credential ID LOGON_TYPE` for a stored password or `jump start ID --credential ID` for a stored password or compatible NT hash. See [Credential Store](credential-store.md).
+
 ## Team coordination
 
 The connected **client** console can read and send the same server-retained messages and assignments as the GUI. These commands use the account authenticated when the client connected; an agent selection is not needed. The server console has no operator session for team chat, so use an authenticated client.

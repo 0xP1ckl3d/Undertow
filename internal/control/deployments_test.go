@@ -332,6 +332,56 @@ func TestSleepingDeploymentKeepsPasswordOnlyInMemory(t *testing.T) {
 	}
 }
 
+func TestSleepingDeploymentQueuesStoredCredentialReferenceOnly(t *testing.T) {
+	m, store, _ := deploymentTestManager(t)
+	defer store.Close()
+	if err := store.BootstrapOperator("alice", "Alice", "a strong fixture password"); err != nil {
+		t.Fatal(err)
+	}
+	const secret = "queued-stored-secret-2d731"
+	credential, err := store.CreateCredential("alice", CredentialInput{Label: "Jump account", Domain: "LAB", Username: "operator", Kind: "password", Secret: secret})
+	if err != nil {
+		t.Fatal(err)
+	}
+	delete(m.agents, "source")
+	report := pivot.DefaultCapabilities().Report()
+	m.offlineAgents["source"] = AgentInfo{ID: "source", OS: "windows", ArtifactIdentity: ArtifactIdentity{UndertowVersion: "test"}, Capabilities: &report, ConnectionState: "sleeping", SleepSupported: true, Sleep: SleepPolicy{IntervalSeconds: 15}, SleepLostAfter: time.Now().Add(time.Minute)}
+	m.SetDeploymentMethodExecutor(deploymentExecutorStub{})
+	record, err := m.createDeployment(context.Background(), createDeploymentRequest{SourceAgentID: "source", Target: "ws06", ArtifactID: "build-one", Method: "winrm", Context: "current-user"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.prepareDeployment(record.ID); err != nil {
+		t.Fatal(err)
+	}
+	ctx := WithActionClaims(context.Background(), ActionClaims{OperatorID: "alice"})
+	if err := m.startDeployment(ctx, record.ID, DeploymentStartRequest{CredentialID: credential.ID}); err != nil {
+		t.Fatal(err)
+	}
+	queuedRecord, err := store.Deployment(record.ID)
+	if err != nil || queuedRecord.CredentialID != credential.ID || queuedRecord.Account != `LAB\operator` {
+		t.Fatalf("record=%+v err=%v", queuedRecord, err)
+	}
+	queued, err := store.LoadQueuedJobs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := queued[queuedRecord.JobID]
+	encoded, _ := json.Marshal(request)
+	if request.CredentialID != credential.ID || request.TokenContextID != "process" || strings.Contains(string(encoded), secret) {
+		t.Fatalf("unsafe queue=%s", encoded)
+	}
+	if _, ok := m.deploymentCredentials[record.ID]; ok {
+		t.Fatal("stored credential copied to transient supplied-credential map")
+	}
+	if err := store.DeleteCredential(credential.ID, "alice", TeamLeaderRole); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.resolveStoredCredential("alice", credential.ID); err == nil {
+		t.Fatal("removed credential resolved")
+	}
+}
+
 func TestSleepingDeploymentKeepsNTHashOnlyInMemory(t *testing.T) {
 	m, store, _ := deploymentTestManager(t)
 	defer store.Close()

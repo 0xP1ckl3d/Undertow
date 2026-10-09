@@ -33,6 +33,7 @@ type DeploymentArtifact struct {
 
 type DeploymentStartRequest struct {
 	TokenContextID string `json:"token_context_id,omitempty"`
+	CredentialID   string `json:"credential_id,omitempty"`
 	Delivery       string `json:"delivery"`
 	InstallPath    string `json:"install_path,omitempty"`
 	Username       string `json:"username,omitempty"`
@@ -397,6 +398,25 @@ func (m *Manager) startDeployment(ctx context.Context, id string, request Deploy
 	if record.Context == "named-account" {
 		return errors.New("named-account deployments require a future credential integration")
 	}
+	if request.CredentialID != "" {
+		if !credentialIDValid(request.CredentialID) || request.Username != "" || request.Password != "" || request.NTHash != "" {
+			return errors.New("choose a stored credential or supplied Jump credentials")
+		}
+		if request.TokenContextID == "" {
+			request.TokenContextID = "process"
+		}
+		material, resolveErr := m.resolveStoredCredential(boundActionFromContext(ctx).OperatorID, request.CredentialID)
+		if resolveErr != nil {
+			return resolveErr
+		}
+		request.Username = material.Account()
+		if material.Kind == "password" {
+			request.Password = material.Secret
+		} else {
+			request.NTHash = material.Secret
+		}
+		defer func() { request.Password, request.NTHash = "", "" }()
+	}
 	selection, err := m.resolveTokenContext(ctx, jobOwner(ctx), record.SourceAgentID, request.TokenContextID)
 	if err != nil {
 		return err
@@ -424,6 +444,7 @@ func (m *Manager) startDeployment(ctx context.Context, id string, request Deploy
 		item.State, item.UpdatedAt, item.Progress = "dispatching", time.Now().UTC(), "Starting Windows method"
 		item.DeliveryType, item.DeliveryID, item.InstallPath = plan.DeliveryType, plan.DeliveryID, plan.InstallPath
 		item.TokenContextID = plan.TokenContextID
+		item.CredentialID = request.CredentialID
 		if plan.Credential != nil {
 			item.Account = plan.Credential.Account()
 		}
@@ -436,9 +457,11 @@ func (m *Manager) startDeployment(ctx context.Context, id string, request Deploy
 	credentialAccount := ""
 	if plan.Credential != nil {
 		credentialAccount = plan.Credential.Account()
-		m.retainDeploymentCredential(id, plan.Credential)
+		if request.CredentialID == "" {
+			m.retainDeploymentCredential(id, plan.Credential)
+		}
 	}
-	queuedRequest := queuedJobRequest{TokenContextID: plan.TokenContextID, Kind: "deployment", DeploymentID: id, Delivery: request.Delivery, InstallPath: plan.InstallPath, CredentialAccount: credentialAccount, Actor: boundActionFromContext(ctx), deferDispatch: true}
+	queuedRequest := queuedJobRequest{TokenContextID: plan.TokenContextID, Kind: "deployment", DeploymentID: id, Delivery: request.Delivery, InstallPath: plan.InstallPath, CredentialID: request.CredentialID, CredentialAccount: credentialAccount, Actor: boundActionFromContext(ctx), deferDispatch: true}
 	job, queued, queueErr := m.queueJobIfSleeping(0, record.SourceAgentID, queuedRequest)
 	if queueErr != nil {
 		m.clearDeploymentCredential(id)
@@ -515,7 +538,7 @@ func (m *Manager) dispatchQueuedDeployment(agentID string, stream *mux.Mux, job 
 		m.failQueuedDeploymentJob(job, "queued deployment record is no longer dispatching")
 		return
 	}
-	if request.CredentialAccount != "" {
+	if request.CredentialAccount != "" && request.CredentialID == "" {
 		defer m.clearDeploymentCredential(record.ID)
 	}
 	sourceInfo, _, sourceReady := m.deploymentSource(agentID)
@@ -541,14 +564,38 @@ func (m *Manager) dispatchQueuedDeployment(agentID string, stream *mux.Mux, job 
 		return
 	}
 	ctx = pivot.WithTokenContext(ctx, request.TokenContextID)
-	plan, err := executor.Preflight(ctx, record, DeploymentStartRequest{TokenContextID: request.TokenContextID, Delivery: request.Delivery, InstallPath: request.InstallPath})
+	preflight := DeploymentStartRequest{TokenContextID: request.TokenContextID, Delivery: request.Delivery, InstallPath: request.InstallPath}
+	if request.CredentialID != "" {
+		material, resolveErr := m.resolveStoredCredential(request.Actor.OperatorID, request.CredentialID)
+		if resolveErr != nil || material.Account() != request.CredentialAccount {
+			failure := "stored credential unavailable or changed before Jump dispatch"
+			_ = m.AdvanceDeployment(record.ID, DeploymentProgress{State: "failed", Progress: "Queued credential unavailable", Failure: failure, JobID: job.info.ID})
+			m.failQueuedDeploymentJob(job, failure)
+			return
+		}
+		preflight.Username = material.Account()
+		if material.Kind == "password" {
+			preflight.Password = material.Secret
+		} else {
+			preflight.NTHash = material.Secret
+		}
+		material.Secret = ""
+	}
+	plan, err := executor.Preflight(ctx, record, preflight)
+	preflight.Password, preflight.NTHash = "", ""
 	if err != nil {
 		_ = m.AdvanceDeployment(record.ID, DeploymentProgress{State: "failed", Progress: "Queued deployment preflight failed", Failure: err.Error(), JobID: job.info.ID})
 		m.failQueuedDeploymentJob(job, "Queued deployment preflight failed: "+err.Error())
 		return
 	}
 	plan.TokenContextID = request.TokenContextID
-	if request.CredentialAccount != "" {
+	if request.CredentialID != "" && (plan.Credential == nil || plan.Credential.Account() != request.CredentialAccount || !sourceInfo.Capabilities.Allows("jump-credentials") || plan.Credential.UsesNTHash() && !sourceInfo.Capabilities.Allows("jump-nt-hash")) {
+		failure := "stored credential is incompatible with this Jump method or agent"
+		_ = m.AdvanceDeployment(record.ID, DeploymentProgress{State: "failed", Progress: "Queued credential unsupported", Failure: failure, JobID: job.info.ID})
+		m.failQueuedDeploymentJob(job, failure)
+		return
+	}
+	if request.CredentialID == "" && request.CredentialAccount != "" {
 		credential, ok := m.takeDeploymentCredential(record.ID)
 		if !ok || credential.Account() != request.CredentialAccount {
 			failure := "supplied Windows credentials are no longer available; server restarts intentionally clear queued passwords and NT hashes"

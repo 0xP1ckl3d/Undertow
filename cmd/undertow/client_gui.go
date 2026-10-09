@@ -117,6 +117,13 @@ func (g *guiServer) handler() http.Handler {
 	mux.HandleFunc("GET /api/events", g.events)
 	mux.HandleFunc("GET /api/agents/{id}/tokens", g.remote(http.MethodGet, func(r *http.Request) string { return "/v1/agents/" + url.PathEscape(r.PathValue("id")) + "/tokens" }))
 	mux.HandleFunc("POST /api/agents/{id}/tokens", g.manageTokens)
+	mux.HandleFunc("POST /api/agents/{id}/tokens/from-credential", g.remote(http.MethodPost, func(r *http.Request) string {
+		return "/v1/agents/" + url.PathEscape(r.PathValue("id")) + "/tokens/from-credential"
+	}))
+	mux.HandleFunc("GET /api/credentials", g.remote(http.MethodGet, func(*http.Request) string { return "/v1/credentials" }))
+	mux.HandleFunc("POST /api/credentials", g.remote(http.MethodPost, func(*http.Request) string { return "/v1/credentials" }))
+	mux.HandleFunc("PUT /api/credentials/{id}", g.remote(http.MethodPut, func(r *http.Request) string { return "/v1/credentials/" + url.PathEscape(r.PathValue("id")) }))
+	mux.HandleFunc("DELETE /api/credentials/{id}", g.remote(http.MethodDelete, func(r *http.Request) string { return "/v1/credentials/" + url.PathEscape(r.PathValue("id")) }))
 	mux.HandleFunc("GET /api/topology", g.remote(http.MethodGet, func(*http.Request) string { return "/v1/topology" }))
 	mux.HandleFunc("GET /api/history", g.remote(http.MethodGet, func(*http.Request) string { return "/v1/history" }))
 	mux.HandleFunc("GET /api/deployments", g.remote(http.MethodGet, func(r *http.Request) string {

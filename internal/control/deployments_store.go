@@ -11,6 +11,7 @@ import (
 // It contains identifiers and status only; credentials and artifact bytes live elsewhere.
 type DeploymentRecord struct {
 	TokenContextID     string     `json:"token_context_id,omitempty"`
+	CredentialID       string     `json:"credential_id,omitempty"`
 	ID                 string     `json:"id"`
 	SourceAgentID      string     `json:"source_agent_id"`
 	Target             string     `json:"target"`

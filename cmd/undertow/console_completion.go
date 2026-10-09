@@ -117,7 +117,7 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 				return matches
 			}
 		}
-		commands := []string{"agents", "agent", "tokens", "payload", "jump", "jumps", "session", "use", "status", "routes", "topology", "transports", "start", "stop", "help", "clear", "cls", "quit", "exit"}
+		commands := []string{"agents", "agent", "tokens", "credentials", "payload", "jump", "jumps", "session", "use", "status", "routes", "topology", "transports", "start", "stop", "help", "clear", "cls", "quit", "exit"}
 		if selected {
 			commands = append(commands, loadedNames...)
 		}
@@ -138,6 +138,10 @@ func consoleCompletions(before []string, partial string, quote rune, selected, v
 		return wordCompletions(commands, partial)
 	}
 	switch before[0] {
+	case "credentials":
+		if len(before) == 1 {
+			return wordCompletions([]string{"list", "add", "replace", "remove"}, partial)
+		}
 	case "tokens":
 		if selected && len(before) == 1 || !selected && len(before) == 2 {
 			return wordCompletions([]string{"list", "discover", "import", "create", "use", "revert", "remove", "clear"}, partial)

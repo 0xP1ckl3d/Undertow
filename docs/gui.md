@@ -36,6 +36,7 @@ Keep the URL private: it grants local workspace access. The service binds to num
 | **Topology** | Server, operator clients, agents, relay paths, accepted networks, forwards, and Jump relationships |
 | **Agents** | Select a host and use Console, Overview, Files, Jobs, Screenshots, Modules, Host, or Live shell |
 | **Jump** | Prepare and track Windows deployment through an existing agent |
+| **Credentials** | Manage encrypted engagement passwords and NT hashes for authorised operations |
 | **Jobs** | Background work, retained output, and received BOF files |
 | **Transfers** | GUI file-transfer and Jump delivery progress, states, and checksums |
 | **Routes** | Accept networks on this client, toggle saved routes, or manage server routes |
@@ -162,7 +163,7 @@ The server stores transfer metadata rather than another copy of the file. Sessio
 
 ## Run tools from Modules
 
-Windows agents expose **Authentication Contexts / Tokens** for discovery, import, logon and session defaults. Job, Modules and Live shell forms also have a per-operation **Authentication context** control. See [Authentication contexts / tokens](authentication-contexts.md) for selection, lifecycle and multi-operator behaviour.
+Windows agents expose **Tokens** for discovery, import, logon and session defaults. **Create a context** stays near the top of that tab, including a stored-password selector. Job, Modules and Shell forms also have a per-operation **Authentication context** control. See [Authentication contexts / tokens](authentication-contexts.md) for selection, lifecycle and multi-operator behaviour. The top-level **Credentials** page manages reusable account material; [Credential Store](credential-store.md) describes ownership, encryption and Jump use.
 
 Open **Agents → your agent → Modules**, or sidebar **Modules** and choose **Target agent**. The bank is local to this client; loading does not execute tools.
 
@@ -282,12 +283,14 @@ The board shows the latest 200 assignments; conversations load in pages of 100 w
 | --- | --- |
 | **Client** | Internet egress/global internal routing toggles on a client with TUN; operator-only requires restarting in a routing mode |
 | **Carriers** | Shared server public address and DNS/QUIC/WebSocket listeners |
-| **Agents** | **Show archived agents**, a local visibility preference, to inspect/restore hidden records |
+| **Agents** | Search archived agents, restore one or many, or permanently delete selected records as a Team Leader. **Show archived agents** controls visibility in Agents and Topology on this client. |
 | **Identity** | Authenticated account; Team Leader account creation, roles, enable/disable, reset, and revoke |
 | **Status** | Client mode, carrier, server, and sessions |
 | **Logs** | Recent server diagnostics, **Follow** new lines, **Pause** following; buffers are bounded |
 
 Carrier and public-address changes are shared. Under **Settings → Carriers → Server public address**, enter the hostname or IP for new profiles and click **Save address**. The HTTPS retrieval host is separate under **Payloads → Retrieval settings**.
+
+Archiving a lost agent removes routes owned by it; a callback automatically restores the agent record. **Restore** makes an archived record visible again without starting its payload. Permanent deletion requires typing `DELETE` and removes its retained server snapshot, jobs and output, screenshots, transfers, Jump records, and associated history. Connected or sleeping agents cannot be deleted. Local console history on connected clients is cleared when they receive the deletion event; clients that were offline may still retain their own local cache.
 
 To start a stopped carrier, use **Settings → Carriers → Start listener**. Select QUIC, WebSocket, or DNS, enter the server listen address or leave its default, and choose TLS for QUIC or WebSocket. **Certificate files** takes certificate and key paths on the server. Click **Start listener**, then check the listener and session counts. Make sure the server firewall permits its port; starting a listener does not change existing agents' callback settings.
 

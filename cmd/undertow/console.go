@@ -847,6 +847,12 @@ func runConsoleCommand(ctx context.Context, output io.Writer, call consoleCaller
 		}
 		return runConsoleOperators(ctx, output, call, args)
 	}
+	if args[0] == "credentials" {
+		if !vpnClient {
+			return errors.New("credential store requires a connected operator client console")
+		}
+		return runConsoleCredentials(ctx, output, call, args)
+	}
 	if args[0] == "session" {
 		if len(args) != 3 || args[1] != "kill" {
 			return errors.New("use session kill AGENT_NUMBER|ID|HOSTNAME, or select an agent first")

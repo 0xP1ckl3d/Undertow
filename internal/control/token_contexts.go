@@ -217,7 +217,7 @@ func (m *Manager) bindTokenOperation(r *http.Request) (*http.Request, error) {
 			return r, err
 		}
 		hasCredential := false
-		for _, name := range []string{"username", "password", "nt_hash"} {
+		for _, name := range []string{"username", "password", "nt_hash", "credential_id"} {
 			var value string
 			if raw := body[name]; len(raw) != 0 && json.Unmarshal(raw, &value) == nil && value != "" {
 				hasCredential = true
@@ -274,6 +274,50 @@ func (m *Manager) bindTokenOperation(r *http.Request) (*http.Request, error) {
 	return r, nil
 }
 func (m *Manager) tokenHTTPHandlers(routes *http.ServeMux) {
+	routes.HandleFunc("POST /v1/agents/{id}/tokens/from-credential", func(w http.ResponseWriter, r *http.Request) {
+		store, operator, ok := m.authorizedCredentialStore(w, r)
+		if !ok {
+			return
+		}
+		var input struct {
+			CredentialID string `json:"credential_id"`
+			LogonType    string `json:"logon_type"`
+		}
+		decoder := json.NewDecoder(io.LimitReader(r.Body, 513))
+		decoder.DisallowUnknownFields()
+		if decoder.Decode(&input) != nil || !credentialIDValid(input.CredentialID) {
+			http.Error(w, "invalid stored credential reference", 400)
+			return
+		}
+		material, err := store.ResolveCredential(input.CredentialID, operator.ID, operator.Role)
+		if err != nil {
+			http.Error(w, "credential unavailable", 404)
+			return
+		}
+		if material.Kind != "password" {
+			http.Error(w, "NT hashes cannot create a Windows logon token", 409)
+			return
+		}
+		agent := r.PathValue("id")
+		keyResult, err := m.forwardTokenRequest(r.Context(), agent, pivot.TokenRequest{Action: "creation-key"})
+		if err != nil || keyResult.CreationKey == nil {
+			http.Error(w, "agent creation key unavailable", 409)
+			return
+		}
+		sealed, err := authcontext.SealLogon(*keyResult.CreationKey, authcontext.LogonRequest{User: material.Username, Domain: material.Domain, Password: material.Secret, LogonType: input.LogonType})
+		material.Secret = ""
+		if err != nil {
+			http.Error(w, "seal stored credential failed", 409)
+			return
+		}
+		result, err := m.forwardTokenRequest(r.Context(), agent, pivot.TokenRequest{Action: "create", SealedLogon: &sealed})
+		if err != nil {
+			http.Error(w, err.Error(), 409)
+			return
+		}
+		result.DefaultContextID = m.tokenDefault(jobOwner(r.Context()), agent)
+		jsonReply(w, 200, result)
+	})
 	routes.HandleFunc("GET /v1/agents/{id}/tokens", func(w http.ResponseWriter, r *http.Request) {
 		agent := r.PathValue("id")
 		if result, ok := m.cachedTokenResponse(agent); ok {
@@ -369,30 +413,34 @@ func (m *Manager) manageTokenRequest(w http.ResponseWriter, r *http.Request, req
 		jsonReply(w, 200, result)
 		return
 	}
-	releaseTurn, err := m.foregroundTurn(r.Context(), agent)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusRequestTimeout)
-		return
-	}
-	defer releaseTurn()
-	stream, err := m.openAgentForOperator(r.Context(), r.Context().Done(), agent, pivot.TokenDestination)
+	result, err := m.forwardTokenRequest(r.Context(), agent, request)
 	if err != nil {
 		http.Error(w, err.Error(), 409)
 		return
 	}
-	result, err := pivot.ManageTokensOnStream(r.Context(), stream, request)
-
-	if err != nil {
-		http.Error(w, err.Error(), 409)
-		return
-	}
-	m.rememberTokenResponse(agent, result)
 	if audit, _ := r.Context().Value(tokenAuditKey{}).(*tokenAuditInfo); audit != nil && result.Created != nil && authcontext.ValidID(result.Created.ID) {
 		audit.id = result.Created.ID
 	}
-
 	result.DefaultContextID = m.tokenDefault(owner, agent)
 	// A stale default remains explicit and fails closed until the operator
 	// selects a live context or reverts; never silently substitute process identity.
 	jsonReply(w, 200, result)
+}
+
+func (m *Manager) forwardTokenRequest(ctx context.Context, agent string, request pivot.TokenRequest) (pivot.TokenResponse, error) {
+	releaseTurn, err := m.foregroundTurn(ctx, agent)
+	if err != nil {
+		return pivot.TokenResponse{}, err
+	}
+	defer releaseTurn()
+	stream, err := m.openAgentForOperator(ctx, ctx.Done(), agent, pivot.TokenDestination)
+	if err != nil {
+		return pivot.TokenResponse{}, err
+	}
+	result, err := pivot.ManageTokensOnStream(ctx, stream, request)
+	if err != nil {
+		return pivot.TokenResponse{}, err
+	}
+	m.rememberTokenResponse(agent, result)
+	return result, nil
 }

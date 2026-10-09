@@ -14,6 +14,7 @@ import (
 
 type AuditRecord struct {
 	TokenContextID  string    `json:"token_context_id,omitempty"`
+	CredentialID    string    `json:"credential_id,omitempty"`
 	ID              string    `json:"id"`
 	ActionID        string    `json:"action_id,omitempty"`
 	At              time.Time `json:"at"`
@@ -31,6 +32,7 @@ type AuditRecord struct {
 type OperationsStore struct {
 	db             *sql.DB
 	screenshotsDir string
+	credentialKey  [32]byte
 }
 
 func OpenOperationsStore(path string) (*OperationsStore, error) {
@@ -58,6 +60,8 @@ func OpenOperationsStore(path string) (*OperationsStore, error) {
 		`CREATE TABLE IF NOT EXISTS screenshots (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, screen INTEGER NOT NULL, at TEXT NOT NULL, size INTEGER NOT NULL, sha256 TEXT NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL, client_id TEXT NOT NULL, client_session_id TEXT NOT NULL, operator_id TEXT NOT NULL, display_name TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS server_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS operator_accounts (id TEXT PRIMARY KEY, display_name TEXT NOT NULL, role TEXT NOT NULL, password_hash BLOB NOT NULL, disabled INTEGER NOT NULL DEFAULT 0, version INTEGER NOT NULL DEFAULT 1)`,
+		`CREATE TABLE IF NOT EXISTS credentials (id TEXT PRIMARY KEY, label TEXT NOT NULL, domain TEXT NOT NULL, username TEXT NOT NULL, kind TEXT NOT NULL, ciphertext BLOB NOT NULL, owner_id TEXT NOT NULL, shared INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+		`CREATE INDEX IF NOT EXISTS credentials_owner ON credentials(owner_id,created_at DESC)`,
 		`CREATE TABLE IF NOT EXISTS team_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, sent_at TEXT NOT NULL, sender_id TEXT NOT NULL, sender_name TEXT NOT NULL, recipient_id TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL, body TEXT NOT NULL, task_id TEXT NOT NULL DEFAULT '')`,
 		`CREATE INDEX IF NOT EXISTS team_messages_room ON team_messages(recipient_id,id DESC)`,
 		`CREATE INDEX IF NOT EXISTS team_messages_sender ON team_messages(sender_id,id DESC)`,
@@ -89,11 +93,23 @@ func OpenOperationsStore(path string) (*OperationsStore, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrate audit authentication context: %w", err)
 	}
+	rows, columnErr = db.Query("SELECT credential_id FROM audit LIMIT 0")
+	if columnErr == nil {
+		rows.Close()
+	} else if _, err := db.Exec("ALTER TABLE audit ADD COLUMN credential_id TEXT NOT NULL DEFAULT ''"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate audit credential reference: %w", err)
+	}
 	if err := os.Chmod(abs, 0600); err != nil {
 		db.Close()
 		return nil, err
 	}
-	return &OperationsStore{db: db, screenshotsDir: filepath.Join(filepath.Dir(abs), "screenshots")}, nil
+	key, err := loadCredentialKey(abs, db)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	return &OperationsStore{db: db, screenshotsDir: filepath.Join(filepath.Dir(abs), "screenshots"), credentialKey: key}, nil
 }
 
 type StoredJob struct {
@@ -377,7 +393,7 @@ func (s *OperationsStore) RecordAudit(record AuditRecord) error {
 	if s == nil {
 		return errors.New("operations store is not configured")
 	}
-	_, err := s.db.Exec(`INSERT INTO audit (id,action_id,at,action,target,client_id,client_session_id,operator_id,display_name,source,identity_trust,status,token_context_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, record.ID, record.ActionID, record.At.Format(time.RFC3339Nano), record.Action, record.Target, record.ClientID, fmt.Sprint(record.ClientSessionID), record.OperatorID, record.DisplayName, record.Source, record.IdentityTrust, record.Status, record.TokenContextID)
+	_, err := s.db.Exec(`INSERT INTO audit (id,action_id,at,action,target,client_id,client_session_id,operator_id,display_name,source,identity_trust,status,token_context_id,credential_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, record.ID, record.ActionID, record.At.Format(time.RFC3339Nano), record.Action, record.Target, record.ClientID, fmt.Sprint(record.ClientSessionID), record.OperatorID, record.DisplayName, record.Source, record.IdentityTrust, record.Status, record.TokenContextID, record.CredentialID)
 	if err != nil {
 		return err
 	}
@@ -401,6 +417,14 @@ func (s *OperationsStore) CompleteAuditContext(id string, status int, contextID 
 	return err
 }
 
+func (s *OperationsStore) CompleteAuditSelection(id string, status int, contextID, credentialID string) error {
+	if s == nil {
+		return errors.New("operations store is not configured")
+	}
+	_, err := s.db.Exec(`UPDATE audit SET status=?,token_context_id=?,credential_id=? WHERE id=?`, status, contextID, credentialID, id)
+	return err
+}
+
 func (s *OperationsStore) AuditHistory(limit int) ([]AuditRecord, error) {
 	if s == nil {
 		return []AuditRecord{}, nil
@@ -408,7 +432,7 @@ func (s *OperationsStore) AuditHistory(limit int) ([]AuditRecord, error) {
 	if limit < 1 || limit > 500 {
 		limit = 100
 	}
-	rows, err := s.db.Query(`SELECT id,action_id,at,action,target,client_id,client_session_id,operator_id,display_name,source,identity_trust,status,token_context_id FROM audit ORDER BY at DESC LIMIT ?`, limit)
+	rows, err := s.db.Query(`SELECT id,action_id,at,action,target,client_id,client_session_id,operator_id,display_name,source,identity_trust,status,token_context_id,credential_id FROM audit ORDER BY at DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -417,7 +441,7 @@ func (s *OperationsStore) AuditHistory(limit int) ([]AuditRecord, error) {
 	for rows.Next() {
 		var r AuditRecord
 		var at, session string
-		if err := rows.Scan(&r.ID, &r.ActionID, &at, &r.Action, &r.Target, &r.ClientID, &session, &r.OperatorID, &r.DisplayName, &r.Source, &r.IdentityTrust, &r.Status, &r.TokenContextID); err != nil {
+		if err := rows.Scan(&r.ID, &r.ActionID, &at, &r.Action, &r.Target, &r.ClientID, &session, &r.OperatorID, &r.DisplayName, &r.Source, &r.IdentityTrust, &r.Status, &r.TokenContextID, &r.CredentialID); err != nil {
 			return nil, err
 		}
 		r.At, _ = time.Parse(time.RFC3339Nano, at)

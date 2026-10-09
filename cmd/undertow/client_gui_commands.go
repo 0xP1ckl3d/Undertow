@@ -189,6 +189,14 @@ func (g *guiServer) runAgentGUICommand(ctx context.Context, agentID, line string
 	call := func(method, path string, body any) ([]byte, error) { return g.client.call(ctx, method, path, body) }
 	base := "/v1/agents/" + url.PathEscape(agentID)
 	switch args[0] {
+	case "credentials":
+		var out strings.Builder
+		if err := runConsoleCredentials(ctx, &out, func(ctx context.Context, method, path string, body any) ([]byte, error) {
+			return g.client.call(ctx, method, path, body)
+		}, args); err != nil {
+			return guiCommandResult{}, err
+		}
+		return guiCommandResult{Output: out.String()}, nil
 	case "tokens":
 		var out strings.Builder
 		if err := runConsoleTokens(ctx, &out, func(ctx context.Context, method, path string, body any) ([]byte, error) {

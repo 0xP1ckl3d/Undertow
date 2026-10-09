@@ -14,6 +14,7 @@ import (
 	"undertow/internal/agent"
 	"undertow/internal/agentprofile"
 	"undertow/internal/bof"
+	"undertow/internal/pivot"
 	"undertow/internal/windowsdeploy"
 )
 
@@ -21,6 +22,12 @@ func main() {
 	log.SetOutput(io.Discard)
 	if len(os.Args) == 2 && os.Args[1] == "_bof-worker" {
 		if err := bof.WorkerMain(os.Stdin, os.Stdout); err != nil {
+			os.Exit(1)
+		}
+		return
+	}
+	if len(os.Args) == 2 && os.Args[1] == "_shell-worker" {
+		if err := pivot.ShellWorkerMain(os.Stdin, os.Stdout); err != nil {
 			os.Exit(1)
 		}
 		return

@@ -183,9 +183,15 @@ func runConsoleDeployment(ctx context.Context, output io.Writer, call consoleCal
 		if tokenID := pivot.TokenContextID(ctx); tokenID != "" {
 			request["token_context_id"] = tokenID
 		}
-		installPath, username, passwordFile, hashFile := "", "", "", ""
+		installPath, username, passwordFile, hashFile, credentialID := "", "", "", "", ""
 		for i := 3; i < len(args); i++ {
 			switch args[i] {
+			case "--credential":
+				i++
+				if i >= len(args) || credentialID != "" {
+					return errors.New("--credential requires one stored credential ID")
+				}
+				credentialID = args[i]
 			case "--username":
 				i++
 				if i >= len(args) || username != "" {
@@ -216,6 +222,15 @@ func runConsoleDeployment(ctx context.Context, output io.Writer, call consoleCal
 		}
 		if passwordFile != "" && hashFile != "" {
 			return errors.New("choose --password-file or --nt-hash-file")
+		}
+		if credentialID != "" {
+			if username != "" || passwordFile != "" || hashFile != "" {
+				return errors.New("choose stored or supplied Jump credentials")
+			}
+			if tokenID := request["token_context_id"]; tokenID != "" && tokenID != "process" {
+				return errors.New("choose --token-context or stored Jump credentials")
+			}
+			request["credential_id"], request["token_context_id"] = credentialID, "process"
 		}
 		if (username == "") != (passwordFile == "" && hashFile == "") {
 			return errors.New("use --username with --password-file or --nt-hash-file")

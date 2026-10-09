@@ -32,6 +32,7 @@ type queuedJobRequest struct {
 	Delivery          string             `json:"delivery,omitempty"`
 	InstallPath       string             `json:"install_path,omitempty"`
 	CredentialAccount string             `json:"credential_account,omitempty"`
+	CredentialID      string             `json:"credential_id,omitempty"`
 	deferDispatch     bool               `json:"-"`
 }
 
@@ -39,7 +40,7 @@ const maxQueuedJobs = 32
 const maxQueuedJobBytes = 64 << 20
 
 func (r queuedJobRequest) size() int {
-	n := len(r.Source) + len(r.Input) + len(r.Arguments) + len(r.Language) + len(r.DeploymentID) + len(r.Delivery) + len(r.InstallPath) + len(r.CredentialAccount)
+	n := len(r.Source) + len(r.Input) + len(r.Arguments) + len(r.Language) + len(r.DeploymentID) + len(r.Delivery) + len(r.InstallPath) + len(r.CredentialAccount) + len(r.CredentialID)
 	for _, arg := range r.Argv {
 		n += len(arg)
 	}

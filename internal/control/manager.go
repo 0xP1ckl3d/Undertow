@@ -1611,6 +1611,7 @@ func (m *Manager) ServeHTTP(ctx context.Context, address, token string) error {
 func (m *Manager) handler(token string) http.Handler {
 	muxer := http.NewServeMux()
 	m.deploymentHTTPHandlers(muxer)
+	m.credentialHTTPHandlers(muxer)
 	m.operatorHTTPHandlers(muxer)
 	m.teamHTTPHandlers(muxer)
 	m.registerTransferHandlers(muxer)
@@ -2134,6 +2135,11 @@ func (m *Manager) handler(token string) http.Handler {
 			http.Error(w, tokenErr.Error(), http.StatusBadRequest)
 			return
 		}
+		r, tokenErr = m.bindCredentialAudit(r)
+		if tokenErr != nil {
+			http.Error(w, "invalid credential reference request", http.StatusBadRequest)
+			return
+		}
 		if (r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodDelete) && !(r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/v1/transfers/")) {
 			m.mu.RLock()
 			store := m.operations
@@ -2162,6 +2168,10 @@ func (m *Manager) handler(token string) http.Handler {
 					record.Action += " tokens." + authAudit.action
 					record.TokenContextID = authAudit.id
 				}
+				if credentialAudit, _ := r.Context().Value(credentialAuditKey{}).(*credentialAuditInfo); credentialAudit != nil {
+					record.Action += " credentials." + credentialAudit.action
+					record.CredentialID = credentialAudit.id
+				}
 				if err := store.RecordAudit(record); err != nil {
 					log.Printf("audit start: %v", err)
 					http.Error(w, "audit unavailable", http.StatusInternalServerError)
@@ -2172,8 +2182,17 @@ func (m *Manager) handler(token string) http.Handler {
 			muxer.ServeHTTP(tracked, r)
 			if store != nil {
 				var completeErr error
-				if authAudit, _ := r.Context().Value(tokenAuditKey{}).(*tokenAuditInfo); authAudit != nil {
-					completeErr = store.CompleteAuditContext(auditID, tracked.status, authAudit.id)
+				authAudit, _ := r.Context().Value(tokenAuditKey{}).(*tokenAuditInfo)
+				credentialAudit, _ := r.Context().Value(credentialAuditKey{}).(*credentialAuditInfo)
+				if authAudit != nil || credentialAudit != nil {
+					contextID, credentialID := pivot.TokenContextID(r.Context()), ""
+					if authAudit != nil {
+						contextID = authAudit.id
+					}
+					if credentialAudit != nil {
+						credentialID = credentialAudit.id
+					}
+					completeErr = store.CompleteAuditSelection(auditID, tracked.status, contextID, credentialID)
 				} else {
 					completeErr = store.CompleteAudit(auditID, tracked.status)
 				}

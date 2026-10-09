@@ -176,10 +176,7 @@ func startInteractiveProcess(ctx context.Context, request InteractiveRequest) (i
 		return startPipedInteractiveProcess(ctx, path, argv[1:])
 	}
 	if request.Credential == nil && operationToken(ctx) != 0 {
-		// Selected-token launches use the Secondary Logon STARTUPINFO contract.
-		// ConPTY requires an extended startup attribute, so use the same
-		// pipe-backed terminal as an explicit NoPTY shell before launching.
-		return startPipedInteractiveProcess(ctx, path, argv[1:])
+		return startSelectedTokenConPTY(ctx, request)
 	}
 	app, err := windows.UTF16PtrFromString(path)
 	if err != nil {
