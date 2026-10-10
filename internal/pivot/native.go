@@ -83,16 +83,6 @@ func serveNative(ctx context.Context, stream *mux.Stream) {
 		return
 	}
 	defer releaseToken()
-	restore, tokenErr := enterTokenThread(ctx)
-	if tokenErr != nil {
-		RejectInteractive(stream, tokenErr)
-		return
-	}
-	defer func() {
-		if err := restore(); err != nil {
-			_ = WriteInteractiveError(stream, err)
-		}
-	}()
 	args, err := nativemodule.EncodeArgs(request.Args, request.Stdin)
 	if err != nil {
 		RejectInteractive(stream, err)
@@ -139,7 +129,7 @@ func serveNative(ctx context.Context, stream *mux.Stream) {
 		defer writeMu.Unlock()
 		return writeInteractiveFrame(stream, kind, p)
 	}
-	code, err := executeNative(runCtx, dll, args, write)
+	code, err := executeNativeForContext(runCtx, dll, args, write)
 	if runCtx.Err() != nil {
 		code, err = -1, fmt.Errorf("native module: %w", runCtx.Err())
 	}

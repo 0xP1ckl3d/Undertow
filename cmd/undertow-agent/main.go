@@ -32,6 +32,12 @@ func main() {
 		}
 		return
 	}
+	if len(os.Args) == 2 && os.Args[1] == "_native-worker" {
+		if err := pivot.NativeWorkerMain(os.Stdin, os.Stdout); err != nil {
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "_jump" {
 		var err error
 		args := os.Args[2:]

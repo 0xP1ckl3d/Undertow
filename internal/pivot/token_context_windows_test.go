@@ -19,16 +19,24 @@ import (
 	"golang.org/x/sys/windows"
 	"undertow/internal/authcontext"
 	"undertow/internal/bof"
+	"undertow/internal/nativemodule"
 )
 
 var tokenUATIdentityAssembly = flag.String("undertow-token-identity-assembly", "", "path to the Windows UAT identity-reporting assembly")
 var tokenUATIdentityBOF = flag.String("undertow-token-identity-bof", "", "path to the Windows UAT identity-reporting BOF")
 var tokenUATTargetIdentity = flag.String("undertow-token-target-identity", "NT AUTHORITY\\SYSTEM", "expected identity for process-token UAT")
 var tokenUATSourceProcess = flag.String("undertow-token-source-process", "LogonUI.exe", "source process name for process-token UAT")
+var tokenUATShellPowerModule = flag.String("undertow-token-shellpower-module", "", "path to packaged ShellPower module on the Windows UAT host")
 
 func TestMain(m *testing.M) {
 	if len(os.Args) == 2 && os.Args[1] == "_shell-worker" {
 		if err := ShellWorkerMain(os.Stdin, os.Stdout); err != nil {
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+	if len(os.Args) == 2 && os.Args[1] == "_native-worker" {
+		if err := NativeWorkerMain(os.Stdin, os.Stdout); err != nil {
 			os.Exit(1)
 		}
 		os.Exit(0)
@@ -528,6 +536,81 @@ func TestWindowsTokenContextUATImportedShellStreaming(t *testing.T) {
 	_, _ = psTerminal.Write([]byte("exit\r"))
 	if err := ps.Wait(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// This test must run on the lab endpoint with an accessible foreign process
+// token. ShellPower uses CLR-managed threads, which must inherit the selected
+// worker's process identity rather than the long-lived agent's identity.
+func TestWindowsTokenContextUATImportedNativeWorkerIdentity(t *testing.T) {
+	if os.Getenv("UNDERTOW_TOKEN_UAT_SHELLPOWER") != "1" {
+		t.Skip("opt in on the Windows lab")
+	}
+	if *tokenUATShellPowerModule == "" {
+		t.Fatal("-undertow-token-shellpower-module is required")
+	}
+	container, err := os.ReadFile(*tokenUATShellPowerModule)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, dll, err := nativemodule.Parse(container)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.WithValue(context.Background(), tokenCapabilityKey{}, true)
+	candidates, err := agentTokens.Discover(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var candidate authcontext.Metadata
+	for _, item := range candidates {
+		if strings.EqualFold(item.Identity, *tokenUATTargetIdentity) && strings.Contains(strings.ToLower(item.Source), strings.ToLower(*tokenUATSourceProcess)) && item.ProcessLaunchReady {
+			candidate = item
+			break
+		}
+	}
+	if candidate.ID == "" {
+		t.Fatalf("launch-ready %s process token from %s unavailable", *tokenUATTargetIdentity, *tokenUATSourceProcess)
+	}
+	stored, err := agentTokens.Import(candidate.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer agentTokens.Remove(stored.ID)
+	selected, release, err := acquireTokenContext(ctx, stored.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	user, err := operationToken(selected).GetTokenUser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedSID := user.User.Sid.String()
+	workerCtx, stop := context.WithTimeout(selected, 60*time.Second)
+	defer stop()
+	args, err := nativemodule.EncodeArgs([]string{"[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output strings.Builder
+	code, err := executeNativeForContext(workerCtx, dll, args, func(_ byte, data []byte) error {
+		output.Write(data)
+		return nil
+	})
+	if err != nil || code != 0 || !strings.Contains(output.String(), expectedSID) {
+		t.Fatalf("ShellPower selected worker: code=%d err=%v output=%q expected SID=%s", code, err, output.String(), expectedSID)
+	}
+	commands := make(chan []byte, 2)
+	commands <- []byte("[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value\rexit\r")
+	close(commands)
+	output.Reset()
+	code, err = executeNativeShellForContext(workerCtx, dll, commands, func(_ byte, data []byte) error {
+		output.Write(data)
+		return nil
+	})
+	if err != nil || code != 0 || !strings.Contains(output.String(), expectedSID) {
+		t.Fatalf("ShellPower live selected worker: code=%d err=%v output=%q expected SID=%s", code, err, output.String(), expectedSID)
 	}
 }
 

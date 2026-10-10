@@ -122,12 +122,6 @@ func serveNativeShell(ctx context.Context, stream *mux.Stream) {
 		return
 	}
 	defer releaseToken()
-	restore, err := enterTokenThread(ctx)
-	if err != nil {
-		RejectInteractive(stream, err)
-		return
-	}
-	defer func() { _ = restore() }()
 	select {
 	case nativeSlots <- struct{}{}:
 		defer func() { <-nativeSlots }()
@@ -199,7 +193,7 @@ func serveNativeShell(ctx context.Context, stream *mux.Stream) {
 		defer writeMu.Unlock()
 		return writeInteractiveFrame(stream, kind, data)
 	}
-	code, runErr := executeNativeShell(runCtx, dll, input, write)
+	code, runErr := executeNativeShellForContext(runCtx, dll, input, write)
 	if runCtx.Err() != nil && runErr == nil {
 		runErr = fmt.Errorf("native live shell: %w", runCtx.Err())
 		code = -1

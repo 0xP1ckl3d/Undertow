@@ -1,10 +1,10 @@
 # ShellPower native module
 
-This module adapts the separate ShellPower project to Undertow's native module and native live-shell ABIs. It loads the .NET CLR and Windows PowerShell 5.1 into the remote Undertow agent process and routes PowerShell streams through Undertow. It does not launch `powershell.exe` or `pwsh.exe`. The original CLR host, patching behavior, string obfuscation, and PowerShell stream formatting are preserved.
+This module adapts the separate ShellPower project to Undertow's native module and native live-shell ABIs. It loads the .NET CLR and Windows PowerShell 5.1 into the Undertow agent process by default and routes PowerShell streams through Undertow. When an authentication context is selected, Undertow launches a short-lived native worker under that primary token and loads the CLR there, so PowerShell's managed threads use the selected process identity. It does not launch `powershell.exe` or `pwsh.exe`. The original CLR host, patching behavior, string obfuscation, and PowerShell stream formatting are preserved.
 
 ## What runs where
 
-Undertow transfers the packaged module to the agent, writes its DLL to the agent's temporary directory, and loads it into the agent process. A one-shot module run unloads and deletes that temporary DLL after execution. A live-shell run keeps it loaded for the session and unloads and deletes it when the session closes. Deletion is attempted during normal cleanup; a crash or forced termination can leave the temporary file behind.
+Undertow transfers the packaged module to the agent, writes its DLL to a temporary directory, and loads it into the agent process when no token context is selected. With a selected context, it starts a short-lived worker under that primary token and loads the DLL there. A one-shot module run unloads and deletes that temporary DLL after execution. A live-shell run keeps it loaded for the session and unloads and deletes it when the session closes. Deletion is attempted during normal cleanup; a crash or forced termination can leave the temporary file behind.
 
 Inline source and uploaded `.ps1` contents are transferred as bytes. ShellPower does not create a `.ps1` file on the agent.
 
@@ -12,11 +12,11 @@ Inline source and uploaded `.ps1` contents are transferred as bytes. ShellPower 
 
 Before invoking PowerShell, ShellPower attempts the patch set inherited from the original project:
 
-- two native AMSI changes targeting `AmsiOpenSession` and `AmsiScanBuffer` in the agent process;
+- two native AMSI changes targeting `AmsiOpenSession` and `AmsiScanBuffer` in the process hosting ShellPower;
 - disabling the PowerShell ETW provider for the ShellPower AppDomain;
 - managed changes for transcription flushing, execution-policy enforcement, and constrained-language policy.
 
-The native AMSI changes modify the loaded `amsi.dll` code in the Undertow agent process. ShellPower does not restore those bytes, so a successful change remains until the agent process exits or another component restores the code. Repeated ShellPower runs recognize an existing ShellPower AMSI patch as success.
+The native AMSI changes modify the loaded `amsi.dll` code in the process hosting ShellPower. ShellPower does not restore those bytes, so a successful change remains until that process exits or another component restores the code. Selected-context workers exit after the run or live session; default-context runs modify the long-lived agent process. Repeated ShellPower runs in the same process recognize an existing ShellPower AMSI patch as success.
 
 The PowerShell ETW state is changed through objects in the created AppDomain. The other managed patches modify JIT-compiled methods resolved through that AppDomain and are attempted again for each new run. A one-shot run unloads its AppDomain during cleanup, while the live shell keeps its AppDomain and runspace for the entire session. CLR code can be shared inside a process, so unloading an AppDomain should not be treated as proof that every managed code byte was restored.
 
