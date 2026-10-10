@@ -35,7 +35,7 @@ The GUI bank and a separately attached terminal console maintain their own regis
 
 ## Shipped modules
 
-The repository includes **49 compiled modules** with help sidecars. Start or reattach a console from this checkout so it scans `modules/`, type `modules` to confirm what loaded, then `agents` and `use NUMBER` to select the target. The examples below are commands to type **inside the selected-agent console**. Run `help COMMAND` before a command to see its local help; the module file is sent to the agent when you invoke it.
+The repository includes **50 compiled modules** with help sidecars. Start or reattach a console from this checkout so it scans `modules/`, type `modules` to confirm what loaded, then `agents` and `use NUMBER` to select the target. The examples below are commands to type **inside the selected-agent console**. Run `help COMMAND` before a command to see its local help; the module file is sent to the agent when you invoke it.
 
 ### WASM host assessment (Windows or Linux agents)
 
@@ -57,6 +57,7 @@ For `wasm-artifact-discovery`, add an **agent-side** root such as `wasm-artifact
 | [module-hello](../modules/native/README.md) | Demonstrates native arguments, output, status, and cancellation. | `module-hello one "two words"` |
 | [module-wininfo](../modules/native/README.md) | Reports Windows computer, process, architecture, and memory information. | `module-wininfo` |
 | [module-hostcheck](../modules/native/README.md) | Reports user, token elevation, integrity, privileges, and network adapters. | `module-hostcheck` |
+| [module-shellpower](../modules/native/shellpower/README.md) | Runs an inline Windows PowerShell command or uploaded `.ps1` inside the agent process; also supplies the GUI's persistent ShellPower live shell. | `module-shellpower 'Get-Process | Select-Object -First 5'` |
 | [module-sift](../modules/native/sift/README.md) | Scans a file or directory with the packaged Sift rules. | `module-sift local C:\Audit --json` |
 | [module-askpass](../modules/native/askpass/README.md) | Displays a Windows credential dialog on the agent's desktop. | `module-askpass "Credential test" "Enter test account credentials"` |
 

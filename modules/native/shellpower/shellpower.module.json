@@ -1,0 +1,5 @@
+{
+  "description": "Run a PowerShell command or uploaded script inside the Undertow agent process.",
+  "usage": "shellpower 'POWERSHELL SCRIPT'",
+  "help": "Enter a simple command directly. For quoting, pipelines, or multiple statements, wrap the full script as one argument. To run a .ps1 file from the Modules tab, leave Arguments empty and select it as the optional data file. Script files may be UTF-8 or BOM-marked UTF-16LE and are limited to 64 KiB. The same packaged module supplies the persistent ShellPower option in Agents > Live shell. This native adapter preserves ShellPower's original in-process PowerShell behavior."
+}

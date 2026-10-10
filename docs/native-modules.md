@@ -21,7 +21,7 @@ use 1
 module-wininfo
 ```
 
-`modules/native/build.ps1` creates the packaged examples in their module directories, so a console started from this repository can preload them directly. Use `run-native modules/native/wininfo/wininfo.module` for a one-off run. See [module bank placement and naming](module-bank.md) and the [console guide](console.md#running-an-agent-program-and-transferring-files) for selection, output, and jobs.
+`modules/native/build.ps1` creates the packaged examples in their module directories, so a console started from this repository can preload them directly. Use `run-native modules/native/wininfo/wininfo.module` for a one-off run. The packaged [ShellPower adapter](../modules/native/shellpower/README.md) is a C++ example built by the same script. See [module bank placement and naming](module-bank.md) and the [console guide](console.md#running-an-agent-program-and-transferring-files) for selection, output, and jobs.
 
 ## Supported format and build
 
@@ -61,6 +61,8 @@ int32_t undertow_main(const undertow_native_api_v1 *api,
 
 The exported name must be exactly `undertow_main`. On Windows x64 it uses the platform's x64 calling convention. The API is a C POD table with `size`, `version`, an opaque integer `context`, function pointers for stdout, stderr, cancellation and job state, plus OS, architecture and agent process ID. The runtime passes no Go pointer or object. API and argument memory are native allocations, borrowed until the entry point returns. Module-owned memory stays with the module; allocate it with your C runtime or Windows APIs. Join module-created threads before returning, because Undertow unloads the DLL when the entry point returns. Never retain API pointers after return. `write` and `write_error` accept bytes with explicit lengths and return zero or `-1`. `undertow_native_printf` is a bounded formatting helper in the header. A write call is limited to 32 KiB. Background output spills from memory to a server file after 256 KiB and is bounded by the server's job output limits; there is no native two-minute or 4 MiB cap.
 
+A module that provides a live shell can also include [the native shell header](../sdk/native/undertow_native_shell.h) and export `undertow_shell_main`. Its API keeps the exact `undertow_native_api_v1` prefix and appends a blocking `read` callback for raw terminal input. The callback returns zero with a byte count, or a nonzero result after the session closes. Live shell modules must keep all session state inside the entry point, check `cancelled`, stop active work cooperatively, and return before Undertow unloads the DLL. The GUI exposes this entry point through the packaged ShellPower choice; ordinary one-shot execution still calls `undertow_main`.
+
 Arguments are deterministic and binary safe: little-endian `uint32 argc`, then for each argument `uint32 length` plus UTF-8 bytes, then `uint32 length` plus opaque bytes from `--data`. The header supplies checked `undertow_native_arg` and `undertow_native_data` helpers. Strings are length-delimited rather than NUL-terminated. At most 256 arguments and 64 KiB of opaque data are allowed; the entire encoded buffer is at most 128 KiB.
 
 ## Running and jobs
@@ -83,6 +85,6 @@ The runtime writes the DLL to a private temporary directory, calls Windows `Load
 
 Useful errors include `invalid native module container`, `unsupported module architecture`, `unsupported native ABI`, `missing native entry point undertow_main`, `load native module`, `native module returned non-zero status`, and `native module: context canceled`. A malformed container fails before execution. Unsupported metadata OS, architecture and ABI fail on the agent before loading. A missing DLL import fails during `LoadLibraryEx`; an absent exported entry fails during `GetProcAddress`. The current compatibility subset is Windows x64 PE32+ DLLs built with MSVC x64 `/LD /MT`, standard System32 DLL imports, and a single exported entry point.
 
-See [the examples](../modules/native/README.md) for `hello`, `wininfo`, and `hostcheck`. The latter two demonstrate direct Windows APIs rather than extra Undertow host operations.
+See [the examples](../modules/native/README.md) for `hello`, `wininfo`, `hostcheck`, and `shellpower`. Wininfo and hostcheck demonstrate direct Windows APIs; ShellPower demonstrates adapting a C++ CLR host to the native ABI.
 
 Back to [documentation home](README.md).

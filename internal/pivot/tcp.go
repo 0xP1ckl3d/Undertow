@@ -126,6 +126,14 @@ func ServeAgentWithLifecycle(ctx context.Context, m *mux.Mux, caps Capabilities,
 			go serveNative(ctx, s)
 			continue
 		}
+		if s.Destination() == NativeShellDestination {
+			if !caps.Native || !caps.Interactive {
+				s.Fail(errors.New("agent native live shell is disabled"))
+				continue
+			}
+			go serveNativeShell(ctx, s)
+			continue
+		}
 		if s.Destination() == AssemblyDestination {
 			if !caps.Native {
 				s.Fail(errors.New("agent native execution is disabled"))

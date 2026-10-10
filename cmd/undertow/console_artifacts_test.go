@@ -200,7 +200,7 @@ func TestPackagedModuleBank(t *testing.T) {
 			t.Errorf("BOF %s is missing help", name)
 		}
 	}
-	for _, name := range []string{"module-askpass", "module-hello", "module-hostcheck", "module-sift", "module-wininfo", "wasm-artifact-discovery", "wasm-enterprise-posture", "wasm-inventory", "wasm-persistence-audit", "wasm-privilege-audit", "wasm-triage"} {
+	for _, name := range []string{"module-askpass", "module-hello", "module-hostcheck", "module-shellpower", "module-sift", "module-wininfo", "wasm-artifact-discovery", "wasm-enterprise-posture", "wasm-inventory", "wasm-persistence-audit", "wasm-privilege-audit", "wasm-triage"} {
 		entry := artifacts.get(name)
 		if entry == nil {
 			t.Errorf("missing packaged module %s", name)

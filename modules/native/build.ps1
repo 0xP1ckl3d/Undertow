@@ -1,10 +1,14 @@
-param([ValidateSet('hello','wininfo','hostcheck','all')][string]$Example = 'all')
+param([ValidateSet('hello','wininfo','hostcheck','shellpower','all')][string]$Example = 'all')
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 if (-not (Get-Command cl.exe -ErrorAction SilentlyContinue)) { throw 'Run this in an x64 MSVC Developer PowerShell with cl.exe on PATH.' }
-$names = if ($Example -eq 'all') { @('hello','wininfo','hostcheck') } else { @($Example) }
+$names = if ($Example -eq 'all') { @('hello','wininfo','hostcheck','shellpower') } else { @($Example) }
 foreach ($name in $names) {
     $directory = Join-Path $PSScriptRoot $name
+    if ($name -eq 'shellpower') {
+        & (Join-Path $directory 'build.ps1')
+        continue
+    }
     $dll = Join-Path $directory "$name.dll"
     Push-Location $directory
     try {

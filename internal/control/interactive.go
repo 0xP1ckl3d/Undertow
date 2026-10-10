@@ -61,6 +61,22 @@ func OpenClientNative(ctx context.Context, client *mux.Mux, agentID string, modu
 	return openClientMemory(ctx, client, agentID, "native", pivot.MemoryRequest{Args: args, Stdin: data, Size: len(module)}, module)
 }
 
+func OpenClientNativeShell(ctx context.Context, client *mux.Mux, agentID string, module []byte, tokenContextID string) (*pivot.InteractiveSession, error) {
+	if client == nil {
+		return nil, errors.New("VPN session is not connected")
+	}
+	stream, err := client.Open(ctx, pivot.InteractiveRelayDestination)
+	if err != nil {
+		return nil, err
+	}
+	request := pivot.MemoryRequest{TokenContextID: tokenContextID, Size: len(module)}
+	if err := json.NewEncoder(stream).Encode(interactiveRelayRequest{TokenContextID: tokenContextID, AgentID: agentID, Kind: "native-shell", Actor: claimsFromContext(ctx)}); err != nil {
+		stream.Close()
+		return nil, err
+	}
+	return pivot.StartNativeShellSession(ctx, stream, bufio.NewReader(stream), request, module)
+}
+
 func OpenClientAssembly(ctx context.Context, client *mux.Mux, agentID string, source []byte, args []string) (*pivot.InteractiveSession, error) {
 	return openClientMemory(ctx, client, agentID, "assembly", pivot.MemoryRequest{Args: args, Size: len(source)}, source)
 }
@@ -201,6 +217,8 @@ func (m *Manager) ServeInteractiveRelayForClient(ctx context.Context, clientID u
 		destination = pivot.WASMDestination
 	} else if request.Kind == "native" {
 		destination = pivot.NativeDestination
+	} else if request.Kind == "native-shell" {
+		destination = pivot.NativeShellDestination
 	} else if request.Kind == "assembly" {
 		destination = pivot.AssemblyDestination
 	} else if request.Kind == "bof" {

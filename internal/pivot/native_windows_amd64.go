@@ -31,8 +31,10 @@ type nativeAPI struct {
 }
 
 type nativeRun struct {
-	ctx   context.Context
-	write func(byte, []byte) error
+	ctx     context.Context
+	write   func(byte, []byte) error
+	input   <-chan []byte
+	pending []byte
 }
 
 var nativeRuns = struct {

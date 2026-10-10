@@ -616,12 +616,23 @@ func (g *guiServer) terminal(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	request, err := parseGUITerminalStart(messageType, startData)
+	start, err := parseGUITerminalStart(messageType, startData)
 	if err != nil {
 		_ = conn.Write(ctx, websocket.MessageText, mustGUIJSON(map[string]string{"type": "error", "data": err.Error()}))
 		return
 	}
-	session, err := control.OpenClientInteractive(control.WithActionClaims(ctx, claims), clientSession, r.PathValue("id"), request)
+	var session *pivot.InteractiveSession
+	if start.Engine == "shellpower" {
+		if g.modules == nil {
+			err = errors.New("ShellPower module bank is unavailable")
+		} else if module := g.modules.artifacts.get("module-shellpower"); module == nil || module.Kind != "module" {
+			err = errors.New("packaged module-shellpower is unavailable")
+		} else {
+			session, err = control.OpenClientNativeShell(control.WithActionClaims(ctx, claims), clientSession, r.PathValue("id"), module.Data, start.Request.TokenContextID)
+		}
+	} else {
+		session, err = control.OpenClientInteractive(control.WithActionClaims(ctx, claims), clientSession, r.PathValue("id"), start.Request)
+	}
 	if err != nil {
 		_ = conn.Write(ctx, websocket.MessageText, mustGUIJSON(map[string]string{"type": "error", "data": err.Error()}))
 		return
@@ -683,19 +694,31 @@ func (g *guiServer) terminal(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func parseGUITerminalStart(messageType websocket.MessageType, data []byte) (pivot.InteractiveRequest, error) {
+type guiTerminalStart struct {
+	Engine  string
+	Request pivot.InteractiveRequest
+}
+
+func parseGUITerminalStart(messageType websocket.MessageType, data []byte) (guiTerminalStart, error) {
 	if messageType != websocket.MessageText || len(data) > 8192 {
-		return pivot.InteractiveRequest{}, errors.New("invalid shell start request")
+		return guiTerminalStart{}, errors.New("invalid shell start request")
 	}
 	var message struct {
 		TokenContextID string   `json:"token_context_id,omitempty"`
 		Type           string   `json:"type"`
+		Engine         string   `json:"engine,omitempty"`
 		Argv           []string `json:"argv"`
 	}
-	if json.Unmarshal(data, &message) != nil || message.Type != "start" || len(message.Argv) > 32 {
-		return pivot.InteractiveRequest{}, errors.New("invalid shell start request")
+	if json.Unmarshal(data, &message) != nil || message.Type != "start" || len(message.Argv) > 32 ||
+		(message.Engine != "" && message.Engine != "process" && message.Engine != "shellpower") ||
+		(message.Engine == "shellpower" && len(message.Argv) != 0) {
+		return guiTerminalStart{}, errors.New("invalid shell start request")
 	}
-	return pivot.InteractiveRequest{TokenContextID: message.TokenContextID, Argv: message.Argv, Cols: 100, Rows: 30}, nil
+	engine := message.Engine
+	if engine == "" {
+		engine = "process"
+	}
+	return guiTerminalStart{Engine: engine, Request: pivot.InteractiveRequest{TokenContextID: message.TokenContextID, Argv: message.Argv, Cols: 100, Rows: 30}}, nil
 }
 
 func mustGUIJSON(value any) []byte { data, _ := json.Marshal(value); return data }

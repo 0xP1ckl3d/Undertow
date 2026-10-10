@@ -137,14 +137,14 @@ Undertow streams source into the interpreter's stdin rather than creating a scri
 ## Open a live shell
 
 1. Open **Agents → your agent → Live shell**.
-2. Choose **Process**. Windows defaults to Command Prompt and offers Windows PowerShell 5.1, PowerShell 7, and WSL. Linux defaults to `/bin/sh` and offers bash, zsh, and Python. The program must be installed on the agent.
+2. Choose a **Shell engine**. Windows offers Command Prompt, Windows PowerShell 5.1, **ShellPower · in process**, PowerShell 7, and WSL. Linux defaults to `/bin/sh` and offers bash, zsh, and Python. Process choices must be installed on the agent.
 3. For **Custom process**, enter executable and one argument per line. Those fields pass arguments directly without shell quoting.
 4. Click **Start live shell** and type into the terminal. Sleeping agents start it at their next callback.
 5. Click **Cancel / close session** when done. Leaving the tab also ends the session.
 
 [![Live shell running Windows PowerShell on an agent](../assets/liveShell.png)](../assets/liveShell.png)
 
-An open shell holds the connection even when you are not typing. Linux uses a PTY; Windows uses process pipes, so terminal behaviour differs. Terminal `shell [PROGRAM ARGS]` uses Ctrl-] to return to Undertow.
+An open shell holds the connection even when you are not typing. Linux uses a PTY; Windows process choices use ConPTY or process pipes. ShellPower uploads the packaged `module-shellpower` DLL and opens one persistent Windows PowerShell 5.1 runspace inside the agent process, so variables, functions, location, and imported modules remain available between commands. It requires the `native` and `interactive` capabilities, does not start `powershell.exe`, and stops an active pipeline when the session closes. Type `exit` or click **Cancel / close session** to end it. Terminal `shell [PROGRAM ARGS]` uses Ctrl-] to return to Undertow.
 
 ## Browse and transfer files
 

@@ -1,5 +1,7 @@
 /.cache/
 /.local/
+/.uat/
+/.uat-*
 /bin/
 /dist/
 /cmd/undertow/web/node_modules/

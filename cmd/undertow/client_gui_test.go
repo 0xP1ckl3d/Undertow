@@ -16,27 +16,29 @@ import (
 
 func TestGUITerminalStartKeepsSelectedProcessAndArguments(t *testing.T) {
 	for _, test := range []struct {
-		name string
-		json string
-		want []string
+		name   string
+		json   string
+		want   []string
+		engine string
 	}{
-		{name: "default", json: `{"type":"start","argv":[]}`},
-		{name: "PowerShell", json: `{"type":"start","argv":["pwsh.exe","-NoProfile"]}`, want: []string{"pwsh.exe", "-NoProfile"}},
-		{name: "custom path", json: `{"type":"start","argv":["C:\\Program Files\\Custom Shell\\shell.exe","argument with spaces"]}`, want: []string{`C:\Program Files\Custom Shell\shell.exe`, "argument with spaces"}},
+		{name: "default", json: `{"type":"start","argv":[]}`, engine: "process"},
+		{name: "PowerShell", json: `{"type":"start","argv":["pwsh.exe","-NoProfile"]}`, want: []string{"pwsh.exe", "-NoProfile"}, engine: "process"},
+		{name: "ShellPower", json: `{"type":"start","engine":"shellpower","argv":[]}`, engine: "shellpower"},
+		{name: "custom path", json: `{"type":"start","argv":["C:\\Program Files\\Custom Shell\\shell.exe","argument with spaces"]}`, want: []string{`C:\Program Files\Custom Shell\shell.exe`, "argument with spaces"}, engine: "process"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			request, err := parseGUITerminalStart(websocket.MessageText, []byte(test.json))
-			if err != nil || len(request.Argv) != len(test.want) || request.Cols != 100 || request.Rows != 30 {
+			if err != nil || request.Engine != test.engine || len(request.Request.Argv) != len(test.want) || request.Request.Cols != 100 || request.Request.Rows != 30 {
 				t.Fatalf("request=%+v err=%v", request, err)
 			}
 			for i, arg := range test.want {
-				if request.Argv[i] != arg {
-					t.Fatalf("argv=%q want=%q", request.Argv, test.want)
+				if request.Request.Argv[i] != arg {
+					t.Fatalf("argv=%q want=%q", request.Request.Argv, test.want)
 				}
 			}
 		})
 	}
-	for _, data := range []string{`{"type":"input","data":"id"}`, `{"type":"start","argv":{}}`, strings.Repeat("x", 8193)} {
+	for _, data := range []string{`{"type":"input","data":"id"}`, `{"type":"start","argv":{}}`, `{"type":"start","engine":"shellpower","argv":["powershell.exe"]}`, `{"type":"start","engine":"unknown","argv":[]}`, strings.Repeat("x", 8193)} {
 		if _, err := parseGUITerminalStart(websocket.MessageText, []byte(data)); err == nil {
 			t.Fatalf("accepted invalid start %q", data[:min(len(data), 60)])
 		}
