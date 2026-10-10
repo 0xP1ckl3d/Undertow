@@ -63,6 +63,9 @@ func TestShellPowerHelperProcess(t *testing.T) {
 			if !strings.Contains(output.String(), test.want) {
 				t.Fatalf("output=%s", output.String())
 			}
+			if strings.Contains(output.String(), "Failed to disable AMSI (2)") || strings.Contains(output.String(), "Failed to find pattern") {
+				t.Fatalf("repeated ShellPower invocation did not recognize the existing AMSI patch: %s", output.String())
+			}
 		}
 		return
 	}
@@ -114,6 +117,9 @@ func TestShellPowerHelperProcess(t *testing.T) {
 				}
 				if !strings.Contains(output.String(), "Windows ShellPower for Undertow") || !strings.Contains(output.String(), "42") {
 					t.Fatalf("native live shell output=%s", output.String())
+				}
+				if strings.Contains(output.String(), "Failed to disable AMSI (2)") || strings.Contains(output.String(), "Failed to find pattern") {
+					t.Fatalf("repeated native live shell did not recognize the existing AMSI patch: %s", output.String())
 				}
 				break readSession
 			}

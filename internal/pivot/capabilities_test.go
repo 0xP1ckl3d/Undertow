@@ -21,8 +21,14 @@ func TestParseDeniedCapabilities(t *testing.T) {
 		t.Fatalf("capabilities not independent: %+v", caps)
 	}
 	report := caps.Report()
-	expectedSupported := []string{"pivot", "exec", "hostops", "interactive", "scripts", "wasm", "native", "upload", "download", "listeners", "relay", "jump-credentials", "jump-nt-hash"}
-	expectedAllowed := []string{"pivot", "hostops", "interactive", "scripts", "wasm", "native", "download", "listeners", "relay", "jump-credentials", "jump-nt-hash"}
+	expectedSupported := []string{"pivot", "exec", "hostops", "interactive", "scripts", "wasm", "native"}
+	expectedAllowed := []string{"pivot", "hostops", "interactive", "scripts", "wasm", "native"}
+	if runtime.GOOS == "windows" && runtime.GOARCH == "amd64" {
+		expectedSupported = append(expectedSupported, "native-shell")
+		expectedAllowed = append(expectedAllowed, "native-shell")
+	}
+	expectedSupported = append(expectedSupported, "upload", "download", "listeners", "relay", "jump-credentials", "jump-nt-hash")
+	expectedAllowed = append(expectedAllowed, "download", "listeners", "relay", "jump-credentials", "jump-nt-hash")
 	if runtime.GOOS == "windows" {
 		expectedSupported = append(expectedSupported, "tokens")
 		expectedAllowed = append(expectedAllowed, "tokens")
@@ -52,6 +58,16 @@ func TestParseDeniedCapabilities(t *testing.T) {
 	deniedWASM, err := ParseDenied("wasm")
 	if err != nil || deniedWASM.WASM || !deniedWASM.Exec || !deniedWASM.Scripts {
 		t.Fatalf("wasm capability not independent: %+v, %v", deniedWASM, err)
+	}
+	deniedNative, err := ParseDenied("native")
+	deniedNativeReport := deniedNative.Report()
+	if err != nil || deniedNativeReport.Allows("native-shell") {
+		t.Fatalf("native-shell marker remained with native denied: %+v, %v", deniedNative, err)
+	}
+	deniedInteractive, err := ParseDenied("interactive")
+	deniedInteractiveReport := deniedInteractive.Report()
+	if err != nil || deniedInteractiveReport.Allows("native-shell") {
+		t.Fatalf("native-shell marker remained with interactive denied: %+v, %v", deniedInteractive, err)
 	}
 	deniedCredentials, err := ParseDenied("jump-credentials")
 	if err != nil || deniedCredentials.JumpCredentials || !deniedCredentials.Upload || !deniedCredentials.Interactive {

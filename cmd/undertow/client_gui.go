@@ -634,6 +634,9 @@ func (g *guiServer) terminal(w http.ResponseWriter, r *http.Request) {
 		session, err = control.OpenClientInteractive(control.WithActionClaims(ctx, claims), clientSession, r.PathValue("id"), start.Request)
 	}
 	if err != nil {
+		if start.Engine == "shellpower" && strings.Contains(err.Error(), "native-shell.undertow.invalid") {
+			err = errors.New("this agent does not support native live shells; build and deploy a current Windows agent")
+		}
 		_ = conn.Write(ctx, websocket.MessageText, mustGUIJSON(map[string]string{"type": "error", "data": err.Error()}))
 		return
 	}

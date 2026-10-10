@@ -118,13 +118,21 @@ func ParseDenied(raw string) (Capabilities, error) {
 }
 
 func (c Capabilities) Report() CapabilityReport {
-	report := CapabilityReport{Supported: []string{"pivot", "exec", "hostops", "interactive", "scripts", "wasm", "native", "upload", "download", "listeners", "relay", "jump-credentials", "jump-nt-hash"}, Allowed: make([]string, 0, 13)}
+	supported := []string{"pivot", "exec", "hostops", "interactive", "scripts", "wasm", "native"}
+	if runtime.GOOS == "windows" && runtime.GOARCH == "amd64" {
+		supported = append(supported, "native-shell")
+	}
+	supported = append(supported, "upload", "download", "listeners", "relay", "jump-credentials", "jump-nt-hash")
+	report := CapabilityReport{Supported: supported, Allowed: make([]string, 0, 14)}
 	for _, item := range []struct {
 		name    string
 		allowed bool
 	}{{"pivot", c.Pivot}, {"exec", c.Exec}, {"hostops", c.HostOps}, {"interactive", c.Interactive}, {"scripts", c.Scripts}, {"wasm", c.WASM}, {"native", c.Native}, {"upload", c.Upload}, {"download", c.Download}, {"listeners", c.Listeners}, {"relay", c.Relay}, {"jump-credentials", c.JumpCredentials}, {"jump-nt-hash", c.JumpNTHash}} {
 		if item.allowed {
 			report.Allowed = append(report.Allowed, item.name)
+			if item.name == "native" && c.Interactive && runtime.GOOS == "windows" && runtime.GOARCH == "amd64" {
+				report.Allowed = append(report.Allowed, "native-shell")
+			}
 		}
 	}
 	if runtime.GOOS == "windows" {

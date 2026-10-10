@@ -85,6 +85,7 @@ For disconnected agents, you can still read Console history, Jobs, Screenshots, 
 | `interactive` | Live shells and ordinary process Jobs |
 | `scripts`, `wasm` | Script and WASM execution respectively |
 | `native` | Native modules, BOFs, and .NET Framework assemblies |
+| `native-shell` | Reports support for in-process native live shells; it is available when both `native` and `interactive` are enabled on a current agent. |
 | `upload`, `download` | File transfer in each direction; screenshot retrieval also needs download |
 | `listeners`, `relay` | Client-service forwards and child-agent listeners respectively |
 | `jump-credentials`, `jump-nt-hash` | Supplied Windows credentials and NT-hash authentication for Jump |
@@ -144,7 +145,7 @@ Undertow streams source into the interpreter's stdin rather than creating a scri
 
 [![Live shell running Windows PowerShell on an agent](../assets/liveShell.png)](../assets/liveShell.png)
 
-An open shell holds the connection even when you are not typing. Linux uses a PTY; Windows process choices use ConPTY or process pipes. ShellPower uploads the packaged `module-shellpower` DLL and opens one persistent Windows PowerShell 5.1 runspace inside the agent process, so variables, functions, location, and imported modules remain available between commands. It requires the `native` and `interactive` capabilities, does not start `powershell.exe`, and stops an active pipeline when the session closes. Type `exit` or click **Cancel / close session** to end it. Terminal `shell [PROGRAM ARGS]` uses Ctrl-] to return to Undertow.
+An open shell holds the connection even when you are not typing. Linux uses a PTY; Windows process choices use ConPTY or process pipes. ShellPower uploads the packaged `module-shellpower` DLL and opens one persistent Windows PowerShell 5.1 runspace inside the agent process, so variables, functions, location, and imported modules remain available between commands. It requires a current agent reporting `native-shell`; older agents must be rebuilt and redeployed. This derived capability is available when both `native` and `interactive` are enabled. ShellPower does not start `powershell.exe` and stops an active pipeline when the session closes. Type `exit` or click **Cancel / close session** to end it. Terminal `shell [PROGRAM ARGS]` uses Ctrl-] to return to Undertow.
 
 ## Browse and transfer files
 

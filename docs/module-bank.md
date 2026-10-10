@@ -57,7 +57,7 @@ For `wasm-artifact-discovery`, add an **agent-side** root such as `wasm-artifact
 | [module-hello](../modules/native/README.md) | Demonstrates native arguments, output, status, and cancellation. | `module-hello one "two words"` |
 | [module-wininfo](../modules/native/README.md) | Reports Windows computer, process, architecture, and memory information. | `module-wininfo` |
 | [module-hostcheck](../modules/native/README.md) | Reports user, token elevation, integrity, privileges, and network adapters. | `module-hostcheck` |
-| [module-shellpower](../modules/native/shellpower/README.md) | Runs an inline Windows PowerShell command or uploaded `.ps1` inside the agent process; also supplies the GUI's persistent ShellPower live shell. | `module-shellpower 'Get-Process | Select-Object -First 5'` |
+| [module-shellpower](../modules/native/shellpower/README.md) | Hosts Windows PowerShell 5.1 inside the agent process without launching `powershell.exe`; runs inline or uploaded `.ps1` source and supplies the persistent ShellPower live shell. It retains ShellPower's AMSI and PowerShell policy/logging patch attempts. | `module-shellpower 'Get-Process | Select-Object -First 5'` |
 | [module-sift](../modules/native/sift/README.md) | Scans a file or directory with the packaged Sift rules. | `module-sift local C:\Audit --json` |
 | [module-askpass](../modules/native/askpass/README.md) | Displays a Windows credential dialog on the agent's desktop. | `module-askpass "Credential test" "Enter test account credentials"` |
 
